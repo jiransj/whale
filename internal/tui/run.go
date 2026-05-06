@@ -22,7 +22,19 @@ func Run(cfg app.Config, start app.StartOptions) error {
 		return err
 	}
 	printStartupBanner(cfg)
-	p := tea.NewProgram(newModel(svc))
+	modelName := strings.TrimSpace(cfg.Model)
+	if modelName == "" {
+		modelName = defaults.DefaultModel
+	}
+	effort := strings.TrimSpace(cfg.ReasoningEffort)
+	if effort == "" {
+		effort = defaults.DefaultReasoningEffort
+	}
+	thinking := "on"
+	if !cfg.ThinkingEnabled {
+		thinking = "off"
+	}
+	p := tea.NewProgram(newModel(svc, modelName, effort, thinking))
 	_, err = p.Run()
 	if err == nil {
 		fmt.Printf("To resume this session, run: whale resume %s\n", svc.SessionID())

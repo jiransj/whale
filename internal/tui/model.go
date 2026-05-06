@@ -139,12 +139,21 @@ type errMsg struct{ err error }
 type quitTimeoutMsg struct{}
 type busyTickMsg struct{}
 
-func newModel(svc *service.Service) model {
+func newModel(svc *service.Service, modelName, effort, thinking string) model {
 	filter := textinput.New()
 	filter.Placeholder = "filter logs (press /)"
 	filter.Prompt = "/"
 	filter.CharLimit = 200
 	vp := viewport.New(80, 20)
+	if modelName == "" {
+		modelName = defaults.DefaultModel
+	}
+	if effort == "" {
+		effort = defaults.DefaultReasoningEffort
+	}
+	if thinking == "" {
+		thinking = "on"
+	}
 	m := model{
 		svc:            svc,
 		input:          composer.New(),
@@ -154,9 +163,9 @@ func newModel(svc *service.Service) model {
 		page:           pageChat,
 		sidebar:        false,
 		logFilterInput: filter,
-		model:          defaults.DefaultModel,
-		effort:         defaults.DefaultReasoningEffort,
-		thinking:       "on",
+		model:          modelName,
+		effort:         effort,
+		thinking:       thinking,
 		chatMode:       "chat",
 		product:        "Whale",
 		version:        resolveVersion(),
