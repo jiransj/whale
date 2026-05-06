@@ -59,8 +59,6 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 		case llm.EventToolUseStart:
 			if ev.ToolCall != nil {
 				assistant.ToolCalls = append(assistant.ToolCalls, *ev.ToolCall)
-				tc := *ev.ToolCall
-				events <- AgentEvent{Type: AgentEventTypeToolCall, ToolCall: &tc}
 				if err := a.store.Update(ctx, assistant); err != nil {
 					return core.Message{}, nil, llm.Usage{}, "", false, err
 				}
@@ -79,6 +77,11 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 				}
 				if len(ev.Response.ToolCalls) > 0 {
 					assistant.ToolCalls = ev.Response.ToolCalls
+					// Emit tool call events now that Input is fully populated.
+					for i := range ev.Response.ToolCalls {
+						tc := ev.Response.ToolCalls[i]
+						events <- AgentEvent{Type: AgentEventTypeToolCall, ToolCall: &tc}
+					}
 				}
 				if ev.Response.Content != "" {
 					assistant.Text = ev.Response.Content

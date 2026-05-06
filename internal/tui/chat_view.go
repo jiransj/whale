@@ -110,7 +110,7 @@ func completedToolTitle(toolName, raw string) string {
 }
 
 func toolDisplayKind(toolName string) string {
-	switch toolName {
+	switch strings.TrimSpace(toolName) {
 	case "exec_shell", "exec_shell_wait":
 		return "shell"
 	case "read_file", "list_dir", "search_files", "grep", "search_content", "fetch", "web_fetch", "web_search":
@@ -133,14 +133,25 @@ func toolCallDetail(text string) string {
 	if strings.HasPrefix(t, "{") {
 		var body map[string]any
 		if err := json.Unmarshal([]byte(t), &body); err == nil {
-			return firstNonEmpty(
+			detail := firstNonEmpty(
 				asString(body["command"]),
 				asString(body["file_path"]),
 				asString(body["path"]),
 				asString(body["pattern"]),
 				asString(body["query"]),
 				asString(body["url"]),
+				asString(body["task_id"]),
 			)
+			if detail != "" {
+				return detail
+			}
+			// Fall back to showing what we can: first non-empty value
+			for _, v := range body {
+				if s := asString(v); strings.TrimSpace(s) != "" {
+					return truncateDisplayText(s, 80)
+				}
+			}
+			return ""
 		}
 	}
 	return t

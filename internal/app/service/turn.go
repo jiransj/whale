@@ -107,22 +107,56 @@ func shouldSuppressCancelledTurnError(ctx context.Context, err error) bool {
 func summarizeToolCall(call core.ToolCall) string {
 	body := map[string]any{}
 	_ = json.Unmarshal([]byte(call.Input), &body)
-	switch call.Name {
+	name := strings.TrimSpace(call.Name)
+	switch name {
 	case "exec_shell":
 		if cmd, _ := body["command"].(string); strings.TrimSpace(cmd) != "" {
 			return fmt.Sprintf("exec_shell: %s", strings.TrimSpace(cmd))
 		}
-	case "write", "edit", "view":
-		if path, _ := body["file_path"].(string); strings.TrimSpace(path) != "" {
-			return fmt.Sprintf("%s: %s", call.Name, strings.TrimSpace(path))
+	case "exec_shell_wait":
+		if taskID, _ := body["task_id"].(string); strings.TrimSpace(taskID) != "" {
+			return fmt.Sprintf("exec_shell_wait: %s", strings.TrimSpace(taskID))
 		}
-	case "ls", "grep", "search_files":
+	case "write", "edit":
+		if path, _ := body["file_path"].(string); strings.TrimSpace(path) != "" {
+			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(path))
+		}
+	case "list_dir", "grep", "search_files":
 		if path, _ := body["path"].(string); strings.TrimSpace(path) != "" {
-			return fmt.Sprintf("%s: %s", call.Name, strings.TrimSpace(path))
+			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(path))
+		}
+	case "read_file":
+		if path, _ := body["file_path"].(string); strings.TrimSpace(path) != "" {
+			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(path))
+		}
+	case "web_search":
+		if q, _ := body["query"].(string); strings.TrimSpace(q) != "" {
+			return fmt.Sprintf("web_search: %s", strings.TrimSpace(q))
+		}
+	case "fetch", "web_fetch":
+		if u, _ := body["url"].(string); strings.TrimSpace(u) != "" {
+			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(u))
+		}
+	case "apply_patch":
+		return "apply_patch: patch payload"
+	case "request_user_input":
+		if qs := body["questions"]; qs != nil {
+			return fmt.Sprintf("request_user_input: %d question(s)", len(asAnySlice(qs)))
 		}
 	}
 	if strings.TrimSpace(call.Input) != "" {
-		return fmt.Sprintf("%s: %s", call.Name, strings.TrimSpace(call.Input))
+		return fmt.Sprintf("%s: %s", name, strings.TrimSpace(call.Input))
 	}
-	return call.Name
+	return name
+}
+
+func asAnySlice(v any) []any {
+	if v == nil {
+		return nil
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	return arr
 }
