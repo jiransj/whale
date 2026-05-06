@@ -1,0 +1,132 @@
+package commands
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/usewhale/whale/internal/session"
+)
+
+type Result struct {
+	Handled     bool
+	ShouldExit  bool
+	ClearScreen bool
+	SessionID   string
+	Output      string
+	ShowStatus  bool
+	ShowContext bool
+	Mode        string
+	PlanPrompt  string
+	InitMemory  bool
+	ShowMemory  bool
+}
+
+func NewSessionID(now time.Time) string {
+	return now.Format("20060102-150405")
+}
+
+func Parse(line, currentSessionID string, now time.Time) (Result, error) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "/") {
+		return Result{}, nil
+	}
+	if trimmed == "/exit" {
+		return Result{Handled: true, ShouldExit: true, SessionID: currentSessionID}, nil
+	}
+	if trimmed == "/status" {
+		return Result{Handled: true, SessionID: currentSessionID, ShowStatus: true}, nil
+	}
+	if trimmed == "/context" {
+		return Result{Handled: true, SessionID: currentSessionID, ShowContext: true}, nil
+	}
+	if strings.HasPrefix(trimmed, "/resume ") {
+		return Result{}, fmt.Errorf("usage: /resume")
+	}
+	if strings.HasPrefix(trimmed, "/new") {
+		fields := strings.Fields(trimmed)
+		next := ""
+		if len(fields) > 2 {
+			return Result{}, fmt.Errorf("usage: /new [id]")
+		}
+		if len(fields) == 2 {
+			next = strings.TrimSpace(fields[1])
+		}
+		if next == "" {
+			next = NewSessionID(now)
+		}
+		return Result{Handled: true, SessionID: next, Output: fmt.Sprintf("new session: %s", next)}, nil
+	}
+	if trimmed == "/clear" {
+		return Result{Handled: true, SessionID: currentSessionID, ClearScreen: true}, nil
+	}
+	if trimmed == "/plan" {
+		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModePlan)}, nil
+	}
+	if strings.HasPrefix(trimmed, "/plan ") {
+		payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/plan"))
+		if payload == "" || payload == "show" || payload == "on" || payload == "off" {
+			return Result{}, fmt.Errorf("usage: /plan [prompt]")
+		}
+		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModePlan), PlanPrompt: payload}, nil
+	}
+	if trimmed == "/agent" {
+		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModeAgent)}, nil
+	}
+	if trimmed == "/init" {
+		return Result{Handled: true, SessionID: currentSessionID, InitMemory: true}, nil
+	}
+	if trimmed == "/memory" {
+		return Result{Handled: true, SessionID: currentSessionID, ShowMemory: true}, nil
+	}
+	return Result{}, nil
+}
+
+func PlanPromptFromSlash(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "/plan ") {
+		return "", false
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/plan"))
+	if payload == "" || payload == "show" || payload == "on" || payload == "off" {
+		return "", false
+	}
+	return payload, true
+}
+
+func ExpandUniqueSlashPrefix(line, help string, localCommands ...string) string {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "/") || strings.Contains(line, " ") {
+		return line
+	}
+	commands := append(ParseSlashCommands(help), localCommands...)
+	matches := make([]string, 0, 1)
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, line) {
+			matches = append(matches, cmd)
+		}
+	}
+	if len(matches) != 1 {
+		return line
+	}
+	return matches[0]
+}
+
+func ParseSlashCommands(help string) []string {
+	parts := strings.Split(help, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		fields := strings.Fields(strings.TrimSpace(part))
+		if len(fields) == 0 {
+			continue
+		}
+		field := strings.TrimSpace(fields[0])
+		if !strings.HasPrefix(field, "/") || seen[field] {
+			continue
+		}
+		seen[field] = true
+		out = append(out, field)
+	}
+	return out
+}

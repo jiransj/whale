@@ -1,0 +1,74 @@
+package agent
+
+import (
+	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/llm"
+	"github.com/usewhale/whale/internal/policy"
+	"github.com/usewhale/whale/internal/session"
+	"github.com/usewhale/whale/internal/store"
+)
+
+type Message = core.Message
+type Role = core.Role
+type FinishReason = core.FinishReason
+type ToolCall = core.ToolCall
+type ToolResult = core.ToolResult
+type Tool = core.Tool
+type ToolSpec = core.ToolSpec
+type ToolRegistry = core.ToolRegistry
+
+const (
+	RoleSystem    = core.RoleSystem
+	RoleUser      = core.RoleUser
+	RoleAssistant = core.RoleAssistant
+	RoleTool      = core.RoleTool
+)
+
+const (
+	FinishReasonEndTurn  = core.FinishReasonEndTurn
+	FinishReasonToolUse  = core.FinishReasonToolUse
+	FinishReasonCanceled = core.FinishReasonCanceled
+	FinishReasonError    = core.FinishReasonError
+)
+
+type EventType = llm.EventType
+type ToolArgsDelta = llm.ToolArgsDelta
+type Usage = llm.Usage
+type ProviderEvent = llm.ProviderEvent
+type ProviderResponse = llm.ProviderResponse
+type Provider = llm.Provider
+
+const (
+	EventContentDelta   = llm.EventContentDelta
+	EventReasoningDelta = llm.EventReasoningDelta
+	EventToolArgsDelta  = llm.EventToolArgsDelta
+	EventToolUseStart   = llm.EventToolUseStart
+	EventToolUseStop    = llm.EventToolUseStop
+	EventComplete       = llm.EventComplete
+	EventError          = llm.EventError
+)
+
+type MessageStore = store.MessageStore
+type ApprovalStore = store.ApprovalStore
+
+type ApprovalMode = policy.ApprovalMode
+type PolicyDecision = policy.PolicyDecision
+type ToolPolicy = policy.ToolPolicy
+type DefaultToolPolicy = policy.DefaultToolPolicy
+type ApprovalRequest = policy.ApprovalRequest
+type ApprovalFunc = policy.ApprovalFunc
+
+const (
+	ApprovalModeOnRequest = policy.ApprovalModeOnRequest
+	ApprovalModeNever     = policy.ApprovalModeNever
+)
+
+var (
+	NewToolRegistry        = core.NewToolRegistry
+	NewToolRegistryChecked = core.NewToolRegistryChecked
+	NewInMemoryStore       = store.NewInMemoryStore
+	NewJSONLStore          = store.NewJSONLStore
+	ParseApprovalMode      = policy.ParseApprovalMode
+	MostRecentSessionID    = store.MostRecentSessionID
+	ListSessions           = session.ListSessions
+)

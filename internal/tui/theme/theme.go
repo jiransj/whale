@@ -1,0 +1,82 @@
+package theme
+
+import "github.com/charmbracelet/lipgloss"
+
+// Palette is the single built-in whale TUI chrome palette.
+// It centralizes the current color choices without introducing user-facing
+// theme configuration yet.
+type Palette struct {
+	Accent     lipgloss.Color
+	Assistant  lipgloss.Color
+	Border     lipgloss.Color
+	Muted      lipgloss.Color
+	Info       lipgloss.Color
+	InfoSoft   lipgloss.Color
+	Success    lipgloss.Color
+	Warn       lipgloss.Color
+	Error      lipgloss.Color
+	Palette    lipgloss.Color
+	StatusIdle lipgloss.Color
+
+	Plan          lipgloss.Color
+	Tool          lipgloss.Color
+	Result        lipgloss.Color
+	ResultDenied  lipgloss.Color
+	ResultTimeout lipgloss.Color
+	ResultError   lipgloss.Color
+	ResultRunning lipgloss.Color
+}
+
+var Default = Palette{
+	Accent:        lipgloss.Color("63"),
+	Assistant:     lipgloss.Color("39"),
+	Border:        lipgloss.Color("240"),
+	Muted:         lipgloss.Color("245"),
+	Info:          lipgloss.Color("111"),
+	InfoSoft:      lipgloss.Color("86"),
+	Success:       lipgloss.Color("42"),
+	Warn:          lipgloss.Color("220"),
+	Error:         lipgloss.Color("203"),
+	Palette:       lipgloss.Color("212"),
+	StatusIdle:    lipgloss.Color("86"),
+	Plan:          lipgloss.Color("45"),
+	Tool:          lipgloss.Color("220"),
+	Result:        lipgloss.Color("81"),
+	ResultDenied:  lipgloss.Color("214"),
+	ResultTimeout: lipgloss.Color("215"),
+	ResultError:   lipgloss.Color("197"),
+	ResultRunning: lipgloss.Color("117"),
+}
+
+func RoleBorder(role string) lipgloss.Color {
+	switch role {
+	case "you":
+		return Default.Accent
+	case "assistant":
+		return Default.Assistant
+	case "think":
+		return Default.Border
+	case "notice", "info", "result_canceled":
+		return Default.Muted
+	case "plan":
+		return Default.Plan
+	case "tool":
+		return Default.Tool
+	case "result":
+		return Default.Result
+	case "result_ok":
+		return Default.Success
+	case "result_denied":
+		return Default.ResultDenied
+	case "result_failed", "error":
+		return Default.Error
+	case "result_timeout":
+		return Default.ResultTimeout
+	case "result_error":
+		return Default.ResultError
+	case "result_running":
+		return Default.ResultRunning
+	default:
+		return Default.Border
+	}
+}

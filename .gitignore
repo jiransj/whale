@@ -1,0 +1,45 @@
+# --- Build & Binary ---
+bin/
+/whale
+/whale-once
+/whale.exe
+/whale-once.exe
+*.test
+*.test.exe
+*.out
+dist/
+
+# --- Caches & Temp ---
+.gocache/
+tmp/
+
+# --- Local Settings, Secrets & Session State ---
+.whale/
+session.json
+.env
+.env.*
+!.env.example
+
+# --- IDE / Editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.fleet/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Dependencies (not vendored) ---
+vendor/
+
+# --- Debug & Profiling ---
+__debug_bin*
+*.prof
+*.pprof
+
+# --- Logs ---
+*.log

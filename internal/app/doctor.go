@@ -1,0 +1,461 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/usewhale/whale/internal/agent"
+	"github.com/usewhale/whale/internal/defaults"
+	"github.com/usewhale/whale/internal/memory"
+	"github.com/usewhale/whale/internal/store"
+)
+
+type DoctorLevel string
+
+const (
+	DoctorOK   DoctorLevel = "ok"
+	DoctorWarn DoctorLevel = "warn"
+	DoctorFail DoctorLevel = "fail"
+)
+
+type DoctorCheck struct {
+	Label  string
+	Level  DoctorLevel
+	Detail string
+}
+
+type DoctorReport struct {
+	Workspace string
+	DataDir   string
+	Checks    []DoctorCheck
+}
+
+type apiKeySource string
+
+const (
+	apiKeySourceMissing     apiKeySource = "missing"
+	apiKeySourceEnv         apiKeySource = "env"
+	apiKeySourceCredentials apiKeySource = "credentials"
+)
+
+type fileState struct {
+	Path    string
+	Present bool
+	Err     error
+}
+
+func RunDoctor(ctx context.Context, cfg Config, workspaceRoot string) (DoctorReport, error) {
+	dataDir := strings.TrimSpace(cfg.DataDir)
+	if dataDir == "" {
+		dataDir = store.DefaultDataDir()
+	}
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	order := parseCSVList(cfg.MemoryFileOrder)
+	if len(order) == 0 {
+		order = defaults.DefaultMemoryFileOrder()
+	}
+
+	apiKeyCheck, source, key := doctorCheckAPIKey(dataDir)
+	credsCheck := doctorCheckCredentials(dataDir)
+	prefsCheck := doctorCheckPreferences(dataDir)
+	dataDirCheck := doctorCheckDataDir(dataDir)
+	apiReachCheck := doctorCheckAPIReach(ctx, key)
+	memoryCheck := doctorCheckMemory(workspaceRoot, order, cfg.MemoryMaxChars)
+	hooksCheck := doctorCheckHooks(workspaceRoot)
+
+	_ = source
+
+	return DoctorReport{
+		Workspace: workspaceRoot,
+		DataDir:   dataDir,
+		Checks: []DoctorCheck{
+			apiKeyCheck,
+			credsCheck,
+			prefsCheck,
+			dataDirCheck,
+			apiReachCheck,
+			memoryCheck,
+			hooksCheck,
+		},
+	}, nil
+}
+
+func (r DoctorReport) Summary() (ok, warn, fail int) {
+	for _, c := range r.Checks {
+		switch c.Level {
+		case DoctorOK:
+			ok++
+		case DoctorWarn:
+			warn++
+		case DoctorFail:
+			fail++
+		}
+	}
+	return ok, warn, fail
+}
+
+func (r DoctorReport) HasFailures() bool {
+	_, _, fail := r.Summary()
+	return fail > 0
+}
+
+func doctorCheckAPIKey(dataDir string) (DoctorCheck, apiKeySource, string) {
+	key, source, err := resolveDeepSeekAPIKey(dataDir)
+	if err != nil {
+		return DoctorCheck{
+			Label:  "api key",
+			Level:  DoctorFail,
+			Detail: err.Error(),
+		}, apiKeySourceMissing, ""
+	}
+	if strings.TrimSpace(key) == "" {
+		return DoctorCheck{
+			Label:  "api key",
+			Level:  DoctorFail,
+			Detail: "not configured — run `whale setup` or set `DEEPSEEK_API_KEY`",
+		}, apiKeySourceMissing, ""
+	}
+	switch source {
+	case apiKeySourceEnv:
+		return DoctorCheck{
+			Label:  "api key",
+			Level:  DoctorOK,
+			Detail: fmt.Sprintf("set via env DEEPSEEK_API_KEY (%s)", tailKey(key)),
+		}, source, key
+	case apiKeySourceCredentials:
+		return DoctorCheck{
+			Label:  "api key",
+			Level:  DoctorOK,
+			Detail: fmt.Sprintf("from %s (%s)", credentialsPath(dataDir), tailKey(key)),
+		}, source, key
+	default:
+		return DoctorCheck{
+			Label:  "api key",
+			Level:  DoctorFail,
+			Detail: "not configured — run `whale setup` or set `DEEPSEEK_API_KEY`",
+		}, apiKeySourceMissing, ""
+	}
+}
+
+func doctorCheckCredentials(dataDir string) DoctorCheck {
+	st := readCredentialsState(dataDir)
+	switch {
+	case st.Err != nil:
+		return DoctorCheck{
+			Label:  "credentials",
+			Level:  DoctorFail,
+			Detail: fmt.Sprintf("%s unreadable — %v", st.Path, st.Err),
+		}
+	case !st.Present:
+		return DoctorCheck{
+			Label:  "credentials",
+			Level:  DoctorWarn,
+			Detail: fmt.Sprintf("%s missing — `whale setup` writes one", st.Path),
+		}
+	default:
+		return DoctorCheck{
+			Label:  "credentials",
+			Level:  DoctorOK,
+			Detail: st.Path,
+		}
+	}
+}
+
+func doctorCheckPreferences(dataDir string) DoctorCheck {
+	st := readPreferencesState(dataDir)
+	switch {
+	case st.Err != nil:
+		return DoctorCheck{
+			Label:  "preferences",
+			Level:  DoctorFail,
+			Detail: fmt.Sprintf("%s unreadable — %v", st.Path, st.Err),
+		}
+	case !st.Present:
+		return DoctorCheck{
+			Label:  "preferences",
+			Level:  DoctorWarn,
+			Detail: fmt.Sprintf("%s missing — defaults will be used", st.Path),
+		}
+	default:
+		return DoctorCheck{
+			Label:  "preferences",
+			Level:  DoctorOK,
+			Detail: st.Path,
+		}
+	}
+}
+
+func doctorCheckDataDir(dataDir string) DoctorCheck {
+	sessionsDir := store.DefaultSessionsDir(dataDir)
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return DoctorCheck{
+			Label:  "data dir",
+			Level:  DoctorFail,
+			Detail: fmt.Sprintf("%s create failed — %v", dataDir, err),
+		}
+	}
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		return DoctorCheck{
+			Label:  "data dir",
+			Level:  DoctorFail,
+			Detail: fmt.Sprintf("%s create failed — %v", sessionsDir, err),
+		}
+	}
+	probe, err := os.CreateTemp(dataDir, ".doctor-probe-*")
+	if err != nil {
+		return DoctorCheck{
+			Label:  "data dir",
+			Level:  DoctorFail,
+			Detail: fmt.Sprintf("%s not writable — %v", dataDir, err),
+		}
+	}
+	probePath := probe.Name()
+	_ = probe.Close()
+	_ = os.Remove(probePath)
+	return DoctorCheck{
+		Label:  "data dir",
+		Level:  DoctorOK,
+		Detail: fmt.Sprintf("%s writable · sessions %s", dataDir, sessionsDir),
+	}
+}
+
+func doctorCheckAPIReach(ctx context.Context, key string) DoctorCheck {
+	if strings.TrimSpace(key) == "" {
+		return DoctorCheck{
+			Label:  "api reach",
+			Level:  DoctorWarn,
+			Detail: "skipped — no API key configured",
+		}
+	}
+	msg, err := CheckDeepSeekAPIReachability(ctx, key)
+	if err != nil {
+		level := DoctorFail
+		if errors.Is(err, errDoctorAuth) {
+			level = DoctorFail
+		}
+		return DoctorCheck{
+			Label:  "api reach",
+			Level:  level,
+			Detail: msg,
+		}
+	}
+	return DoctorCheck{
+		Label:  "api reach",
+		Level:  DoctorOK,
+		Detail: msg,
+	}
+}
+
+func doctorCheckMemory(workspaceRoot string, fileOrder []string, maxChars int) DoctorCheck {
+	pm, ok := memory.ReadProjectMemory(workspaceRoot, fileOrder, maxChars)
+	if !ok {
+		return DoctorCheck{
+			Label:  "memory",
+			Level:  DoctorWarn,
+			Detail: fmt.Sprintf("no project memory file found (%s)", strings.Join(fileOrder, ", ")),
+		}
+	}
+	detail := pm.Path
+	if pm.Truncated {
+		detail += " (truncated)"
+	}
+	return DoctorCheck{
+		Label:  "memory",
+		Level:  DoctorOK,
+		Detail: detail,
+	}
+}
+
+func doctorCheckHooks(workspaceRoot string) DoctorCheck {
+	projectPath := filepath.Join(workspaceRoot, ".whale", "settings.json")
+	home, _ := os.UserHomeDir()
+	globalPath := filepath.Join(home, ".whale", "settings.json")
+	paths := []string{projectPath}
+	if strings.TrimSpace(home) != "" {
+		paths = append(paths, globalPath)
+	}
+
+	totalHooks := 0
+	loaded := make([]string, 0, len(paths))
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return DoctorCheck{
+				Label:  "hooks",
+				Level:  DoctorFail,
+				Detail: fmt.Sprintf("%s unreadable — %v", path, err),
+			}
+		}
+		var st agent.HookSettings
+		if err := json.Unmarshal(b, &st); err != nil {
+			return DoctorCheck{
+				Label:  "hooks",
+				Level:  DoctorWarn,
+				Detail: fmt.Sprintf("%s parse error — %v", path, err),
+			}
+		}
+		loaded = append(loaded, path)
+		totalHooks += countHooks(st)
+	}
+
+	if len(loaded) == 0 {
+		return DoctorCheck{
+			Label:  "hooks",
+			Level:  DoctorOK,
+			Detail: "no hooks configured",
+		}
+	}
+	return DoctorCheck{
+		Label:  "hooks",
+		Level:  DoctorOK,
+		Detail: fmt.Sprintf("%d hook(s) from %d file(s)", totalHooks, len(loaded)),
+	}
+}
+
+func countHooks(st agent.HookSettings) int {
+	n := 0
+	for _, hooks := range st.Hooks {
+		for _, hook := range hooks {
+			if strings.TrimSpace(hook.Command) != "" {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func resolveDeepSeekAPIKey(dataDir string) (string, apiKeySource, error) {
+	if v := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY")); v != "" {
+		return v, apiKeySourceEnv, nil
+	}
+	creds, err := LoadCredentials(dataDir)
+	if err != nil {
+		return "", apiKeySourceMissing, err
+	}
+	if v := strings.TrimSpace(creds.DeepSeekAPIKey); v != "" {
+		return v, apiKeySourceCredentials, nil
+	}
+	return "", apiKeySourceMissing, nil
+}
+
+func readCredentialsState(dataDir string) fileState {
+	path := credentialsPath(dataDir)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fileState{Path: path}
+		}
+		return fileState{Path: path, Present: true, Err: err}
+	}
+	var creds Credentials
+	if err := json.Unmarshal(b, &creds); err != nil {
+		return fileState{Path: path, Present: true, Err: fmt.Errorf("unmarshal credentials: %w", err)}
+	}
+	return fileState{Path: path, Present: true}
+}
+
+func readPreferencesState(dataDir string) fileState {
+	path := preferencesPath(dataDir)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fileState{Path: path}
+		}
+		return fileState{Path: path, Present: true, Err: err}
+	}
+	var prefs Preferences
+	if err := json.Unmarshal(b, &prefs); err != nil {
+		return fileState{Path: path, Present: true, Err: fmt.Errorf("unmarshal preferences: %w", err)}
+	}
+	return fileState{Path: path, Present: true}
+}
+
+func tailKey(key string) string {
+	trimmed := strings.TrimSpace(key)
+	if len(trimmed) <= 4 {
+		return trimmed
+	}
+	return "…" + trimmed[len(trimmed)-4:]
+}
+
+var errDoctorAuth = errors.New("doctor auth error")
+
+func CheckDeepSeekAPIReachability(ctx context.Context, key string) (string, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("DEEPSEEK_BASE_URL")), "/")
+	if baseURL == "" {
+		baseURL = "https://api.deepseek.com"
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, baseURL, nil)
+	if err != nil {
+		return "request build failed", err
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(key))
+
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		return classifyDoctorHTTPError(err), err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		return "unauthorized — check your DeepSeek API key", fmt.Errorf("%w: 401", errDoctorAuth)
+	case resp.StatusCode == http.StatusForbidden:
+		return "forbidden — verify the key is active and allowed", fmt.Errorf("%w: 403", errDoctorAuth)
+	case resp.StatusCode >= 200 && resp.StatusCode < 500:
+		return fmt.Sprintf("reachable — %s responded %d", baseURL, resp.StatusCode), nil
+	default:
+		return fmt.Sprintf("HTTP %d from %s", resp.StatusCode, baseURL), fmt.Errorf("http %d", resp.StatusCode)
+	}
+}
+
+func classifyDoctorHTTPError(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout — check your network connection"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout — check your network connection"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "DNS resolution failed — check your network connection"
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		if errors.Is(opErr.Err, syscall.ECONNREFUSED) {
+			return "connection refused — check firewall or base URL settings"
+		}
+		return "connection failed — check your network connection"
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(msg, "tls handshake timeout"):
+		return "TLS handshake timed out — check your network connection"
+	case strings.Contains(msg, "timeout"):
+		return "timeout — check your network connection"
+	case strings.Contains(msg, "no such host"), strings.Contains(msg, "lookup "):
+		return "DNS resolution failed — check your network connection"
+	case strings.Contains(msg, "connect:"):
+		return "connection failed — check your network connection"
+	default:
+		return err.Error()
+	}
+}

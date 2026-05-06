@@ -1,0 +1,91 @@
+package telemetry
+
+import (
+	"strings"
+
+	"github.com/usewhale/whale/internal/defaults"
+	"github.com/usewhale/whale/internal/llm"
+)
+
+type Pricing struct {
+	InputMissUSDPerMTok float64
+	InputHitUSDPerMTok  float64
+	OutputUSDPerMTok    float64
+}
+
+var defaultPricing = map[string]Pricing{
+	defaults.DefaultModel: {InputMissUSDPerMTok: 0.27, InputHitUSDPerMTok: 0.027, OutputUSDPerMTok: 1.10},
+	defaults.ProModel:     {InputMissUSDPerMTok: 2.00, InputHitUSDPerMTok: 0.20, OutputUSDPerMTok: 8.00},
+}
+
+func pricingForModel(model string) Pricing {
+	m := strings.ToLower(strings.TrimSpace(model))
+	if strings.Contains(m, "pro") {
+		return defaultPricing[defaults.ProModel]
+	}
+	return defaultPricing[defaults.DefaultModel]
+}
+
+func EstimateTurnUSD(model string, usage llm.Usage) float64 {
+	p := pricingForModel(model)
+	promptNonCache := max(usage.PromptTokens-usage.PromptCacheHitTokens, 0)
+	promptCache := max(usage.PromptCacheHitTokens, 0)
+	completion := max(usage.CompletionTokens, 0)
+	return (float64(promptNonCache)/1_000_000.0)*p.InputMissUSDPerMTok +
+		(float64(promptCache)/1_000_000.0)*p.InputHitUSDPerMTok +
+		(float64(completion)/1_000_000.0)*p.OutputUSDPerMTok
+}
+
+func InputCostUSD(model string, usage llm.Usage) float64 {
+	p := pricingForModel(model)
+	promptNonCache := max(usage.PromptTokens-usage.PromptCacheHitTokens, 0)
+	promptCache := max(usage.PromptCacheHitTokens, 0)
+	return (float64(promptNonCache)/1_000_000.0)*p.InputMissUSDPerMTok +
+		(float64(promptCache)/1_000_000.0)*p.InputHitUSDPerMTok
+}
+
+func OutputCostUSD(model string, usage llm.Usage) float64 {
+	p := pricingForModel(model)
+	return (float64(max(usage.CompletionTokens, 0)) / 1_000_000.0) * p.OutputUSDPerMTok
+}
+
+type TurnStats struct {
+	Turn               int
+	Model              string
+	Usage              llm.Usage
+	CostUSD            float64
+	InputCostUSD       float64
+	OutputCostUSD      float64
+	CacheHitRatio      float64
+	ReasoningReplayTok int
+}
+
+func BuildTurnStats(turn int, model string, usage llm.Usage) TurnStats {
+	cost := EstimateTurnUSD(model, usage)
+	inCost := InputCostUSD(model, usage)
+	outCost := OutputCostUSD(model, usage)
+	hit := max(usage.PromptCacheHitTokens, 0)
+	miss := max(usage.PromptCacheMissTokens, 0)
+	denom := hit + miss
+	ratio := 0.0
+	if denom > 0 {
+		ratio = float64(hit) / float64(denom)
+	}
+	return TurnStats{
+		Turn:               turn,
+		Model:              model,
+		Usage:              usage,
+		CostUSD:            cost,
+		InputCostUSD:       inCost,
+		OutputCostUSD:      outCost,
+		CacheHitRatio:      ratio,
+		ReasoningReplayTok: max(usage.ReasoningReplayTokens, 0),
+	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}

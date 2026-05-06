@@ -1,0 +1,88 @@
+package app
+
+import (
+	"context"
+	"path/filepath"
+	"strings"
+
+	"github.com/usewhale/whale/internal/agent"
+	"github.com/usewhale/whale/internal/llm/deepseek"
+	"github.com/usewhale/whale/internal/policy"
+	"github.com/usewhale/whale/internal/session"
+)
+
+func (a *App) RunUserPromptSubmitHook(input string) (blocked bool, output string) {
+	if a.hookRunner.Empty() {
+		return false, ""
+	}
+	report := a.hookRunner.Run(a.ctx, agent.NewUserPromptSubmitPayload(a.sessionID, a.workspaceRoot, input))
+	lines := renderHookReport(report)
+	if report.Blocked {
+		lines = append(lines, "assistant> blocked by UserPromptSubmit hook")
+	}
+	return report.Blocked, strings.Join(lines, "\n")
+}
+
+func (a *App) RunStopHook(lastAssistantText string, turn int) string {
+	if a.hookRunner.Empty() {
+		return ""
+	}
+	report := a.hookRunner.Run(a.ctx, agent.NewStopPayload(a.sessionID, a.workspaceRoot, lastAssistantText, turn))
+	return strings.Join(renderHookReport(report), "\n")
+}
+
+func (a *App) ensureAgent() (*agent.Agent, error) {
+	if a.a == nil {
+		opts := []deepseek.Option{}
+		if a.apiKey != "" {
+			opts = append(opts, deepseek.WithAPIKey(a.apiKey))
+		}
+		if strings.TrimSpace(a.model) != "" {
+			opts = append(opts, deepseek.WithModel(a.model))
+		}
+		opts = append(opts, deepseek.WithReasoningEffort(a.reasoningEffort), deepseek.WithThinking(a.thinkingEnabled))
+		provider, err := deepseek.New(opts...)
+		if err != nil {
+			return nil, err
+		}
+		a.a = agent.NewAgentWithRegistry(provider, a.msgStore, a.toolRegistry,
+			agent.WithSessionMode(a.currentMode),
+			agent.WithSessionsDir(a.sessionsDir),
+			agent.WithBudgetWarningUSD(a.budgetWarningUSD),
+			agent.WithUsageLogPath(filepath.Join(a.cfg.DataDir, "usage.jsonl")),
+			agent.WithAutoCompact(a.cfg.AutoCompact, a.cfg.AutoCompactThreshold, a.cfg.ContextWindow),
+			agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: a.approvalMode, AllowPrefixes: a.allowPrefixes, DenyPrefixes: a.denyPrefixes}),
+			agent.WithHooks(a.hooks, a.workspaceRoot),
+			agent.WithProjectMemory(a.cfg.MemoryEnabled, a.cfg.MemoryMaxChars, parseCSVList(a.cfg.MemoryFileOrder), a.workspaceRoot),
+			agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
+				a.approvalMu.Lock()
+				defer a.approvalMu.Unlock()
+				return a.approvalFn(req)
+			}),
+			agent.WithUserInputFunc(a.userInput),
+		)
+	}
+	return a.a, nil
+}
+
+func (a *App) RunTurn(ctx context.Context, input string, hiddenInput bool) (<-chan agent.AgentEvent, error) {
+	ag, err := a.ensureAgent()
+	if err != nil {
+		return nil, err
+	}
+	return ag.RunStreamWithOptions(ctx, a.sessionID, input, hiddenInput)
+}
+
+func (a *App) FinalizeTurn(lastAssistantText string) error {
+	meta, err := session.LoadSessionMeta(a.sessionsDir, a.sessionID)
+	if err != nil {
+		return nil
+	}
+	nextTurn := meta.TurnCount + 1
+	summary := strings.TrimSpace(lastAssistantText)
+	if len(summary) > 240 {
+		summary = summary[:240]
+	}
+	_, err = session.PatchSessionMeta(a.sessionsDir, a.sessionID, session.SessionMeta{Workspace: a.workspaceRoot, Branch: a.branch, TurnCount: nextTurn, Summary: summary})
+	return err
+}

@@ -1,0 +1,80 @@
+package tui
+
+import (
+	"strconv"
+	"strings"
+)
+
+func isSessionHeaderRow(row string) bool {
+	return strings.HasSuffix(strings.TrimSpace(row), ":")
+}
+
+func stripSessionOrdinal(row string) string {
+	s := strings.TrimSpace(row)
+	if s == "" {
+		return row
+	}
+	// examples: "1) xxx", "*  2) xxx", " 3) xxx"
+	if strings.HasPrefix(s, "*") {
+		s = strings.TrimSpace(strings.TrimPrefix(s, "*"))
+	}
+	if n, ok := strings.CutSuffix(strings.Fields(s)[0], ")"); ok {
+		if _, err := strconv.Atoi(n); err == nil {
+			return strings.TrimSpace(strings.TrimPrefix(s, strings.Fields(s)[0]))
+		}
+	}
+	return row
+}
+
+func sessionChoiceNumberAt(rows []string, idx int) int {
+	if idx < 0 || idx >= len(rows) {
+		return 0
+	}
+	s := strings.TrimSpace(rows[idx])
+	if strings.HasPrefix(s, "*") {
+		s = strings.TrimSpace(strings.TrimPrefix(s, "*"))
+	}
+	f := strings.Fields(s)
+	if len(f) == 0 {
+		return 0
+	}
+	n := strings.TrimSuffix(f[0], ")")
+	v, err := strconv.Atoi(n)
+	if err != nil || v < 1 {
+		return 0
+	}
+	return v
+}
+
+func firstSessionChoiceIndex(rows []string) int {
+	for i := range rows {
+		if sessionChoiceNumberAt(rows, i) > 0 {
+			return i
+		}
+	}
+	return 0
+}
+
+func prevSessionChoiceIndex(rows []string, cur int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	for i := cur - 1; i >= 0; i-- {
+		if sessionChoiceNumberAt(rows, i) > 0 {
+			return i
+		}
+	}
+	return cur
+}
+
+func nextSessionChoiceIndex(rows []string, cur int) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	for i := cur + 1; i < len(rows); i++ {
+		if sessionChoiceNumberAt(rows, i) > 0 {
+			return i
+		}
+	}
+	return cur
+}

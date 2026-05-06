@@ -1,0 +1,193 @@
+package render
+
+import "strings"
+
+type MessageKind string
+
+const (
+	KindText       MessageKind = "text"
+	KindNotice     MessageKind = "notice"
+	KindThinking   MessageKind = "thinking"
+	KindPlan       MessageKind = "plan"
+	KindToolCall   MessageKind = "tool_call"
+	KindToolResult MessageKind = "tool_result"
+)
+
+type UIMessage struct {
+	ID   string
+	Role string
+	Kind MessageKind
+	Text string
+}
+
+type Assembler struct {
+	messages      []UIMessage
+	toolEntryByID map[string]int
+}
+
+func NewAssembler() *Assembler {
+	return &Assembler{toolEntryByID: map[string]int{}}
+}
+
+func (a *Assembler) Reset() {
+	a.messages = nil
+	a.toolEntryByID = map[string]int{}
+}
+
+func (a *Assembler) Snapshot() []UIMessage {
+	out := make([]UIMessage, len(a.messages))
+	copy(out, a.messages)
+	return out
+}
+
+func (a *Assembler) AppendDelta(role, text string) {
+	t := strings.ReplaceAll(text, "\r\n", "\n")
+	if t == "" {
+		return
+	}
+	if n := len(a.messages); n > 0 && canCoalesce(role, a.messages[n-1]) {
+		a.messages[n-1].Text += t
+		return
+	}
+	if strings.TrimSpace(t) == "" {
+		return
+	}
+	a.messages = append(a.messages, UIMessage{
+		Role: role,
+		Kind: kindForRole(role),
+		Text: strings.TrimRight(t, "\n"),
+	})
+}
+
+func (a *Assembler) AddToolCall(toolCallID, text string) {
+	t := strings.TrimSpace(strings.TrimRight(text, "\n"))
+	if t == "" {
+		return
+	}
+	a.messages = append(a.messages, UIMessage{
+		ID:   toolCallID,
+		Role: "tool",
+		Kind: KindToolCall,
+		Text: t,
+	})
+	if toolCallID != "" {
+		a.toolEntryByID[toolCallID] = len(a.messages) - 1
+	}
+}
+
+func (a *Assembler) AddNotice(text string) {
+	t := strings.TrimSpace(strings.TrimRight(text, "\n"))
+	if t == "" {
+		return
+	}
+	a.messages = append(a.messages, UIMessage{
+		Role: "notice",
+		Kind: KindNotice,
+		Text: t,
+	})
+}
+
+func (a *Assembler) UpdateToolCall(toolCallID, text, role string) bool {
+	t := strings.TrimSpace(strings.TrimRight(text, "\n"))
+	if toolCallID == "" || t == "" {
+		return false
+	}
+	idx, ok := a.toolEntryByID[toolCallID]
+	if !ok || idx < 0 || idx >= len(a.messages) {
+		return false
+	}
+	if strings.TrimSpace(role) == "" {
+		role = "tool"
+	}
+	a.messages[idx].Role = role
+	a.messages[idx].Text = t
+	return true
+}
+
+func (a *Assembler) AddPlanDelta(text string) {
+	t := strings.ReplaceAll(text, "\r\n", "\n")
+	if t == "" {
+		return
+	}
+	if n := len(a.messages); n > 0 && a.messages[n-1].Kind == KindPlan {
+		a.messages[n-1].Text += t
+		return
+	}
+	if strings.TrimSpace(t) == "" {
+		return
+	}
+	a.messages = append(a.messages, UIMessage{
+		Role: "plan",
+		Kind: KindPlan,
+		Text: strings.TrimRight(t, "\n"),
+	})
+}
+
+func (a *Assembler) AddPlan(text string) {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return
+	}
+	a.messages = append(a.messages, UIMessage{
+		Role: "plan",
+		Kind: KindPlan,
+		Text: t,
+	})
+}
+
+func (a *Assembler) SetPlan(text string) {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return
+	}
+	if n := len(a.messages); n > 0 && a.messages[n-1].Kind == KindPlan {
+		a.messages[n-1].Text = t
+		return
+	}
+	a.AddPlan(t)
+}
+
+func (a *Assembler) AddToolResult(name, text string) {
+	a.AddToolResultWithRole(name, text, "result")
+}
+
+func (a *Assembler) AddToolResultWithRole(name, text, role string) {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return
+	}
+	if strings.TrimSpace(role) == "" {
+		role = "result"
+	}
+	label := strings.TrimSpace(name)
+	if label != "" {
+		t = label + ": " + t
+	}
+	a.messages = append(a.messages, UIMessage{
+		Role: role,
+		Kind: KindToolResult,
+		Text: t,
+	})
+}
+
+func (a *Assembler) BackfillToolCall(toolCallID, replacement string) {
+	if toolCallID == "" || replacement == "" {
+		return
+	}
+	idx, ok := a.toolEntryByID[toolCallID]
+	if !ok || idx < 0 || idx >= len(a.messages) {
+		return
+	}
+	a.messages[idx].Text = replacement
+}
+
+func canCoalesce(role string, last UIMessage) bool {
+	return last.Role == role && (last.Kind == KindText || last.Kind == KindThinking) && (role == "assistant" || role == "think")
+}
+
+func kindForRole(role string) MessageKind {
+	if role == "think" {
+		return KindThinking
+	}
+	return KindText
+}
