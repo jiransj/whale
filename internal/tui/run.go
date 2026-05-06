@@ -12,7 +12,6 @@ import (
 	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/app/service"
 	"github.com/usewhale/whale/internal/build"
-	"github.com/usewhale/whale/internal/defaults"
 )
 
 func Run(cfg app.Config, start app.StartOptions) error {
@@ -21,8 +20,14 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	if err != nil {
 		return err
 	}
-	printStartupBanner(cfg)
-	p := tea.NewProgram(newModel(svc))
+	modelName := svc.Model()
+	effort := svc.ReasoningEffort()
+	thinking := "on"
+	if !svc.ThinkingEnabled() {
+		thinking = "off"
+	}
+	printStartupBanner(modelName, effort)
+	p := tea.NewProgram(newModel(svc, modelName, effort, thinking))
 	_, err = p.Run()
 	if err == nil {
 		fmt.Printf("To resume this session, run: whale resume %s\n", svc.SessionID())
@@ -30,7 +35,7 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	return err
 }
 
-func printStartupBanner(cfg app.Config) {
+func printStartupBanner(model, effort string) {
 	version := build.CurrentVersion()
 	cwd := "."
 	if wd, err := os.Getwd(); err == nil {
@@ -42,14 +47,6 @@ func printStartupBanner(cfg app.Config) {
 				cwd = "~/" + rel
 			}
 		}
-	}
-	model := strings.TrimSpace(cfg.Model)
-	if model == "" {
-		model = defaults.DefaultModel
-	}
-	effort := strings.TrimSpace(cfg.ReasoningEffort)
-	if effort == "" {
-		effort = defaults.DefaultReasoningEffort
 	}
 	fmt.Println("╭────────────────────────────────────────────────────╮")
 	fmt.Printf("│ %-50s │\n", fmt.Sprintf(">_ Whale (%s)", version))

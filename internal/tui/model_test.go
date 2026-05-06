@@ -13,7 +13,7 @@ import (
 )
 
 func newModelWithDispatchSpy() (model, *[]service.Intent) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	intents := []service.Intent{}
 	m.dispatch = func(in service.Intent) {
 		intents = append(intents, in)
@@ -218,7 +218,7 @@ func TestVisibleSubmittedTextForPlanPrompt(t *testing.T) {
 }
 
 func TestSlashSuggestionsHiddenForMultilineInput(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.input.SetValue("/sta\nmore")
 	m.updateSlashMatches()
 	if len(m.slash.matches) != 0 {
@@ -227,7 +227,7 @@ func TestSlashSuggestionsHiddenForMultilineInput(t *testing.T) {
 }
 
 func TestSlashSuggestionsShownForSingleLineSlash(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.input.SetValue("/")
 	m.updateSlashMatches()
 	if len(m.slash.matches) == 0 {
@@ -281,7 +281,7 @@ func TestSlashSuggestionTabFillsInputWithoutDispatch(t *testing.T) {
 }
 
 func TestSlashSuggestionEscClearsSuggestionsWithoutMutatingInput(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.input.SetValue("/co")
 	m.updateSlashMatches()
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -316,7 +316,7 @@ func TestSlashSuggestionPlanAutoRunsWhenSelected(t *testing.T) {
 }
 
 func TestCtrlCClearsNonEmptyInputWithoutArmingQuit(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.input.SetValue("draft")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	m = next.(model)
@@ -335,7 +335,7 @@ func TestCtrlCClearsNonEmptyInputWithoutArmingQuit(t *testing.T) {
 }
 
 func TestApprovalNoticeTextUsesDecisionAndSummary(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.approval.reason = "exec_shell: go test ./..."
 	if got := m.approvalNoticeText("allow"); !strings.Contains(got, "You approved whale to run go test ./... this time") {
 		t.Fatalf("unexpected allow notice: %q", got)
@@ -349,7 +349,7 @@ func TestApprovalNoticeTextUsesDecisionAndSummary(t *testing.T) {
 }
 
 func TestTurnInterruptedNoticeText(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	got := m.turnInterruptedNoticeText()
 	if !strings.Contains(got, "Conversation interrupted") {
 		t.Fatalf("unexpected interrupt notice: %q", got)
@@ -501,7 +501,7 @@ func TestSessionHydrationCommitsTranscriptAndClearsLiveAssembler(t *testing.T) {
 }
 
 func TestChatIdleViewDoesNotRenderEmptyViewportFrame(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.width = 80
 	m.height = 24
 	view := m.View()
@@ -514,7 +514,7 @@ func TestChatIdleViewDoesNotRenderEmptyViewportFrame(t *testing.T) {
 }
 
 func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.width = 80
 	m.height = 24
 	m.append("assistant", "streamed answer")
@@ -528,7 +528,7 @@ func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 }
 
 func TestChatLiveViewTruncatesLongOutput(t *testing.T) {
-	m := newModel(nil)
+	m := newModel(nil, "", "", "")
 	m.width = 80
 	m.height = 8
 	m.append("assistant", strings.Repeat("line\n", 80))

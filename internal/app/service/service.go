@@ -140,3 +140,6 @@ func (s *Service) SessionID() string    { return s.app.SessionID() }
 func (s *Service) WorkspaceRoot() string {
 	return s.app.WorkspaceRoot()
 }
+func (s *Service) Model() string           { return s.app.Model() }
+func (s *Service) ReasoningEffort() string { return s.app.ReasoningEffort() }
+func (s *Service) ThinkingEnabled() bool   { return s.app.ThinkingEnabled() }
