@@ -122,7 +122,7 @@ printf '%s\n' "Installing whale $RESOLVED_VERSION for $OS/$ARCH..."
 curl -fsSL "$BASE_URL/$ASSET_NAME" -o "$ASSET_PATH"
 curl -fsSL "$BASE_URL/checksums.txt" -o "$CHECKSUMS_PATH"
 
-EXPECTED_SUM="$(awk -v asset="$ASSET_NAME" '$2 == asset {print $1}' "$CHECKSUMS_PATH")"
+EXPECTED_SUM="$(awk -v asset="$ASSET_NAME" '$2 == asset || $2 ~ "/"asset"$" {print $1}' "$CHECKSUMS_PATH")"
 if [ -z "$EXPECTED_SUM" ]; then
   printf '%s\n' "whale install: could not find checksum for $ASSET_NAME" >&2
   exit 1
