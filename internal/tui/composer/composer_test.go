@@ -114,3 +114,43 @@ func TestComposerTwentyLinesRenderWithoutFoldHint(t *testing.T) {
 		t.Fatalf("expected textarea height to grow to 20, got %d", c.Height())
 	}
 }
+
+func TestComposerSoftWrapIncreasesHeight(t *testing.T) {
+	c := New()
+	c.SetWidth(20)
+	c.SetValue("1234567890abcdefghijk")
+	if c.Height() <= 1 {
+		t.Fatalf("expected soft-wrapped input to grow beyond one row, got %d", c.Height())
+	}
+}
+
+func TestComposerSoftWrapKeepsFirstVisibleLine(t *testing.T) {
+	c := New()
+	c.SetWidth(20)
+	for _, r := range "1234567890abcdefghijk" {
+		c.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	view := c.View()
+	if !strings.Contains(view, "› 1234567890abcdef") {
+		t.Fatalf("expected first wrapped row to remain visible, got %q", view)
+	}
+}
+
+func TestComposerEmptyPlaceholderCollapsesToSingleLine(t *testing.T) {
+	c := New()
+	c.SetWidth(20)
+	c.SetValue("1234567890abcdefghijk")
+	if c.Height() <= 1 {
+		t.Fatalf("expected wrapped content to grow composer before reset, got %d", c.Height())
+	}
+	c.Reset()
+
+	view := c.View()
+
+	if !strings.Contains(view, "Type message or") {
+		t.Fatalf("expected placeholder text in empty composer view:\n%s", view)
+	}
+	if strings.Count(view, "\n") > 1 {
+		t.Fatalf("expected empty composer to render as a single visible row, got:\n%s", view)
+	}
+}

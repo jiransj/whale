@@ -1,5 +1,9 @@
 # Whale
 
+<p align="center">
+  <img src="docs/logo.svg" alt="Whale — DeepSeek-native coding agent for the terminal" width="600">
+</p>
+
 [English](README.md)
 
 面向终端的 DeepSeek 原生编程代理。

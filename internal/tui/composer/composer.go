@@ -3,10 +3,13 @@ package composer
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	rw "github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 	tuitheme "github.com/usewhale/whale/internal/tui/theme"
 )
 
@@ -73,9 +76,14 @@ func (c *Composer) InsertNewline() {
 }
 
 func (c *Composer) Update(msg tea.Msg) tea.Cmd {
+	wasAtEnd := c.AtEnd()
+	prevHeight := c.textarea.Height()
 	var cmd tea.Cmd
 	c.textarea, cmd = c.textarea.Update(msg)
 	c.reflow()
+	if wasAtEnd && c.textarea.Height() > prevHeight {
+		c.realignViewportAtEnd()
+	}
 	return cmd
 }
 
@@ -103,6 +111,11 @@ func (c *Composer) HandleKey(msg tea.KeyMsg) bool {
 }
 
 func (c Composer) View() string {
+	if c.Value() == "" && c.textarea.Height() != 1 {
+		copy := c.textarea
+		copy.SetHeight(1)
+		return copy.View()
+	}
 	value := c.Value()
 	lines := splitComposerLines(value)
 	if len(lines) <= composerCollapseThreshold {
@@ -140,8 +153,7 @@ func (c *Composer) moveToEnd() {
 }
 
 func (c *Composer) reflow() {
-	lines := splitComposerLines(c.Value())
-	height := len(lines)
+	height := c.visualLineCount()
 	if height < 1 {
 		height = 1
 	}
@@ -217,4 +229,83 @@ func splitComposerLines(value string) []string {
 		return []string{""}
 	}
 	return strings.Split(value, "\n")
+}
+
+func (c Composer) visualLineCount() int {
+	width := c.textarea.Width()
+	if width <= 0 {
+		return len(splitComposerLines(c.Value()))
+	}
+	total := 0
+	for _, line := range splitComposerLines(c.Value()) {
+		total += wrappedLineCount([]rune(line), width)
+	}
+	return total
+}
+
+func wrappedLineCount(runes []rune, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	var (
+		lines  = 1
+		row    []rune
+		word   []rune
+		spaces int
+	)
+
+	flushWord := func() {
+		if len(word) == 0 && spaces == 0 {
+			return
+		}
+		if spaces > 0 {
+			if uniseg.StringWidth(string(row))+uniseg.StringWidth(string(word))+spaces > width {
+				lines++
+				row = append([]rune{}, word...)
+				row = append(row, repeatSpaces(spaces)...)
+			} else {
+				row = append(row, word...)
+				row = append(row, repeatSpaces(spaces)...)
+			}
+			word = nil
+			spaces = 0
+			return
+		}
+		lastCharLen := rw.RuneWidth(word[len(word)-1])
+		if uniseg.StringWidth(string(word))+lastCharLen > width {
+			if len(row) > 0 {
+				lines++
+				row = nil
+			}
+			row = append(row, word...)
+			word = nil
+		}
+	}
+
+	for _, r := range runes {
+		if unicode.IsSpace(r) {
+			spaces++
+		} else {
+			word = append(word, r)
+		}
+		flushWord()
+	}
+
+	if uniseg.StringWidth(string(row))+uniseg.StringWidth(string(word))+spaces >= width {
+		lines++
+	} else if len(word) > 0 || spaces > 0 {
+		row = append(row, word...)
+		row = append(row, repeatSpaces(spaces+1)...)
+	}
+
+	return lines
+}
+
+func repeatSpaces(n int) []rune {
+	return []rune(strings.Repeat(" ", n))
+}
+
+func (c *Composer) realignViewportAtEnd() {
+	value := c.textarea.Value()
+	c.textarea.SetValue(value)
 }
