@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -29,31 +32,70 @@ func (b *Toolset) searchContent(_ context.Context, call core.ToolCall) (core.Too
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}
-	args := []string{"-n", "--no-heading"}
-	args = append(args, "--json")
-	if in.LiteralText {
+
+	matches, byFile, searchErr := searchWithRipgrep(in.Pattern, abs, in.Include, in.LiteralText, b.root)
+	if searchErr != nil {
+		matches, byFile, searchErr = searchWithGo(in.Pattern, abs, in.Include, in.LiteralText, b.root)
+		if searchErr != nil {
+			return marshalToolError(call, "exec_failed", searchErr.Error()), nil
+		}
+	}
+
+	summaryParts := make([]string, 0, maxSummarySamples)
+	for f, c := range byFile {
+		summaryParts = append(summaryParts, f+":"+strconv.Itoa(c))
+		if len(summaryParts) >= maxSummarySamples {
+			break
+		}
+	}
+	result := map[string]any{
+		"status": "ok",
+		"metrics": map[string]any{
+			"total_matches":  len(matches),
+			"files_matched":  len(byFile),
+			"pattern_length": len([]rune(in.Pattern)),
+			"truncated":      false,
+		},
+		"payload": map[string]any{
+			"matches": matches,
+		},
+		"summary": strings.Join(summaryParts, " | "),
+	}
+	return marshalToolResult(call, result)
+}
+
+type submatch struct {
+	Match string `json:"match"`
+	Start int    `json:"start"`
+	End   int    `json:"end"`
+}
+
+type matchRow struct {
+	File       string     `json:"file"`
+	LineNumber int        `json:"line_number"`
+	Line       string     `json:"line"`
+	Submatches []submatch `json:"submatches"`
+}
+
+// searchWithRipgrep tries to use ripgrep (rg) for fast searching.
+// Returns an error if rg is not available or fails.
+func searchWithRipgrep(pattern, path, include string, literal bool, root string) ([]matchRow, map[string]int, error) {
+	if _, err := exec.LookPath("rg"); err != nil {
+		return nil, nil, fmt.Errorf("rg not found: %w", err)
+	}
+
+	args := []string{"-n", "--no-heading", "--json"}
+	if literal {
 		args = append(args, "-F")
 	}
-	if strings.TrimSpace(in.Include) != "" {
-		args = append(args, "-g", in.Include)
+	if strings.TrimSpace(include) != "" {
+		args = append(args, "-g", include)
 	}
-	args = append(args, in.Pattern, abs)
+	args = append(args, pattern, path)
 	cmd := exec.Command("rg", args...)
 	out, err := cmd.Output()
 	if err != nil && len(out) == 0 {
-		return marshalToolError(call, "exec_failed", err.Error()), nil
-	}
-
-	type submatch struct {
-		Match string `json:"match"`
-		Start int    `json:"start"`
-		End   int    `json:"end"`
-	}
-	type matchRow struct {
-		File       string     `json:"file"`
-		LineNumber int        `json:"line_number"`
-		Line       string     `json:"line"`
-		Submatches []submatch `json:"submatches"`
+		return nil, nil, err
 	}
 
 	var matches []matchRow
@@ -76,7 +118,7 @@ func (b *Toolset) searchContent(_ context.Context, call core.ToolCall) (core.Too
 		num, _ := data["line_number"].(float64)
 
 		rel := rawPath
-		if rp, rerr := filepath.Rel(b.root, rawPath); rerr == nil {
+		if rp, rerr := filepath.Rel(root, rawPath); rerr == nil {
 			rel = filepath.ToSlash(rp)
 		}
 		row := matchRow{
@@ -98,27 +140,151 @@ func (b *Toolset) searchContent(_ context.Context, call core.ToolCall) (core.Too
 		byFile[row.File]++
 	}
 	if err := sc.Err(); err != nil {
-		return marshalToolError(call, "parse_failed", err.Error()), nil
+		return nil, nil, err
 	}
-	summaryParts := make([]string, 0, maxSummarySamples)
-	for f, c := range byFile {
-		summaryParts = append(summaryParts, f+":"+strconv.Itoa(c))
-		if len(summaryParts) >= maxSummarySamples {
-			break
+	return matches, byFile, nil
+}
+
+// searchWithGo is a pure-Go fallback when ripgrep is not available.
+// It walks the directory tree and searches file contents with Go's regexp.
+func searchWithGo(pattern, path, include string, literal bool, root string) ([]matchRow, map[string]int, error) {
+	searchPattern := pattern
+	if literal {
+		searchPattern = regexp.QuoteMeta(pattern)
+	}
+	re, err := regexp.Compile(searchPattern)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid pattern: %w", err)
+	}
+
+	var includeRe *regexp.Regexp
+	if strings.TrimSpace(include) != "" {
+		includeRe, err = globToRegexp(include)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid include pattern: %w", err)
 		}
 	}
-	result := map[string]any{
-		"status": "ok",
-		"metrics": map[string]any{
-			"total_matches":  len(matches),
-			"files_matched":  len(byFile),
-			"pattern_length": len([]rune(in.Pattern)),
-			"truncated":      false,
-		},
-		"payload": map[string]any{
-			"matches": matches,
-		},
-		"summary": strings.Join(summaryParts, " | "),
+
+	var matches []matchRow
+	byFile := map[string]int{}
+
+	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable
+		}
+		// Skip hidden files and directories (like rg does by default)
+		base := filepath.Base(filePath)
+		if info.IsDir() {
+			if base != "." && base != ".." && strings.HasPrefix(base, ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(base, ".") {
+			return nil
+		}
+		// Apply include filter
+		if includeRe != nil && !includeRe.MatchString(filePath) {
+			return nil
+		}
+		// Skip binary files
+		if isLikelyBinary(filePath) {
+			return nil
+		}
+
+		fileMatches, err := grepFile(filePath, re, root)
+		if err != nil {
+			return nil
+		}
+		for _, m := range fileMatches {
+			matches = append(matches, m)
+			byFile[m.File]++
+		}
+		// Cap to avoid unbounded memory
+		if len(matches) >= 200 {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
 	}
-	return marshalToolResult(call, result)
+	return matches, byFile, nil
+}
+
+// grepFile searches a single file for regex matches, returning match rows.
+func grepFile(filePath string, re *regexp.Regexp, root string) ([]matchRow, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var matches []matchRow
+	sc := bufio.NewScanner(f)
+	lineNum := 0
+	for sc.Scan() {
+		lineNum++
+		line := sc.Text()
+		locs := re.FindAllStringIndex(line, -1)
+		if len(locs) == 0 {
+			continue
+		}
+		rel := filePath
+		if rp, rerr := filepath.Rel(root, filePath); rerr == nil {
+			rel = filepath.ToSlash(rp)
+		}
+		row := matchRow{
+			File:       rel,
+			LineNumber: lineNum,
+			Line:       line,
+		}
+		for _, loc := range locs {
+			row.Submatches = append(row.Submatches, submatch{
+				Match: line[loc[0]:loc[1]],
+				Start: loc[0],
+				End:   loc[1],
+			})
+		}
+		matches = append(matches, row)
+	}
+	if err := sc.Err(); err != nil {
+		return matches, err
+	}
+	return matches, nil
+}
+
+// globToRegexp converts a simple glob pattern to a compiled regexp.
+// Supports *, ?, and {a,b} alternation.
+func globToRegexp(glob string) (*regexp.Regexp, error) {
+	pattern := strings.ReplaceAll(glob, ".", "\\.")
+	pattern = strings.ReplaceAll(pattern, "*", ".*")
+	pattern = strings.ReplaceAll(pattern, "?", ".")
+	// Handle {a,b} alternation
+	braceRe := regexp.MustCompile(`\{([^}]+)\}`)
+	pattern = braceRe.ReplaceAllStringFunc(pattern, func(m string) string {
+		inner := m[1 : len(m)-1]
+		return "(" + strings.ReplaceAll(inner, ",", "|") + ")"
+	})
+	return regexp.Compile(pattern)
+}
+
+// isLikelyBinary checks if a file appears to be binary by looking for null bytes.
+func isLikelyBinary(filePath string) bool {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return true // can't open, skip
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil {
+		return n == 0
+	}
+	for _, b := range buf[:n] {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
 }
