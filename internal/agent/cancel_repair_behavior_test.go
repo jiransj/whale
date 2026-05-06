@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,8 @@ func (p *cancelThenSummaryProvider) StreamResponse(ctx context.Context, _ []Mess
 
 func TestRunStreamCancelCurrentTurn(t *testing.T) {
 	store := NewInMemoryStore()
-	a := NewAgent(&cancelThenSummaryProvider{}, store, nil)
+	prov := &cancelThenSummaryProvider{}
+	a := NewAgent(prov, store, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	events, err := a.RunStream(ctx, "s-cancel", "hi")
 	if err != nil {
@@ -37,41 +39,40 @@ func TestRunStreamCancelCurrentTurn(t *testing.T) {
 	time.AfterFunc(10*time.Millisecond, cancel)
 
 	seenCancelled := false
-	seenSummaryStarted := false
-	seenSummaryDone := false
-	seenDone := false
 	for ev := range events {
 		switch ev.Type {
 		case AgentEventTypeTurnCancelled:
 			seenCancelled = true
-		case AgentEventTypeForcedSummaryStarted:
-			seenSummaryStarted = true
-		case AgentEventTypeForcedSummaryDone:
-			seenSummaryDone = true
-		case AgentEventTypeDone:
-			seenDone = true
+		case AgentEventTypeForcedSummaryStarted, AgentEventTypeForcedSummaryDone, AgentEventTypeDone:
+			t.Fatalf("unexpected event after cancel: %s", ev.Type)
 		}
 	}
 
 	if !seenCancelled {
 		t.Fatal("expected turn_cancelled event")
 	}
-	if !seenSummaryStarted {
-		t.Fatal("expected forced_summary_started event")
-	}
-	if !seenSummaryDone {
-		t.Fatal("expected forced_summary_done event")
-	}
-	if !seenDone {
-		t.Fatal("expected done event carrying forced summary")
+	if got := prov.calls; got != 1 {
+		t.Fatalf("expected cancel path not to trigger extra summary request, got provider calls=%d", got)
 	}
 	msgs, _ := store.List(context.Background(), "s-cancel")
 	if len(msgs) == 0 {
 		t.Fatal("expected persisted messages")
 	}
 	last := msgs[len(msgs)-1]
-	if last.Role != RoleAssistant || strings.TrimSpace(last.Text) == "" {
-		t.Fatalf("expected forced summary assistant message, got: %+v", last)
+	if last.Role != RoleUser || !last.Hidden || last.FinishReason != FinishReasonCanceled || !strings.Contains(last.Text, "<turn_aborted>") {
+		t.Fatalf("expected hidden interrupt marker, got: %+v", last)
+	}
+}
+
+func TestRunCancelCurrentTurnReturnsContextCanceled(t *testing.T) {
+	store := NewInMemoryStore()
+	a := NewAgent(&cancelThenSummaryProvider{}, store, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(10*time.Millisecond, cancel)
+
+	_, err := a.Run(ctx, "s-cancel-run", "hi")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got %v", err)
 	}
 }
 

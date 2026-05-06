@@ -317,9 +317,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.markNoFinalAnswerIfNeeded()
 			eventCmd = m.commitLiveScrollbackCmd()
 			m.addLog(logEntry{Kind: "turn_done", Source: "assistant", Summary: truncateLine(ev.LastResponse, 120), Raw: ev.LastResponse})
-			if m.status != "no final answer returned" {
-				m.status = "ready"
-			}
+			m.status = "ready"
 			if wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {
 				m.mode = modePlanImplementation
 				m.planImplementation.index = 0

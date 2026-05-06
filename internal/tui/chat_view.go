@@ -30,7 +30,6 @@ func (m *model) markNoFinalAnswerIfNeeded() bool {
 	if !m.sawReasoningThisTurn || m.sawAssistantThisTurn || m.sawPlanThisTurn {
 		return false
 	}
-	m.status = "no final answer returned"
 	m.addLog(logEntry{
 		Kind:    "no_final_answer",
 		Source:  "assistant",

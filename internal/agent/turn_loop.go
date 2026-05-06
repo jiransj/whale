@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/usewhale/whale/internal/compact"
 	"github.com/usewhale/whale/internal/core"
@@ -83,21 +82,8 @@ func (a *Agent) RunStreamWithOptions(ctx context.Context, sessionID, input strin
 			assistant, toolMsg, usage, modelName, abortTurn, sErr := a.streamAndHandle(ctx, sessionID, history, rt, out)
 			if sErr != nil {
 				if errors.Is(sErr, context.Canceled) || errors.Is(sErr, context.DeadlineExceeded) {
+					a.persistInterruptedTurnMarker(sessionID)
 					out <- AgentEvent{Type: AgentEventTypeTurnCancelled, Content: "turn cancelled"}
-					out <- AgentEvent{Type: AgentEventTypeForcedSummaryStarted, Content: "building forced summary"}
-					// Forced summary is compensating work after the user cancels
-					// a turn, so it intentionally does not inherit the canceled
-					// turn context.
-					forceCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-					sum, serr := a.forceSummary(forceCtx, sessionID, history, "turn cancelled")
-					cancel()
-					if serr != nil {
-						out <- AgentEvent{Type: AgentEventTypeForcedSummaryFailed, Content: serr.Error()}
-						out <- AgentEvent{Type: AgentEventTypeError, Err: sErr}
-						return
-					}
-					out <- AgentEvent{Type: AgentEventTypeForcedSummaryDone, Content: "forced summary completed"}
-					out <- AgentEvent{Type: AgentEventTypeDone, Message: &sum}
 					return
 				}
 				out <- AgentEvent{Type: AgentEventTypeError, Err: sErr}

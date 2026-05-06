@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestComposerCtrlJInsertsNewline(t *testing.T) {
@@ -152,5 +153,25 @@ func TestComposerEmptyPlaceholderCollapsesToSingleLine(t *testing.T) {
 	}
 	if strings.Count(view, "\n") > 1 {
 		t.Fatalf("expected empty composer to render as a single visible row, got:\n%s", view)
+	}
+}
+
+func TestComposerViewHasNoTrailingNewline(t *testing.T) {
+	c := New()
+	c.SetWidth(24)
+	view := c.View()
+	if strings.HasSuffix(view, "\n") {
+		t.Fatalf("expected composer view without trailing newline, got %q", view)
+	}
+}
+
+func TestComposerViewPadsVisibleWidth(t *testing.T) {
+	c := New()
+	c.SetWidth(24)
+	view := c.View()
+	for _, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got != 24 {
+			t.Fatalf("expected padded line width 24, got %d in %q", got, line)
+		}
 	}
 }

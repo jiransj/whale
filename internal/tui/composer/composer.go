@@ -111,17 +111,21 @@ func (c *Composer) HandleKey(msg tea.KeyMsg) bool {
 }
 
 func (c Composer) View() string {
+	var view string
 	if c.Value() == "" && c.textarea.Height() != 1 {
 		copy := c.textarea
 		copy.SetHeight(1)
-		return copy.View()
+		view = copy.View()
+	} else {
+		value := c.Value()
+		lines := splitComposerLines(value)
+		if len(lines) <= composerCollapseThreshold {
+			view = c.textarea.View()
+		} else {
+			view = c.foldedView(lines)
+		}
 	}
-	value := c.Value()
-	lines := splitComposerLines(value)
-	if len(lines) <= composerCollapseThreshold {
-		return c.textarea.View()
-	}
-	return c.foldedView(lines)
+	return c.normalizeView(view)
 }
 
 func (c Composer) LineCount() int {
@@ -229,6 +233,20 @@ func splitComposerLines(value string) []string {
 		return []string{""}
 	}
 	return strings.Split(value, "\n")
+}
+
+func (c Composer) normalizeView(view string) string {
+	view = strings.TrimRight(view, "\n")
+	if view == "" {
+		return ""
+	}
+	lines := strings.Split(view, "\n")
+	padded := make([]string, 0, len(lines))
+	style := lipgloss.NewStyle().Width(c.width).MaxWidth(c.width)
+	for _, line := range lines {
+		padded = append(padded, style.Render(line))
+	}
+	return strings.Join(padded, "\n")
 }
 
 func (c Composer) visualLineCount() int {

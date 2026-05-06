@@ -180,7 +180,7 @@ func TestMarkNoFinalAnswerIfNeeded(t *testing.T) {
 	if !m.markNoFinalAnswerIfNeeded() {
 		t.Fatal("expected no-final-answer status to be marked")
 	}
-	if m.status != "no final answer returned" {
+	if m.status != "" {
 		t.Fatalf("unexpected status: %q", m.status)
 	}
 	if got := len(m.assembler.Snapshot()); got != 0 {

@@ -362,15 +362,25 @@ func (a *Agent) Run(ctx context.Context, sessionID, input string) (core.Message,
 		return core.Message{}, err
 	}
 	var final core.Message
+	cancelled := false
 	for ev := range events {
 		if ev.Type == AgentEventTypeError && ev.Err != nil {
 			return core.Message{}, ev.Err
+		}
+		if ev.Type == AgentEventTypeTurnCancelled {
+			cancelled = true
 		}
 		if ev.Type == AgentEventTypeDone && ev.Message != nil {
 			final = *ev.Message
 		}
 	}
 	if final.ID == "" {
+		if cancelled {
+			if err := ctx.Err(); err != nil {
+				return core.Message{}, err
+			}
+			return core.Message{}, context.Canceled
+		}
 		return core.Message{}, errors.New("agent finished without final message")
 	}
 	return final, nil
