@@ -65,7 +65,6 @@ func (m model) View() string {
 	if m.chatMode == "plan" {
 		footerText += "  mode: plan (Shift+Tab to switch)"
 	}
-	footerText += "  scroll/copy with terminal"
 	footer := lipgloss.JoinHorizontal(lipgloss.Left, footerText)
 	parts := make([]string, 0, 3)
 	if body != "" {
