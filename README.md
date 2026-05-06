@@ -30,6 +30,10 @@ whale --version
 
 You need Go `1.26.2` or newer.
 
+<p align="center">
+  <img src="docs/screenshot-01.png" alt="Whale TUI screenshot" width="700">
+</p>
+
 ## Getting started
 
 Whale currently uses the DeepSeek API.

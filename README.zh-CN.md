@@ -30,6 +30,10 @@ whale --version
 
 你需要 Go `1.26.2` 或更新版本。
 
+<p align="center">
+  <img src="docs/screenshot-02.png" alt="Whale TUI 截图" width="700">
+</p>
+
 ## 快速开始
 
 Whale 当前使用 DeepSeek API。
