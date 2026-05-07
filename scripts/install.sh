@@ -85,6 +85,21 @@ verify_checksum() {
   fi
 }
 
+download_asset() {
+  url="$1"
+  dst="$2"
+  if [ -t 2 ]; then
+    curl -fL "$url" -o "$dst"
+    return $?
+  fi
+  curl -fsL "$url" -o "$dst"
+}
+
+asset_exists() {
+  url="$1"
+  curl -fsIL "$url" >/dev/null 2>&1
+}
+
 install_binary() {
   src="$1"
   dst="$2"
@@ -125,13 +140,14 @@ CHECKSUMS_PATH="$TMPDIR/checksums.txt"
 EXTRACT_DIR="$TMPDIR/extract"
 
 printf '%s\n' "Installing whale $RESOLVED_VERSION for $OS/$ARCH"
-printf '%s\n' "Downloading $ARCHIVE_NAME..."
-if curl -fsL "$BASE_URL/$ARCHIVE_NAME" -o "$ARCHIVE_PATH"; then
+if asset_exists "$BASE_URL/$ARCHIVE_NAME"; then
+  printf '%s\n' "Downloading $ARCHIVE_NAME..."
+  download_asset "$BASE_URL/$ARCHIVE_NAME" "$ARCHIVE_PATH"
   DOWNLOAD_NAME="$ARCHIVE_NAME"
   DOWNLOAD_PATH="$ARCHIVE_PATH"
 else
   printf '%s\n' "Archive not found; downloading $ASSET_NAME..."
-  curl -fsSL "$BASE_URL/$ASSET_NAME" -o "$ASSET_PATH"
+  download_asset "$BASE_URL/$ASSET_NAME" "$ASSET_PATH"
   DOWNLOAD_NAME="$ASSET_NAME"
   DOWNLOAD_PATH="$ASSET_PATH"
 fi
