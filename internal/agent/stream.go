@@ -201,11 +201,24 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 		if !ok {
 			spec = core.ToolSpec{Name: call.Name}
 		}
-		if a.mode == session.ModePlan && !core.IsReadOnlyToolCall(spec, call) {
+		if (a.mode == session.ModePlan || a.mode == session.ModeAsk) && !core.IsReadOnlyToolCall(spec, call) {
+			blockedCode, blockedMsg, blockedSummary, blockedData := modeBlockedDetails(a.mode)
+			content, err := core.MarshalToolEnvelope(core.ToolEnvelope{
+				OK:      false,
+				Success: false,
+				Code:    blockedCode,
+				Error:   blockedMsg,
+				Message: blockedMsg,
+				Summary: blockedSummary,
+				Data:    blockedData,
+			})
+			if err != nil {
+				content = fmt.Sprintf(`{"success":false,"error":%q,"code":%q}`, blockedMsg, blockedCode)
+			}
 			tr := core.ToolResult{
 				ToolCallID: call.ID,
 				Name:       call.Name,
-				Content:    `{"success":false,"error":"tool unavailable in plan mode","code":"plan_mode_blocked"}`,
+				Content:    content,
 				IsError:    true,
 			}
 			events <- AgentEvent{
@@ -213,7 +226,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 				ToolBlocked: &ToolCallBlocked{
 					ToolCallID: call.ID,
 					ToolName:   call.Name,
-					ReasonCode: "plan_mode_blocked",
+					ReasonCode: blockedCode,
 				},
 			}
 			results = append(results, tr)
@@ -347,4 +360,30 @@ func (a *Agent) bestEffortUpdateAssistant(msg core.Message) {
 	// was canceled. This is diagnostic persistence; failure must not mask the
 	// original provider error.
 	_ = a.store.Update(context.Background(), msg)
+}
+
+func modeBlockedDetails(mode session.Mode) (code, message, summary string, data map[string]any) {
+	switch mode {
+	case session.ModeAsk:
+		return "ask_mode_blocked",
+			"tool unavailable in ask mode",
+			"Current mode: ask. Ask mode only allows read-only tools. To execute or modify files, switch to agent mode. To propose a reviewed approach first, switch to plan mode.",
+			map[string]any{
+				"current_mode":    "ask",
+				"suggested_modes": []string{"agent", "plan"},
+			}
+	case session.ModePlan:
+		return "plan_mode_blocked",
+			"tool unavailable in plan mode",
+			"Current mode: plan. Plan mode is read-only until the plan is approved. Stay here to refine the plan, or switch to agent mode when it's time to implement.",
+			map[string]any{
+				"current_mode":    "plan",
+				"suggested_modes": []string{"agent"},
+			}
+	default:
+		return "mode_blocked",
+			"tool unavailable in current mode",
+			"Tool unavailable in the current mode.",
+			map[string]any{}
+	}
 }

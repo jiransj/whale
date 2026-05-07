@@ -52,6 +52,7 @@ type toolResultEnvelope struct {
 	hasOK      bool
 	code       string
 	message    string
+	summary    string
 	status     string
 	data       map[string]any
 	metrics    map[string]any
@@ -91,6 +92,7 @@ func summarizeFailedResult(env toolResultEnvelope, fallback string) (string, str
 	hasExitCode := hasInt(env.metrics["exit_code"])
 	duration := formatDurationMS(asInt64(env.metrics["duration_ms"]))
 	detail := firstLine(firstNonEmpty(
+		env.summary,
 		asString(env.payload["stderr"]),
 		asString(env.payload["stdout"]),
 		env.message,

@@ -65,17 +65,23 @@ func (a *App) buildStatus() string {
 }
 
 func modeDisplay(mode session.Mode) string {
+	if mode == session.ModeAsk {
+		return "ask"
+	}
 	if mode == session.ModePlan {
 		return "plan"
 	}
-	return "chat"
+	return "agent"
 }
 
 func modeTitle(mode session.Mode) string {
+	if mode == session.ModeAsk {
+		return "Ask"
+	}
 	if mode == session.ModePlan {
 		return "Plan"
 	}
-	return "Chat"
+	return "Agent"
 }
 
 func approvalModeDisplay(mode policy.ApprovalMode) string {

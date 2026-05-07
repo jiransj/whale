@@ -62,8 +62,8 @@ func (m model) View() string {
 		status = lipgloss.NewStyle().Foreground(tuitheme.Default.Warn).Render(label + " " + spin)
 	}
 	footerText := "status: " + status + "  model: " + m.model + "  effort: " + m.effort + "  thinking: " + m.thinking
-	if m.chatMode == "plan" {
-		footerText += "  mode: plan (Shift+Tab to switch)"
+	if m.chatMode == "ask" || m.chatMode == "plan" {
+		footerText += "  mode: " + m.chatMode + " (Shift+Tab to switch)"
 	}
 	footer := lipgloss.JoinHorizontal(lipgloss.Left, footerText)
 	parts := make([]string, 0, 3)

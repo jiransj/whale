@@ -166,7 +166,7 @@ func newModel(svc *service.Service, modelName, effort, thinking string) model {
 		model:          modelName,
 		effort:         effort,
 		thinking:       thinking,
-		chatMode:       "chat",
+		chatMode:       "agent",
 		product:        "Whale",
 		version:        resolveVersion(),
 		cwd:            resolveWorkingDirectory(),
@@ -656,7 +656,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					commitCmd := m.commitMessageScrollbackCmd("you", "Implement the plan.")
 					m.busy = true
 					m.status = "running"
-					m.chatMode = "chat"
+					m.chatMode = "agent"
 					m.dispatchIntent(service.Intent{Kind: service.IntentImplementPlan})
 					m.mode = modeChat
 					return m, tea.Sequence(commitCmd, busyTickCmd())

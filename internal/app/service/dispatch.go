@@ -128,6 +128,17 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 		line = prompt
 		hiddenInput = false
 	}
+	if prompt, ok := appcommands.AskPromptFromSlash(line); ok {
+		out, err := s.app.SetMode(session.ModeAsk)
+		if err != nil {
+			s.emit(Event{Kind: EventError, Text: err.Error()})
+			s.emit(Event{Kind: EventTurnDone})
+			return
+		}
+		s.emit(Event{Kind: EventInfo, Text: out})
+		line = prompt
+		hiddenInput = false
+	}
 	if s.app.IsResumeMenu(line) {
 		choices, err := s.app.ListResumeChoices(20)
 		if err != nil {

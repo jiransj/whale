@@ -57,6 +57,9 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 	if cmdResult.Output != "" {
 		output = cmdResult.Output
 	}
+	if cmdResult.AskPrompt != "" {
+		synthetic = cmdResult.AskPrompt
+	}
 	if cmdResult.PlanPrompt != "" {
 		synthetic = cmdResult.PlanPrompt
 	}

@@ -13,6 +13,7 @@ type Mode string
 
 const (
 	ModeAgent Mode = "agent"
+	ModeAsk   Mode = "ask"
 	ModePlan  Mode = "plan"
 )
 
@@ -25,6 +26,8 @@ func ParseMode(raw string) (Mode, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", string(ModeAgent):
 		return ModeAgent, nil
+	case string(ModeAsk):
+		return ModeAsk, nil
 	case string(ModePlan):
 		return ModePlan, nil
 	default:

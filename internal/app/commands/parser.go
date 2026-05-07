@@ -17,6 +17,7 @@ type Result struct {
 	ShowStatus  bool
 	ShowContext bool
 	Mode        string
+	AskPrompt   string
 	PlanPrompt  string
 	InitMemory  bool
 	ShowMemory  bool
@@ -60,6 +61,13 @@ func Parse(line, currentSessionID string, now time.Time) (Result, error) {
 	if trimmed == "/clear" {
 		return Result{Handled: true, SessionID: currentSessionID, ClearScreen: true}, nil
 	}
+	if trimmed == "/ask" {
+		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModeAsk)}, nil
+	}
+	if strings.HasPrefix(trimmed, "/ask ") {
+		payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/ask"))
+		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModeAsk), AskPrompt: payload}, nil
+	}
 	if trimmed == "/plan" {
 		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModePlan)}, nil
 	}
@@ -69,9 +77,6 @@ func Parse(line, currentSessionID string, now time.Time) (Result, error) {
 			return Result{}, fmt.Errorf("usage: /plan [prompt]")
 		}
 		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModePlan), PlanPrompt: payload}, nil
-	}
-	if trimmed == "/agent" {
-		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModeAgent)}, nil
 	}
 	if trimmed == "/init" {
 		return Result{Handled: true, SessionID: currentSessionID, InitMemory: true}, nil
@@ -89,6 +94,18 @@ func PlanPromptFromSlash(line string) (string, bool) {
 	}
 	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/plan"))
 	if payload == "" || payload == "show" || payload == "on" || payload == "off" {
+		return "", false
+	}
+	return payload, true
+}
+
+func AskPromptFromSlash(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "/ask ") {
+		return "", false
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/ask"))
+	if payload == "" {
 		return "", false
 	}
 	return payload, true
