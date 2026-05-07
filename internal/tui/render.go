@@ -82,9 +82,8 @@ func (m model) View() string {
 		}
 		view += "\n\n" + lipgloss.NewStyle().Foreground(tuitheme.Default.Error).Render(
 			fmt.Sprintf(
-				"approval: %s\nid: %s\n%s\n\n%s\n(←/→/tab select, enter confirm, esc deny)",
+				"approval: %s\n%s\n\n%s\n(←/→/tab select, enter confirm, esc deny)",
 				m.approval.toolName,
-				m.approval.toolCallID,
 				m.approval.reason,
 				strings.Join(opts, "   "),
 			),

@@ -700,6 +700,23 @@ func TestChatStoppingViewShowsStoppingAboveComposer(t *testing.T) {
 	}
 }
 
+func TestApprovalViewHidesToolCallID(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 24
+	m.mode = modeApproval
+	m.approval.toolCallID = "tc-123"
+	m.approval.toolName = "edit"
+	m.approval.reason = "edit: internal/tui/model.go"
+	view := m.View()
+	if !strings.Contains(view, "approval: edit") {
+		t.Fatalf("expected approval header in view:\n%s", view)
+	}
+	if strings.Contains(view, "id: tc-123") {
+		t.Fatalf("approval view should not expose tool call id:\n%s", view)
+	}
+}
+
 func TestChatLiveViewTruncatesLongOutput(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
