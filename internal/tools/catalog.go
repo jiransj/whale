@@ -16,7 +16,7 @@ func (b *Toolset) Tools() []core.Tool {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"file_path": map[string]any{"type": "string", "description": "Path relative to workspace root, or absolute (leading / mapped to workspace root)"},
+					"file_path": map[string]any{"type": "string", "description": "Path relative to workspace root, or an absolute path inside the workspace root"},
 					"offset":    map[string]any{"type": "integer", "minimum": 0, "description": "Start line offset (0-based)"},
 					"limit":     map[string]any{"type": "integer", "minimum": 1, "maximum": 2000, "description": "Max lines to read"},
 				},
@@ -32,7 +32,7 @@ func (b *Toolset) Tools() []core.Tool {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": "Directory path relative to workspace root, or absolute (leading / mapped to workspace root)"},
+					"path":   map[string]any{"type": "string", "description": "Directory path relative to workspace root, or an absolute path inside the workspace root"},
 					"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				},
 			},
@@ -47,7 +47,7 @@ func (b *Toolset) Tools() []core.Tool {
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"pattern":      map[string]any{"type": "string", "description": "Pattern or literal query"},
-					"path":         map[string]any{"type": "string", "description": "Search root relative to workspace, or absolute (leading / mapped to workspace root)"},
+					"path":         map[string]any{"type": "string", "description": "Search root relative to workspace, or an absolute path inside the workspace root"},
 					"include":      map[string]any{"type": "string", "description": "Glob include filter, e.g. *.go"},
 					"literal_text": map[string]any{"type": "boolean", "description": "When true, treat pattern as plain text"},
 				},
@@ -182,7 +182,7 @@ func (b *Toolset) Tools() []core.Tool {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"file_path": map[string]any{"type": "string", "description": "Target file path relative to workspace, or absolute (leading / mapped to workspace root)"},
+					"file_path": map[string]any{"type": "string", "description": "Target file path relative to workspace, or an absolute path inside the workspace root"},
 					"search":    map[string]any{"type": "string", "description": "Exact text to replace"},
 					"replace":   map[string]any{"type": "string", "description": "Replacement text"},
 					"all":       map[string]any{"type": "boolean", "description": "Replace all occurrences"},
@@ -199,7 +199,7 @@ func (b *Toolset) Tools() []core.Tool {
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"file_path": map[string]any{"type": "string", "description": "Target file path relative to workspace, or absolute (leading / mapped to workspace root)"},
+					"file_path": map[string]any{"type": "string", "description": "Target file path relative to workspace, or an absolute path inside the workspace root"},
 					"content":   map[string]any{"type": "string", "description": "Full file content to write"},
 				},
 				"required": []string{"file_path", "content"},

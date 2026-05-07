@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -118,10 +119,14 @@ func (r *ToolRegistry) Dispatch(ctx context.Context, call ToolCall) (ToolResult,
 	}
 	res, err := tool.Run(ctx, call)
 	if err != nil {
+		code := "exec_failed"
+		if errors.Is(err, context.Canceled) {
+			code = "cancelled"
+		}
 		return r.normalizeResult(call, ToolResult{
 			ToolCallID: call.ID,
 			Name:       call.Name,
-			Content:    fmt.Sprintf(`{"ok":false,"error":%q,"code":"exec_failed"}`, err.Error()),
+			Content:    fmt.Sprintf(`{"ok":false,"error":%q,"code":%q}`, err.Error(), code),
 			IsError:    true,
 		}, time.Since(start).Milliseconds()), nil
 	}

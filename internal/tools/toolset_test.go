@@ -143,9 +143,21 @@ func firstMetadataDiff(t *testing.T, metadata map[string]any) string {
 
 func TestPathEscapeDenied(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "inside.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
 	ts, err := NewToolset(dir)
 	if err != nil {
 		t.Fatalf("new toolset: %v", err)
+	}
+	insideRes, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": filepath.Join(dir, "inside.txt"),
+	}))
+	if err != nil || insideRes.IsError {
+		t.Fatalf("expected absolute path inside workspace to be allowed: err=%v res=%+v", err, insideRes)
+	}
+	if !strings.Contains(insideRes.Content, "ok") {
+		t.Fatalf("expected inside file content, got: %s", insideRes.Content)
 	}
 	res, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
 		"file_path": "../x",

@@ -66,10 +66,15 @@ func (b *Toolset) safePath(raw string) (string, error) {
 	if raw == "" {
 		raw = "."
 	}
-	for strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "\\") {
-		raw = raw[1:]
+	var target string
+	if filepath.IsAbs(raw) {
+		target = filepath.Clean(raw)
+	} else {
+		for strings.HasPrefix(raw, "\\") {
+			raw = raw[1:]
+		}
+		target = filepath.Clean(filepath.Join(b.root, raw))
 	}
-	target := filepath.Clean(filepath.Join(b.root, raw))
 	rel, err := filepath.Rel(b.root, target)
 	if err != nil {
 		return "", err

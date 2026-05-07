@@ -64,6 +64,7 @@ func (b *Toolset) execShell(ctx context.Context, call core.ToolCall) (core.ToolR
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "/bin/sh", "-lc", in.Command)
+	configureShellCommand(cmd)
 	cmd.Dir = workdir
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -81,6 +82,9 @@ func (b *Toolset) execShell(ctx context.Context, call core.ToolCall) (core.ToolR
 	exitCode := 0
 	status := "ok"
 	summaryParts := make([]string, 0, 4)
+	if cctx.Err() == context.Canceled {
+		return marshalToolError(call, "cancelled", "command canceled"), nil
+	}
 	if cctx.Err() == context.DeadlineExceeded {
 		return marshalToolError(call, "timeout", "command timed out"), nil
 	}

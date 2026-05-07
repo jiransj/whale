@@ -76,6 +76,54 @@ func TestRunCancelCurrentTurnReturnsContextCanceled(t *testing.T) {
 	}
 }
 
+type blockingCancelTool struct{}
+
+func (b blockingCancelTool) Name() string { return "blocking_cancel" }
+func (b blockingCancelTool) Run(ctx context.Context, call ToolCall) (ToolResult, error) {
+	<-ctx.Done()
+	return ToolResult{}, ctx.Err()
+}
+
+func TestRunStreamCancelDuringToolSkipsRecovery(t *testing.T) {
+	store := NewInMemoryStore()
+	prov := &oneToolProvider{tool: "blocking_cancel", input: `{}`}
+	a := NewAgentWithRegistry(
+		prov,
+		store,
+		NewToolRegistry([]Tool{blockingCancelTool{}}),
+		WithToolPolicy(DefaultToolPolicy{Mode: ApprovalModeNever}),
+		WithRecoveryPolicy(DefaultRecoveryPolicy()),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	events, err := a.RunStream(ctx, "s-tool-cancel", "go")
+	if err != nil {
+		t.Fatalf("run stream failed: %v", err)
+	}
+	time.AfterFunc(10*time.Millisecond, cancel)
+
+	var seenCancelled bool
+	for ev := range events {
+		switch ev.Type {
+		case AgentEventTypeTurnCancelled:
+			seenCancelled = true
+		case AgentEventTypeToolRecoveryScheduled, AgentEventTypeToolRecoveryAttempt, AgentEventTypeToolRecoveryExhausted, AgentEventTypeReplanRequiredSet:
+			t.Fatalf("unexpected recovery event after cancel: %s", ev.Type)
+		case AgentEventTypeToolResult:
+			if ev.Result != nil && strings.Contains(ev.Result.Content, "request_replan") {
+				t.Fatalf("unexpected replan result after cancel: %s", ev.Result.Content)
+			}
+		}
+	}
+	if !seenCancelled {
+		t.Fatal("expected turn_cancelled event")
+	}
+	msgs, _ := store.List(context.Background(), "s-tool-cancel")
+	last := msgs[len(msgs)-1]
+	if last.Role != RoleUser || !last.Hidden || last.FinishReason != FinishReasonCanceled || !strings.Contains(last.Text, "<turn_aborted>") {
+		t.Fatalf("expected hidden interrupt marker, got: %+v", last)
+	}
+}
+
 type repairAndStormProvider struct {
 	calls int
 }

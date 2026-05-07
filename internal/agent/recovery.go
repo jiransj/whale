@@ -77,12 +77,16 @@ func classifyToolFailure(res core.ToolResult, dispatchErr error) FailureClass {
 	}
 	if err := json.Unmarshal([]byte(res.Content), &env); err == nil {
 		switch strings.TrimSpace(env.Code) {
+		case "cancelled", "canceled":
+			return ""
 		case "timeout":
 			return FailureClassTimeout
 		case "exec_failed":
 			return FailureClassExecFailed
 		case "parse_failed", "invalid_args", "invalid_plan_update":
 			return FailureClassParseFailed
+		case "not_found", "read_failed", "permission_denied":
+			return ""
 		case "policy_denied":
 			return FailureClassPolicyDenied
 		case "approval_denied":

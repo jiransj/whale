@@ -13,6 +13,9 @@ func (a *Agent) dispatchWithRecovery(ctx context.Context, sessionID string, call
 	for {
 		attempt++
 		res, err := a.tools.Dispatch(ctx, call)
+		if ctx.Err() != nil {
+			return res, true
+		}
 		if err != nil {
 			res = core.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: err.Error(), IsError: true}
 		}

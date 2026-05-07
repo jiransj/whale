@@ -423,3 +423,50 @@ func TestRecoveryRequestReplanBuildsStructuredResult(t *testing.T) {
 		t.Fatalf("expected replan event/result, event=%v result=%v", sawReplanEvent, sawReplanResult)
 	}
 }
+
+type notFoundTool struct{}
+
+func (n notFoundTool) Name() string { return "read_file" }
+func (n notFoundTool) Run(_ context.Context, call ToolCall) (ToolResult, error) {
+	return ToolResult{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Content:    `{"success":false,"error":"missing file","code":"not_found"}`,
+		IsError:    true,
+	}, nil
+}
+
+func TestRecoveryDoesNotWrapExploratoryPathFailures(t *testing.T) {
+	store := NewInMemoryStore()
+	prov := &oneToolProvider{tool: "read_file", input: `{"file_path":"missing.txt"}`}
+	a := NewAgentWithRegistry(
+		prov,
+		store,
+		NewToolRegistry([]Tool{notFoundTool{}}),
+		WithToolPolicy(DefaultToolPolicy{Mode: ApprovalModeNever}),
+		WithRecoveryPolicy(DefaultRecoveryPolicy()),
+	)
+	events, err := a.RunStream(context.Background(), "s-not-found", "go")
+	if err != nil {
+		t.Fatalf("run stream failed: %v", err)
+	}
+	var sawNotFound bool
+	for ev := range events {
+		switch ev.Type {
+		case AgentEventTypeToolRecoveryExhausted, AgentEventTypeReplanRequiredSet:
+			t.Fatalf("unexpected recovery event for path failure: %s", ev.Type)
+		case AgentEventTypeToolResult:
+			if ev.Result != nil {
+				if strings.Contains(ev.Result.Content, "request_replan") {
+					t.Fatalf("unexpected replan result: %s", ev.Result.Content)
+				}
+				if strings.Contains(ev.Result.Content, `"code":"not_found"`) {
+					sawNotFound = true
+				}
+			}
+		}
+	}
+	if !sawNotFound {
+		t.Fatal("expected original not_found tool result")
+	}
+}

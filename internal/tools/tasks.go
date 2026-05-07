@@ -84,6 +84,7 @@ func (r *shellTaskRegistry) get(id string) (*shellTask, bool) {
 
 func runShellBackground(ctx context.Context, dir, command string, task *shellTask) {
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	configureShellCommand(cmd)
 	cmd.Dir = dir
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -98,8 +99,13 @@ func runShellBackground(ctx context.Context, dir, command string, task *shellTas
 	task.stdout = stdoutBuf.String()
 	task.stderr = stderrBuf.String()
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			task.status = "timeout"
+			task.exitCode = nil
+			return
+		}
+		if errors.Is(ctx.Err(), context.Canceled) {
+			task.status = "canceled"
 			task.exitCode = nil
 			return
 		}

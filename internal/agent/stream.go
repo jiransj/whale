@@ -339,6 +339,9 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 		}
 
 		finalRes, ok := a.dispatchWithRecovery(ctx, sessionID, call, events)
+		if err := ctx.Err(); err != nil {
+			return core.Message{}, nil, llm.Usage{}, "", false, err
+		}
 		if ok {
 			if !a.hooks.Empty() {
 				var toolArgs any
