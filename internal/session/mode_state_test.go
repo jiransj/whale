@@ -16,6 +16,20 @@ func TestModeStateSaveLoad(t *testing.T) {
 	}
 }
 
+func TestModeStateSaveLoadAsk(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveModeState(dir, "s1", ModeAsk); err != nil {
+		t.Fatalf("save mode failed: %v", err)
+	}
+	st, err := LoadModeState(dir, "s1")
+	if err != nil {
+		t.Fatalf("load mode failed: %v", err)
+	}
+	if st.Mode != ModeAsk {
+		t.Fatalf("expected ask mode, got %s", st.Mode)
+	}
+}
+
 func TestModeStateDefaultAgentWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	st, err := LoadModeState(dir, "missing")

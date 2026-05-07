@@ -236,22 +236,32 @@ func (m *model) syncModelEffortFromInfo(text string) {
 	switch strings.TrimSpace(text) {
 	case "Plan mode enabled":
 		m.chatMode = "plan"
-	case "Chat mode enabled":
-		m.chatMode = "chat"
+	case "Ask mode enabled":
+		m.chatMode = "ask"
+	case "Agent mode enabled":
+		m.chatMode = "agent"
 	}
 }
 
 func chatModeDisplay(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "ask":
+		return "ask"
 	case "plan":
 		return "plan"
 	default:
-		return "chat"
+		return "agent"
 	}
 }
 
 func visibleSubmittedText(value string) string {
 	trimmed := strings.TrimSpace(value)
+	if strings.HasPrefix(trimmed, "/ask ") {
+		payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/ask"))
+		if payload != "" {
+			return payload
+		}
+	}
 	if !strings.HasPrefix(trimmed, "/plan ") {
 		return value
 	}

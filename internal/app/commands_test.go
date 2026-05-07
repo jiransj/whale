@@ -71,6 +71,9 @@ func TestExpandUniqueSlashPrefix(t *testing.T) {
 	if got := expandUniqueSlashPrefix("/plan inspect"); got != "/plan inspect" {
 		t.Fatalf("commands with args should stay unchanged, got %q", got)
 	}
+	if got := expandUniqueSlashPrefix("/as"); got != "/ask" {
+		t.Fatalf("expected /ask, got %q", got)
+	}
 }
 
 func TestResolveCLIResumeID(t *testing.T) {
@@ -141,12 +144,20 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 		t.Fatal("expected /plan off usage error")
 	}
 
-	res, err = handleCommand("/agent", "cur", now)
+	res, err = handleCommand("/ask", "cur", now)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !res.Handled || res.Mode != "agent" {
-		t.Fatalf("unexpected /agent result: %+v", res)
+	if !res.Handled || res.Mode != "ask" {
+		t.Fatalf("unexpected /ask result: %+v", res)
+	}
+
+	res, err = handleCommand("/ask inspect the parser", "cur", now)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.Handled || res.Mode != "ask" || res.AskPrompt != "inspect the parser" {
+		t.Fatalf("unexpected /ask prompt result: %+v", res)
 	}
 
 	for _, old := range []string{"/step", "/checkpoint", "/continue", "/stop", "/revise add retry"} {

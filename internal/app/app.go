@@ -18,7 +18,7 @@ import (
 	"github.com/usewhale/whale/internal/tools"
 )
 
-const CommandsHelp = "/exit, /new [id], /clear, /resume, /status, /context, /model, /permissions, /plan [prompt], /compact, /init"
+const CommandsHelp = "/exit, /new [id], /clear, /resume, /status, /context, /model, /permissions, /ask [prompt], /plan [prompt], /compact, /init"
 
 type Config struct {
 	DataDir              string
@@ -263,10 +263,14 @@ func (a *App) SetMode(mode session.Mode) (string, error) {
 	return fmt.Sprintf("%s mode enabled", modeTitle(mode)), nil
 }
 func (a *App) ToggleMode() (string, error) {
-	if a.currentMode == session.ModePlan {
+	switch a.currentMode {
+	case session.ModeAgent:
+		return a.SetMode(session.ModeAsk)
+	case session.ModeAsk:
+		return a.SetMode(session.ModePlan)
+	default:
 		return a.SetMode(session.ModeAgent)
 	}
-	return a.SetMode(session.ModePlan)
 }
 func (a *App) SetApprovalMode(mode policy.ApprovalMode) {
 	a.approvalMode = mode

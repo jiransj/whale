@@ -1103,6 +1103,34 @@ func TestRuntimePlanModeBlocksNonReadOnlyTools(t *testing.T) {
 	}
 }
 
+func TestRuntimeAskModeBlocksNonReadOnlyTools(t *testing.T) {
+	a := agent.NewAgentWithRegistry(
+		&planWriteProvider{},
+		store.NewInMemoryStore(),
+		core.NewToolRegistry([]core.Tool{writeLikeTool{}}),
+		agent.WithSessionMode(session.ModeAsk),
+		agent.WithSessionsDir(t.TempDir()),
+	)
+
+	events, err := a.RunStream(context.Background(), "eval-ask-write-block", "go")
+	if err != nil {
+		t.Fatalf("run stream failed: %v", err)
+	}
+	var sawModeBlocked bool
+	var sawBlockedResult bool
+	for ev := range events {
+		if ev.Type == agent.AgentEventTypeToolModeBlocked && ev.ToolBlocked != nil && ev.ToolBlocked.ReasonCode == "ask_mode_blocked" {
+			sawModeBlocked = true
+		}
+		if ev.Type == agent.AgentEventTypeToolResult && ev.Result != nil && strings.Contains(ev.Result.Content, "ask_mode_blocked") {
+			sawBlockedResult = true
+		}
+	}
+	if !sawModeBlocked || !sawBlockedResult {
+		t.Fatalf("expected ask_mode_blocked event and result, got event=%v result=%v", sawModeBlocked, sawBlockedResult)
+	}
+}
+
 type autoCompactProvider struct {
 	histories [][]core.Message
 }

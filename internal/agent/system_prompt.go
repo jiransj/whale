@@ -19,6 +19,23 @@ func (a *Agent) buildImmutableSystemBlocks() []string {
 	systemBlocks := make([]string, 0, 2)
 	if a.mode == session.ModePlan {
 		systemBlocks = append(systemBlocks, planning.ModeInstructions())
+	} else if a.mode == session.ModeAsk {
+		systemBlocks = append(systemBlocks, strings.TrimSpace(`
+Ask mode is active.
+
+- Answer questions about the codebase, architecture, behavior, bugs, and possible changes.
+- You may use read-only tools, including file reads/search, read-only shell commands, and web lookup/fetch tools, when they help answer the question.
+- Do not modify files, do not call mutating tools, and do not act as though you are implementing changes right now.
+- If code changes are needed, explain them, summarize them, or outline them briefly instead of attempting to make them.
+`))
+	} else {
+		systemBlocks = append(systemBlocks, strings.TrimSpace(`
+Agent mode is active.
+
+- You have access to all tools, including read-only and write tools.
+- You may read, edit, and create files, run shell commands, and use all other available tools to accomplish the user's request.
+- When mode restrictions blocked a previous turn, you are no longer constrained by those restrictions — carry out the request fully.
+`))
 	}
 	if strings.TrimSpace(a.workspaceRoot) != "" {
 		systemBlocks = append(systemBlocks, "Current Whale workspace root: "+a.workspaceRoot+"\nShell commands run from this directory by default. Do not assume a synthetic path such as /workspace; use relative paths or the exec_shell cwd parameter for subdirectories.")

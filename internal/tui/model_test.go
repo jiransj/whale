@@ -141,6 +141,9 @@ func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
 	if !containsString(cmds, "/plan") {
 		t.Fatalf("expected /plan in slash commands: %+v", cmds)
 	}
+	if !containsString(cmds, "/ask") {
+		t.Fatalf("expected /ask in slash commands: %+v", cmds)
+	}
 	if containsString(cmds, "/approval") {
 		t.Fatalf("expected /approval to stay hidden from slash commands: %+v", cmds)
 	}
@@ -152,9 +155,6 @@ func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
 	}
 	if containsString(cmds, "/step") {
 		t.Fatalf("expected /step to stay hidden from slash commands: %+v", cmds)
-	}
-	if containsString(cmds, "/agent") {
-		t.Fatalf("expected /agent to stay hidden from slash commands: %+v", cmds)
 	}
 }
 
@@ -206,6 +206,9 @@ func TestMarkNoFinalAnswerIfNeededSkippedWithAssistant(t *testing.T) {
 }
 
 func TestVisibleSubmittedTextForPlanPrompt(t *testing.T) {
+	if got := visibleSubmittedText("/ask inspect the parser"); got != "inspect the parser" {
+		t.Fatalf("unexpected visible text for ask prompt: %q", got)
+	}
 	if got := visibleSubmittedText("/plan inspect the parser"); got != "inspect the parser" {
 		t.Fatalf("unexpected visible text: %q", got)
 	}
@@ -312,6 +315,27 @@ func TestSlashSuggestionPlanAutoRunsWhenSelected(t *testing.T) {
 	}
 	if !m.busy || m.status != "running" {
 		t.Fatalf("expected running state for /plan autorun, busy=%v status=%q", m.busy, m.status)
+	}
+}
+
+func TestSlashSuggestionAskAutoRunsWhenSelected(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.input.SetValue("/as")
+	m.updateSlashMatches()
+	selectSlashCommand(t, &m, "/ask")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected one dispatch for selected /ask, got %+v", *intents)
+	}
+	if (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != "/ask" {
+		t.Fatalf("unexpected dispatched intent: %+v", (*intents)[0])
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected input cleared after /ask autorun, got %q", got)
+	}
+	if !m.busy || m.status != "running" {
+		t.Fatalf("expected running state for /ask autorun, busy=%v status=%q", m.busy, m.status)
 	}
 }
 
@@ -584,6 +608,18 @@ func TestSummarizeToolResultForChat_Denied(t *testing.T) {
 	role, got := summarizeToolResultForChat("exec_shell", raw)
 	if role != "result_denied" || got != "DENIED · tool approval denied" {
 		t.Fatalf("unexpected denied summary: role=%q text=%q", role, got)
+	}
+}
+
+func TestSummarizeToolResultForChat_AskModeBlockedShowsProductCommands(t *testing.T) {
+	raw := `{"success":false,"code":"ask_mode_blocked","message":"tool unavailable in ask mode","summary":"Current mode: ask. Ask mode only allows read-only tools. To execute or modify files, switch to agent mode. To propose a reviewed approach first, switch to plan mode.","data":{"current_mode":"ask","suggested_modes":["agent","plan"]}}`
+	role, got := summarizeToolResultForChat("exec_shell", raw)
+	if role != "result_failed" {
+		t.Fatalf("expected result_failed role, got %q", role)
+	}
+	want := "✗ · Current mode: ask. Ask mode only allows read-only tools. To execute or modify files, switch to agent mode. To propose a reviewed approach first, switch to plan mode."
+	if got != want {
+		t.Fatalf("unexpected ask-mode summary:\nwant: %q\ngot:  %q", want, got)
 	}
 }
 
