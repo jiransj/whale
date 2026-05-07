@@ -109,6 +109,9 @@ if [ -z "$BIN_DIR" ]; then
   BIN_DIR="$(default_bin_dir)"
 fi
 
+if [ "$VERSION" = "latest" ]; then
+  printf '%s\n' "Resolving latest whale release..."
+fi
 RESOLVED_VERSION="$(resolve_version)"
 ASSET_NAME="whale-$OS-$ARCH"
 BASE_URL="https://github.com/$REPO_SLUG/releases/download/$RESOLVED_VERSION"
@@ -118,8 +121,10 @@ trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 ASSET_PATH="$TMPDIR/$ASSET_NAME"
 CHECKSUMS_PATH="$TMPDIR/checksums.txt"
 
-printf '%s\n' "Installing whale $RESOLVED_VERSION for $OS/$ARCH..."
+printf '%s\n' "Installing whale $RESOLVED_VERSION for $OS/$ARCH"
+printf '%s\n' "Downloading $ASSET_NAME..."
 curl -fsSL "$BASE_URL/$ASSET_NAME" -o "$ASSET_PATH"
+printf '%s\n' "Downloading checksums.txt..."
 curl -fsSL "$BASE_URL/checksums.txt" -o "$CHECKSUMS_PATH"
 
 EXPECTED_SUM="$(awk -v asset="$ASSET_NAME" '$2 == asset || $2 ~ "/"asset"$" {print $1}' "$CHECKSUMS_PATH")"
@@ -128,10 +133,12 @@ if [ -z "$EXPECTED_SUM" ]; then
   exit 1
 fi
 
+printf '%s\n' "Verifying checksum..."
 verify_checksum "$ASSET_PATH" "$EXPECTED_SUM"
+printf '%s\n' "Installing to $BIN_DIR/whale..."
 TARGET="$(install_binary "$ASSET_PATH" "$BIN_DIR")"
 
-printf '%s\n' "Installed to $TARGET"
+printf '%s\n' "Installed whale $RESOLVED_VERSION to $TARGET"
 "$TARGET" --version
 
 case ":$PATH:" in
