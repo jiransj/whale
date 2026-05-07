@@ -55,25 +55,18 @@ func (m model) View() string {
 	mainWidth, bodyHeight := m.layoutDims()
 	m.refreshViewportContent()
 	body := m.renderBody(mainWidth, bodyHeight)
-	status := lipgloss.NewStyle().Foreground(tuitheme.Default.StatusIdle).Render(m.status)
-	if m.busy {
-		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-		spin := frames[int(time.Now().UnixNano()/int64(120*time.Millisecond))%len(frames)]
-		label := "working"
-		if m.stopping {
-			label = "stopping"
-		}
-		status = lipgloss.NewStyle().Foreground(tuitheme.Default.Warn).Render(label + " " + spin)
-	}
-	footerText := "status: " + status + "  model: " + m.model + "  effort: " + m.effort + "  thinking: " + m.thinking
+	footerText := "model: " + m.model + "  effort: " + m.effort + "  thinking: " + m.thinking
 	if m.chatMode == "ask" || m.chatMode == "plan" {
 		footerText += "  mode: " + m.chatMode + " (Shift+Tab to switch)"
 	}
 	footer := lipgloss.JoinHorizontal(lipgloss.Left, footerText)
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if body != "" {
 		parts = append(parts, body)
 		parts = append(parts, "\n")
+	}
+	if statusLine := m.renderBusyStatusLine(mainWidth); statusLine != "" {
+		parts = append(parts, statusLine)
 	}
 	parts = append(parts, m.input.View(), footer)
 	view := strings.Join(parts, "\n")
@@ -139,6 +132,47 @@ func (m model) View() string {
 		view += "\n\n" + m.renderPermissionsPicker()
 	}
 	return view
+}
+
+func (m model) renderBusyStatusLine(width int) string {
+	if !m.busy {
+		return ""
+	}
+	label := "Working"
+	if m.stopping {
+		label = "Stopping"
+	}
+	line := fmt.Sprintf("%s (%s)", label, formatElapsedCompact(m.busyElapsed()))
+	return lipgloss.NewStyle().
+		Width(width).
+		Foreground(tuitheme.Default.Warn).
+		Render(line)
+}
+
+func (m model) busyElapsed() time.Duration {
+	if m.busySince.IsZero() {
+		return 0
+	}
+	return time.Since(m.busySince)
+}
+
+func formatElapsedCompact(elapsed time.Duration) string {
+	seconds := int(elapsed / time.Second)
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	if seconds < 3600 {
+		minutes := seconds / 60
+		remSeconds := seconds % 60
+		return fmt.Sprintf("%dm %02ds", minutes, remSeconds)
+	}
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	remSeconds := seconds % 60
+	return fmt.Sprintf("%dh %02dm %02ds", hours, minutes, remSeconds)
 }
 
 func resolveVersion() string {

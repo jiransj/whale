@@ -52,6 +52,7 @@ type model struct {
 	page               page
 	status             string
 	busy               bool
+	busySince          time.Time
 	stopping           bool
 	sidebar            bool
 	model              string
@@ -204,6 +205,18 @@ func busyTickCmd() tea.Cmd {
 	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return busyTickMsg{} })
 }
 
+func (m *model) startBusy() {
+	if m.busySince.IsZero() {
+		m.busySince = time.Now()
+	}
+	m.busy = true
+}
+
+func (m *model) stopBusy() {
+	m.busy = false
+	m.busySince = time.Time{}
+}
+
 // clearScreenCmd clears the visible terminal and scrollback buffer,
 // then forces a full TUI redraw. Uses ANSI \033[3J to clear scrollback
 // in addition to \033[H\033[2J (visible area).
@@ -237,7 +250,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(ev.Text) != "" {
 				m.sawAssistantThisTurn = true
 			}
-			m.busy = true
+			m.startBusy()
 			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventReasoningDelta:
 			m.append("think", ev.Text)
@@ -322,7 +335,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "session picker"
 		case service.EventTurnDone:
 			wasBusy := m.busy
-			m.busy = false
+			m.stopBusy()
 			m.stopping = false
 			m.markNoFinalAnswerIfNeeded()
 			eventCmd = m.commitLiveScrollbackCmd()
@@ -409,7 +422,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "shift+tab", "backtab":
 				if !m.busy && !m.hasSlashSuggestions() {
-					m.busy = true
+					m.startBusy()
 					m.status = "switching mode"
 					m.dispatchIntent(service.Intent{Kind: service.IntentToggleMode})
 					return m, busyTickCmd()
@@ -666,7 +679,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if m.planImplementation.index == 0 {
 					commitCmd := m.commitMessageScrollbackCmd("you", "Implement the plan.")
-					m.busy = true
+					m.startBusy()
 					m.status = "running"
 					m.chatMode = "agent"
 					m.dispatchIntent(service.Intent{Kind: service.IntentImplementPlan})
@@ -706,14 +719,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.SetValue(cmd)
 					m.updateSlashMatches()
 					if m.shouldAutoRunSlash(cmd) {
-						commitCmd := m.commitMessageScrollbackCmd("you", cmd)
+						m.append("you", cmd)
 						m.input.SetValue("")
 						m.slash.matches = nil
 						m.slash.selected = 0
-						m.busy = true
+						m.startBusy()
 						m.status = "running"
 						m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: cmd})
-						return m, tea.Sequence(commitCmd, busyTickCmd())
+						return m, busyTickCmd()
 					}
 				}
 				return m, nil
@@ -737,7 +750,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resetHistoryNavigation()
 			commitCmd := m.commitMessageScrollbackCmd("you", visibleSubmittedText(value))
 			m.input.SetValue("")
-			m.busy = true
+			m.startBusy()
 			m.status = "running"
 			m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value})
 			return m, tea.Sequence(commitCmd, busyTickCmd())

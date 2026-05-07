@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -632,6 +633,12 @@ func TestChatIdleViewDoesNotRenderEmptyViewportFrame(t *testing.T) {
 	if !strings.Contains(view, "Type message or command") {
 		t.Fatalf("expected composer placeholder in idle view:\n%s", view)
 	}
+	if strings.Contains(view, "status: ready") {
+		t.Fatalf("idle view should not render ready status in footer:\n%s", view)
+	}
+	if strings.Contains(view, "Working (") || strings.Contains(view, "Stopping (") {
+		t.Fatalf("idle view should not render busy status line:\n%s", view)
+	}
 }
 
 func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
@@ -648,6 +655,37 @@ func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 	}
 }
 
+func TestChatBusyViewShowsWorkingAboveComposer(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 24
+	m.startBusy()
+	m.busySince = time.Now().Add(-12 * time.Second)
+	view := m.View()
+	if !strings.Contains(view, "Working (12s)") {
+		t.Fatalf("expected working status line with elapsed time:\n%s", view)
+	}
+	if strings.Contains(view, "status: working") {
+		t.Fatalf("busy view should not render footer status:\n%s", view)
+	}
+	if strings.Index(view, "Working (12s)") > strings.Index(view, "Type message or command") {
+		t.Fatalf("working status line should appear above composer:\n%s", view)
+	}
+}
+
+func TestChatStoppingViewShowsStoppingAboveComposer(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 24
+	m.startBusy()
+	m.stopping = true
+	m.busySince = time.Now().Add(-(time.Minute + 5*time.Second))
+	view := m.View()
+	if !strings.Contains(view, "Stopping (1m 05s)") {
+		t.Fatalf("expected stopping status line with continued elapsed time:\n%s", view)
+	}
+}
+
 func TestChatLiveViewTruncatesLongOutput(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
@@ -659,6 +697,23 @@ func TestChatLiveViewTruncatesLongOutput(t *testing.T) {
 	}
 	if !strings.Contains(view, "Type message or command") {
 		t.Fatalf("expected composer to remain visible after truncating live output:\n%s", view)
+	}
+}
+
+func TestFormatElapsedCompact(t *testing.T) {
+	cases := []struct {
+		elapsed time.Duration
+		want    string
+	}{
+		{elapsed: 0, want: "0s"},
+		{elapsed: 12 * time.Second, want: "12s"},
+		{elapsed: time.Minute + 5*time.Second, want: "1m 05s"},
+		{elapsed: time.Hour + 2*time.Minute + 9*time.Second, want: "1h 02m 09s"},
+	}
+	for _, tc := range cases {
+		if got := formatElapsedCompact(tc.elapsed); got != tc.want {
+			t.Fatalf("formatElapsedCompact(%v) = %q, want %q", tc.elapsed, got, tc.want)
+		}
 	}
 }
 
