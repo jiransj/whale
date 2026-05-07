@@ -32,6 +32,8 @@ func (m *model) markNoFinalAnswerIfNeeded() bool {
 	}
 	if m.chatMode == "plan" {
 		m.appendNotice("No plan was produced. Ask the model to propose the plan again.")
+	} else {
+		m.appendNotice("No final answer was produced. Ask the model to answer directly or retry the last step.")
 	}
 	m.addLog(logEntry{
 		Kind:    "no_final_answer",

@@ -183,8 +183,15 @@ func TestMarkNoFinalAnswerIfNeeded(t *testing.T) {
 	if m.status != "" {
 		t.Fatalf("unexpected status: %q", m.status)
 	}
-	if got := len(m.assembler.Snapshot()); got != 0 {
-		t.Fatalf("expected no chat fallback entries, got %d", got)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected one notice entry, got %+v", snap)
+	}
+	if snap[0].Kind != tuirender.KindNotice || snap[0].Role != "notice" {
+		t.Fatalf("expected notice entry, got %+v", snap[0])
+	}
+	if !strings.Contains(snap[0].Text, "No final answer was produced") {
+		t.Fatalf("expected generic missing-answer notice, got %q", snap[0].Text)
 	}
 	if len(m.logs) != 1 || m.logs[0].Kind != "no_final_answer" {
 		t.Fatalf("expected diagnostic log entry, got %+v", m.logs)
