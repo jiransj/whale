@@ -8,7 +8,7 @@
 
 DeepSeek-native coding agent for the terminal.
 
-Whale is a local CLI/TUI coding agent designed around DeepSeek's prefix cache behavior, append-only turns, and a terminal-first workflow.
+Whale is a local CLI/TUI coding agent designed around DeepSeek's prefix cache(**90%** prefix-cache hit rate) behavior, append-only turns, and a terminal-first workflow. 
 
 ## Install
 

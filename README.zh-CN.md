@@ -8,7 +8,7 @@
 
 面向终端的 DeepSeek 原生编程代理。
 
-Whale 是一个本地 CLI/TUI 编程代理，围绕 DeepSeek 的前缀缓存行为、追加式 turn，以及终端优先工作流来设计。
+Whale 是一个本地 CLI/TUI 编程代理，围绕 DeepSeek 的前缀缓存行为（命中率为 90%）、追加式 turn，以及终端优先工作流来设计。
 
 ## 安装
 
