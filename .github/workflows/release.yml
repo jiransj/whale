@@ -72,13 +72,16 @@ jobs:
           VERSION: ${{ github.event.release.tag_name }}
         run: |
           mkdir -p dist
-          go build -ldflags "-X github.com/usewhale/whale/internal/build.Version=${VERSION}" -o "dist/${{ matrix.asset_name }}" ./cmd/whale
+          go build -trimpath -ldflags "-s -w -X github.com/usewhale/whale/internal/build.Version=${VERSION}" -o "dist/${{ matrix.asset_name }}" ./cmd/whale
+          tar -czf "dist/${{ matrix.asset_name }}.tar.gz" -C dist "${{ matrix.asset_name }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/${{ matrix.asset_name }}
+          path: |
+            dist/${{ matrix.asset_name }}
+            dist/${{ matrix.asset_name }}.tar.gz
 
   release:
     needs: build

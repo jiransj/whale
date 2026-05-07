@@ -114,27 +114,48 @@ if [ "$VERSION" = "latest" ]; then
 fi
 RESOLVED_VERSION="$(resolve_version)"
 ASSET_NAME="whale-$OS-$ARCH"
+ARCHIVE_NAME="$ASSET_NAME.tar.gz"
 BASE_URL="https://github.com/$REPO_SLUG/releases/download/$RESOLVED_VERSION"
 TMPDIR="$(mktemp -d 2>/dev/null || mktemp -d -t whale-install)"
 trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
 ASSET_PATH="$TMPDIR/$ASSET_NAME"
+ARCHIVE_PATH="$TMPDIR/$ARCHIVE_NAME"
 CHECKSUMS_PATH="$TMPDIR/checksums.txt"
+EXTRACT_DIR="$TMPDIR/extract"
 
 printf '%s\n' "Installing whale $RESOLVED_VERSION for $OS/$ARCH"
-printf '%s\n' "Downloading $ASSET_NAME..."
-curl -fsSL "$BASE_URL/$ASSET_NAME" -o "$ASSET_PATH"
+printf '%s\n' "Downloading $ARCHIVE_NAME..."
+if curl -fsL "$BASE_URL/$ARCHIVE_NAME" -o "$ARCHIVE_PATH"; then
+  DOWNLOAD_NAME="$ARCHIVE_NAME"
+  DOWNLOAD_PATH="$ARCHIVE_PATH"
+else
+  printf '%s\n' "Archive not found; downloading $ASSET_NAME..."
+  curl -fsSL "$BASE_URL/$ASSET_NAME" -o "$ASSET_PATH"
+  DOWNLOAD_NAME="$ASSET_NAME"
+  DOWNLOAD_PATH="$ASSET_PATH"
+fi
 printf '%s\n' "Downloading checksums.txt..."
 curl -fsSL "$BASE_URL/checksums.txt" -o "$CHECKSUMS_PATH"
 
-EXPECTED_SUM="$(awk -v asset="$ASSET_NAME" '$2 == asset || $2 ~ "/"asset"$" {print $1}' "$CHECKSUMS_PATH")"
+EXPECTED_SUM="$(awk -v asset="$DOWNLOAD_NAME" '$2 == asset || $2 ~ "/"asset"$" {print $1}' "$CHECKSUMS_PATH")"
 if [ -z "$EXPECTED_SUM" ]; then
-  printf '%s\n' "whale install: could not find checksum for $ASSET_NAME" >&2
+  printf '%s\n' "whale install: could not find checksum for $DOWNLOAD_NAME" >&2
   exit 1
 fi
 
 printf '%s\n' "Verifying checksum..."
-verify_checksum "$ASSET_PATH" "$EXPECTED_SUM"
+verify_checksum "$DOWNLOAD_PATH" "$EXPECTED_SUM"
+if [ "$DOWNLOAD_NAME" = "$ARCHIVE_NAME" ]; then
+  printf '%s\n' "Extracting $ARCHIVE_NAME..."
+  mkdir -p "$EXTRACT_DIR"
+  tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_DIR"
+  ASSET_PATH="$EXTRACT_DIR/$ASSET_NAME"
+  if [ ! -f "$ASSET_PATH" ]; then
+    printf '%s\n' "whale install: archive did not contain $ASSET_NAME" >&2
+    exit 1
+  fi
+fi
 printf '%s\n' "Installing to $BIN_DIR/whale..."
 TARGET="$(install_binary "$ASSET_PATH" "$BIN_DIR")"
 
