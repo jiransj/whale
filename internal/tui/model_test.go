@@ -564,39 +564,44 @@ func TestCommitLiveScrollbackClearsAssembler(t *testing.T) {
 	}
 }
 
-func TestAssistantDeltaCommitsStableLinesAndKeepsTailLive(t *testing.T) {
+func TestAssistantDeltaKeepsMultilineBlockLiveUntilBoundary(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
 	m.height = 24
-	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "stable line\nlive tail"}))
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "stable line\nlive tail"}))
 	m = next.(model)
-	if cmd == nil {
-		t.Fatal("expected stable line to be committed to scrollback")
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 || snap[0].Text != "stable line\nlive tail" {
+		t.Fatalf("expected newline-delimited assistant content to stay in one live message, got %+v", snap)
 	}
 	view := m.View()
-	if strings.Contains(view, "stable line") {
-		t.Fatalf("expected committed line to be removed from live view:\n%s", view)
+	if !strings.Contains(view, "stable line") {
+		t.Fatalf("expected first line to remain in the same live block:\n%s", view)
 	}
 	if !strings.Contains(view, "live tail") {
-		t.Fatalf("expected unfinished tail to remain live:\n%s", view)
+		t.Fatalf("expected tail to remain in the same live block:\n%s", view)
 	}
 }
 
-func TestCommitLiveScrollbackFlushesOnlyStreamTailAfterStableLines(t *testing.T) {
+func TestReasoningDeltaKeepsSingleThinkingCardAcrossNewlines(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
 	m.height = 24
-	next, firstCmd := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "stable line\nlive tail"}))
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventReasoningDelta, Text: "first thought\n\nsecond thought\nthird thought"}))
 	m = next.(model)
-	if firstCmd == nil {
-		t.Fatal("expected first stable line commit")
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 || snap[0].Role != "think" {
+		t.Fatalf("expected reasoning content to stay in one live thinking message, got %+v", snap)
 	}
-	cmd := m.commitLiveScrollbackCmd()
-	if cmd == nil {
-		t.Fatal("expected final tail commit")
+	lines := m.renderChatLines(80)
+	joined := strings.Join(lines, "\n")
+	if got := strings.Count(joined, "Thinking"); got != 1 {
+		t.Fatalf("expected one thinking card, got %d:\n%s", got, joined)
 	}
-	if got := m.assistantStream.tailMessage(); got != nil {
-		t.Fatalf("expected stream tail cleared after final commit, got %+v", got)
+	for _, want := range []string{"first thought", "second thought", "third thought"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected %q in thinking card:\n%s", want, joined)
+		}
 	}
 }
 
@@ -923,8 +928,16 @@ func TestSummarizeToolResultForChat_ShellOutputTruncated(t *testing.T) {
 	if role != "result_ok" {
 		t.Fatalf("expected result_ok role, got %q", role)
 	}
-	if !strings.Contains(got, "… +") {
-		t.Fatalf("expected truncated output marker, got: %q", got)
+	for _, want := range []string{"l1", "l2", "l13", "l14"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected compact output to keep %q, got: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "l3") || strings.Contains(got, "l12") {
+		t.Fatalf("expected middle output to be omitted, got: %q", got)
+	}
+	if !strings.Contains(got, "10 lines omitted; use /tool for full output") {
+		t.Fatalf("expected omitted output marker, got: %q", got)
 	}
 }
 

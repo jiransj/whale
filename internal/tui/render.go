@@ -39,7 +39,7 @@ func (m model) renderLiveArea(width, bodyHeight int) string {
 	if truncated {
 		prefix := lipgloss.NewStyle().
 			Foreground(tuitheme.Default.Muted).
-			Render("... live output truncated; streaming history has been added to scrollback")
+			Render("... live output truncated; full turn will be added to scrollback when complete")
 		lines = append([]string{prefix}, lines...)
 	}
 	return lipgloss.NewStyle().

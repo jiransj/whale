@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+const shellOutputPreviewLines = 6
+const shellOutputHeadLines = 2
+const shellOutputTailLines = 2
+const shellOutputLineRunes = 220
+
 func summarizeToolResultForChat(toolName, raw string) (string, string) {
 	body := strings.TrimSpace(raw)
 	if body == "" {
@@ -81,11 +86,49 @@ func summarizeShellResult(env toolResultEnvelope, successBySignal bool) (string,
 	if duration != "" {
 		parts = append(parts, duration)
 	}
-	output := truncateDisplayText(firstNonEmpty(asString(env.payload["stdout"]), asString(env.payload["stderr"])), 12)
+	output := summarizeShellOutput(firstNonEmpty(asString(env.payload["stdout"]), asString(env.payload["stderr"])))
 	if output != "" {
 		return "result_ok", strings.Join(parts, " · ") + "\n" + output
 	}
 	return "result_ok", strings.Join(parts, " · ")
+}
+
+func summarizeShellOutput(text string) string {
+	text = strings.TrimRight(text, "\n")
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	rawLines := strings.Split(text, "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		lines = append(lines, truncateShellOutputLine(strings.TrimRight(line, "\r")))
+	}
+	if len(lines) <= shellOutputPreviewLines {
+		return strings.Join(lines, "\n")
+	}
+	head := minInt(shellOutputHeadLines, len(lines))
+	tail := minInt(shellOutputTailLines, len(lines)-head)
+	omitted := len(lines) - head - tail
+	out := make([]string, 0, head+1+tail)
+	out = append(out, lines[:head]...)
+	out = append(out, fmt.Sprintf("... %d lines omitted; use /tool for full output", omitted))
+	out = append(out, lines[len(lines)-tail:]...)
+	return strings.Join(out, "\n")
+}
+
+func truncateShellOutputLine(line string) string {
+	runes := []rune(line)
+	if len(runes) <= shellOutputLineRunes {
+		return line
+	}
+	return string(runes[:shellOutputLineRunes]) + "..."
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func summarizeFailedResult(env toolResultEnvelope, fallback string) (string, string) {

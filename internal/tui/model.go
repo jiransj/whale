@@ -39,33 +39,30 @@ const (
 )
 
 type model struct {
-	svc             *service.Service
-	dispatch        func(service.Intent)
-	input           composer.Composer
-	viewport        viewport.Model
-	assembler       *tuirender.Assembler
-	logs            []logEntry
-	diffs           []diffEntry
-	width           int
-	height          int
-	mode            mode
-	page            page
-	status          string
-	busy            bool
-	busySince       time.Time
-	stopping        bool
-	sidebar         bool
-	model           string
-	effort          string
-	thinking        string
-	chatMode        string
-	product         string
-	version         string
-	cwd             string
-	assistantStream liveStream
-	reasoningStream liveStream
-	planStream      liveStream
-	approval        struct {
+	svc       *service.Service
+	dispatch  func(service.Intent)
+	input     composer.Composer
+	viewport  viewport.Model
+	assembler *tuirender.Assembler
+	logs      []logEntry
+	diffs     []diffEntry
+	width     int
+	height    int
+	mode      mode
+	page      page
+	status    string
+	busy      bool
+	busySince time.Time
+	stopping  bool
+	sidebar   bool
+	model     string
+	effort    string
+	thinking  string
+	chatMode  string
+	product   string
+	version   string
+	cwd       string
+	approval  struct {
 		toolCallID string
 		toolName   string
 		reason     string
@@ -178,7 +175,6 @@ func newModel(svc *service.Service, modelName, effort, thinking string) model {
 		cwd:            resolveWorkingDirectory(),
 		historyIndex:   -1,
 	}
-	m.initLiveStreams()
 	if svc != nil {
 		m.dispatch = svc.Dispatch
 	}
@@ -248,37 +244,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ev := service.Event(msg)
 		switch ev.Kind {
 		case service.EventAssistantDelta:
+			m.append("assistant", ev.Text)
 			m.addLog(logEntry{Kind: "assistant_delta", Source: "assistant", Summary: ev.Text, Raw: ev.Text})
 			if strings.TrimSpace(ev.Text) != "" {
 				m.sawAssistantThisTurn = true
 			}
 			m.startBusy()
-			eventCmd = m.pushStreamDelta("assistant", ev.Text)
 		case service.EventReasoningDelta:
+			m.append("think", ev.Text)
 			m.addLog(logEntry{Kind: "reasoning_delta", Source: "reasoning", Summary: ev.Text, Raw: ev.Text})
 			if strings.TrimSpace(ev.Text) != "" {
 				m.sawReasoningThisTurn = true
 			}
-			eventCmd = m.pushStreamDelta("think", ev.Text)
 		case service.EventPlanDelta:
+			m.appendPlanDelta(ev.Text)
 			m.addLog(logEntry{Kind: "plan_delta", Source: "plan", Summary: ev.Text, Raw: ev.Text})
 			if strings.TrimSpace(ev.Text) != "" {
 				m.sawPlanThisTurn = true
 			}
-			eventCmd = m.pushStreamDelta("plan", ev.Text)
 		case service.EventPlanCompleted:
 			if strings.TrimSpace(ev.Text) != "" {
-				m.initLiveStreams()
-				if m.planStream.hasCommitted {
-					eventCmd = m.flushStreamCmd("plan")
-				} else {
-					m.planStream.reset()
-					eventCmd = m.commitMessagesScrollbackCmd([]tuirender.UIMessage{{
-						Role: "plan",
-						Kind: tuirender.KindPlan,
-						Text: ev.Text,
-					}})
+				if m.assembler == nil {
+					m.assembler = tuirender.NewAssembler()
 				}
+				m.assembler.SetPlan(ev.Text)
+				eventCmd = m.commitLiveScrollbackCmd()
 				m.sawPlanThisTurn = true
 			}
 			m.addLog(logEntry{Kind: "plan_completed", Source: "plan", Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
@@ -301,7 +291,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog(logEntry{Kind: "error", Source: "system", Summary: ev.Text, Raw: ev.Text})
 			m.status = "error"
 		case service.EventToolCall:
-			eventCmd = m.flushAllStreamsCmd()
 			m.appendToolCall(ev.ToolCallID, ev.ToolName, ev.Text)
 			m.addLog(logEntry{
 				Kind:    "tool_call",
@@ -310,7 +299,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Raw:     fmt.Sprintf("id=%s\ninput=%s", ev.ToolCallID, ev.Text),
 			})
 		case service.EventToolResult:
-			eventCmd = m.flushAllStreamsCmd()
 			role, text := summarizeToolResultForChat(ev.ToolName, ev.Text)
 			if suppressesNoFinalAnswer(role) {
 				m.sawTerminalToolOutcomeThisTurn = true
@@ -321,9 +309,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog(logEntry{Kind: "tool_result", Source: ev.ToolName, Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
 			m.captureDiffMetadata(ev.ToolName, ev.Metadata)
 			m.captureDiff(ev.ToolName, ev.Text)
-			eventCmd = sequenceCmds(eventCmd, m.commitLiveScrollbackCmd())
+			eventCmd = m.commitLiveScrollbackCmd()
 		case service.EventApprovalRequired:
-			eventCmd = m.flushAllStreamsCmd()
 			m.mode = modeApproval
 			m.approval.toolCallID = ev.ToolCallID
 			m.approval.toolName = ev.ToolName
@@ -379,7 +366,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.permissionsPicker.index = indexOf(ev.ApprovalChoices, ev.CurrentApproval)
 		case service.EventClearScreen:
 			m.assembler.Reset()
-			m.resetLiveStreams()
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
@@ -391,7 +377,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Sequence(clearScreenCmd(), waitEventCmd(m.svc))
 		case service.EventSessionHydrated:
 			m.assembler.Reset()
-			m.resetLiveStreams()
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false

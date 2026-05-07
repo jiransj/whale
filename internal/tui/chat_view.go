@@ -359,10 +359,10 @@ func (m *model) refreshViewportContent() {
 }
 
 func (m model) renderChatLines(width int) []string {
-	messages := m.liveStreamMessages()
-	if m.assembler != nil {
-		messages = append(messages, m.assembler.Snapshot()...)
+	if m.assembler == nil {
+		return nil
 	}
+	messages := m.assembler.Snapshot()
 	if len(messages) == 0 {
 		return nil
 	}
@@ -376,14 +376,6 @@ func (m model) scrollbackText(messages []tuirender.UIMessage) string {
 
 func (m model) commitMessagesScrollbackCmd(messages []tuirender.UIMessage) tea.Cmd {
 	text := m.scrollbackText(messages)
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	return tea.Println(text + "\n")
-}
-
-func (m model) commitLinesScrollbackCmd(lines []string) tea.Cmd {
-	text := strings.TrimRight(strings.Join(lines, "\n"), "\n")
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -449,10 +441,10 @@ func (m model) busySubmitNoticeText() string {
 }
 
 func (m *model) commitLiveScrollbackCmd() tea.Cmd {
-	cmds := []tea.Cmd{m.flushAllStreamsCmd()}
 	if m.assembler != nil {
-		cmds = append(cmds, m.commitMessagesScrollbackCmd(m.assembler.Snapshot()))
+		cmd := m.commitMessagesScrollbackCmd(m.assembler.Snapshot())
 		m.assembler.Reset()
+		return cmd
 	}
-	return sequenceCmds(cmds...)
+	return nil
 }
