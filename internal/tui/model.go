@@ -522,7 +522,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "approved for session"
 				m.appendNotice(m.approvalNoticeText("allow_session"))
 				return m, nil
-			case "d", "esc":
+			case "d", "esc", "ctrl+c":
 				m.dispatchIntent(service.Intent{Kind: service.IntentDenyTool, ToolCallID: m.approval.toolCallID})
 				m.addLog(logEntry{Kind: "approval_deny", Source: m.approval.toolName, Summary: "deny", Raw: "deny"})
 				m.mode = modeChat
