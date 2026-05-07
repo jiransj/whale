@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour/ansi"
+	"github.com/muesli/termenv"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	gmrenderer "github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/util"
-	"github.com/muesli/termenv"
 )
 
 func boolPtr(v bool) *bool       { return &v }
