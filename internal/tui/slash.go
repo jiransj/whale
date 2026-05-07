@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	appcommands "github.com/usewhale/whale/internal/app/commands"
 	tuitheme "github.com/usewhale/whale/internal/tui/theme"
 )
 
@@ -44,7 +45,7 @@ func (m *model) updateSlashMatches() {
 		m.slash.selected = 0
 		return
 	}
-	if !strings.HasPrefix(raw, "/") {
+	if !appcommands.LooksLikeSlashCommand(raw) {
 		m.slash.matches = nil
 		m.slash.selected = 0
 		return

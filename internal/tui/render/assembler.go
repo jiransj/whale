@@ -104,6 +104,17 @@ func (a *Assembler) UpdateToolCall(toolCallID, text, role string) bool {
 	return true
 }
 
+func (a *Assembler) ToolCallText(toolCallID string) string {
+	if toolCallID == "" {
+		return ""
+	}
+	idx, ok := a.toolEntryByID[toolCallID]
+	if !ok || idx < 0 || idx >= len(a.messages) {
+		return ""
+	}
+	return a.messages[idx].Text
+}
+
 func (a *Assembler) AddPlanDelta(text string) {
 	t := strings.ReplaceAll(text, "\r\n", "\n")
 	if t == "" {

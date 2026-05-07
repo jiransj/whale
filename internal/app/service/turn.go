@@ -121,17 +121,25 @@ func summarizeToolCall(call core.ToolCall) string {
 		if path, _ := body["file_path"].(string); strings.TrimSpace(path) != "" {
 			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(path))
 		}
-	case "list_dir", "grep", "search_files":
+	case "list_dir":
 		if path, _ := body["path"].(string); strings.TrimSpace(path) != "" {
 			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(path))
+		}
+	case "grep", "search_content":
+		if detail := summarizeContentSearchCall(body); detail != "" {
+			return fmt.Sprintf("%s: %s", name, detail)
+		}
+	case "search_files":
+		if detail := summarizeFileSearchCall(body); detail != "" {
+			return fmt.Sprintf("%s: %s", name, detail)
 		}
 	case "read_file":
 		if path, _ := body["file_path"].(string); strings.TrimSpace(path) != "" {
 			return fmt.Sprintf("%s: %s", name, strings.TrimSpace(path))
 		}
 	case "web_search":
-		if q, _ := body["query"].(string); strings.TrimSpace(q) != "" {
-			return fmt.Sprintf("web_search: %s", strings.TrimSpace(q))
+		if query := summarizeWebSearchCall(body); query != "" {
+			return fmt.Sprintf("web_search: %s", query)
 		}
 	case "fetch", "web_fetch":
 		if u, _ := body["url"].(string); strings.TrimSpace(u) != "" {
@@ -148,6 +156,63 @@ func summarizeToolCall(call core.ToolCall) string {
 		return fmt.Sprintf("%s: %s", name, strings.TrimSpace(call.Input))
 	}
 	return name
+}
+
+func summarizeContentSearchCall(body map[string]any) string {
+	pattern := strings.TrimSpace(asString(body["pattern"]))
+	path := strings.TrimSpace(asString(body["path"]))
+	include := strings.TrimSpace(asString(body["include"]))
+	if pattern == "" {
+		return ""
+	}
+	return appendSearchScope(pattern, path, include)
+}
+
+func summarizeFileSearchCall(body map[string]any) string {
+	pattern := strings.TrimSpace(asString(body["pattern"]))
+	path := strings.TrimSpace(asString(body["path"]))
+	if pattern == "" {
+		return ""
+	}
+	return appendSearchScope(pattern, path, "")
+}
+
+func summarizeWebSearchCall(body map[string]any) string {
+	if query := strings.TrimSpace(asString(body["query"])); query != "" {
+		return query
+	}
+	if query := strings.TrimSpace(asString(body["q"])); query != "" {
+		return query
+	}
+	for _, entry := range asAnySlice(body["search_query"]) {
+		obj, _ := entry.(map[string]any)
+		if query := strings.TrimSpace(asString(obj["q"])); query != "" {
+			return query
+		}
+		if query := strings.TrimSpace(asString(obj["query"])); query != "" {
+			return query
+		}
+	}
+	return ""
+}
+
+func appendSearchScope(subject, path, include string) string {
+	detail := strings.TrimSpace(subject)
+	if detail == "" {
+		return ""
+	}
+	if strings.TrimSpace(path) != "" {
+		detail += " in " + strings.TrimSpace(path)
+	}
+	if strings.TrimSpace(include) != "" {
+		detail += " (" + strings.TrimSpace(include) + ")"
+	}
+	return detail
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func asAnySlice(v any) []any {

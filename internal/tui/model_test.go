@@ -266,6 +266,15 @@ func TestSlashSuggestionsShownForSingleLineSlash(t *testing.T) {
 	}
 }
 
+func TestSlashSuggestionsHiddenForAbsolutePathInput(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.input.SetValue("/Users/goranka/Engineer/ai/dsk 里有好几个go项目的，你看看它们怎么做的")
+	m.updateSlashMatches()
+	if len(m.slash.matches) != 0 {
+		t.Fatalf("expected slash suggestions hidden for absolute path prompt, got %+v", m.slash.matches)
+	}
+}
+
 func TestSlashSuggestionEnterAutoRunsSingleCommandAndClearsSuggestions(t *testing.T) {
 	m, intents := newModelWithDispatchSpy()
 	m.input.SetValue("/co")
@@ -722,6 +731,71 @@ func TestToolResultUpdatesToolCellWithoutRawJSON(t *testing.T) {
 	}
 	if strings.Contains(snap[0].Text, "payload") || strings.Contains(snap[0].Text, "package tui") {
 		t.Fatalf("tool cell must not expose raw json/content: %q", snap[0].Text)
+	}
+}
+
+func TestToolCallShowsSearchPatternAndPath(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-search",
+		ToolName:   "grep",
+		Text:       `grep: assistant_delta in internal/tui (*.go)`,
+	}))
+	m = next.(model)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected one tool cell, got %+v", snap)
+	}
+	want := "Exploring\nSearch assistant_delta in internal/tui (*.go)"
+	if snap[0].Text != want {
+		t.Fatalf("unexpected search tool call text:\nwant: %q\ngot:  %q", want, snap[0].Text)
+	}
+}
+
+func TestToolResultKeepsSearchDetailAndAddsSummary(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-search",
+		ToolName:   "grep",
+		Text:       `grep: assistant_delta in internal/tui (*.go)`,
+	}))
+	m = next.(model)
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"total_matches":1,"files_matched":1},"payload":{"matches":[]}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-search",
+		ToolName:   "grep",
+		Text:       raw,
+	}))
+	m = next.(model)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected one updated tool cell, got %+v", snap)
+	}
+	want := "Explored\nSearch assistant_delta in internal/tui (*.go)\n✓ · 1 matches in 1 files"
+	if snap[0].Text != want {
+		t.Fatalf("unexpected completed search cell:\nwant: %q\ngot:  %q", want, snap[0].Text)
+	}
+}
+
+func TestToolCallShowsWebSearchQuery(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-web",
+		ToolName:   "web_search",
+		Text:       `web_search: F1 pit strategy tools`,
+	}))
+	m = next.(model)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected one web search cell, got %+v", snap)
+	}
+	want := "Exploring\nSearch web for F1 pit strategy tools"
+	if snap[0].Text != want {
+		t.Fatalf("unexpected web search tool call text:\nwant: %q\ngot:  %q", want, snap[0].Text)
 	}
 }
 

@@ -62,7 +62,11 @@ func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, sum
 	if toolCallID == "" {
 		return false
 	}
-	title := completedToolTitle(toolName, result)
+	previous := ""
+	if m.assembler != nil {
+		previous = m.assembler.ToolCallText(toolCallID)
+	}
+	title := completedToolTitle(toolName, result, previous)
 	if summary != "" && summary != "✓" {
 		title += "\n" + summary
 	}
@@ -91,7 +95,7 @@ func summarizeToolCallForChat(toolName, text string) string {
 	}
 }
 
-func completedToolTitle(toolName, raw string) string {
+func completedToolTitle(toolName, raw, previous string) string {
 	env := parseToolEnvelope(raw)
 	switch toolDisplayKind(toolName) {
 	case "shell":
@@ -101,7 +105,7 @@ func completedToolTitle(toolName, raw string) string {
 		}
 		return "Ran " + cmd
 	case "explore":
-		return "Explored\n" + explorationLine(toolName, "", env)
+		return "Explored\n" + explorationLine(toolName, previousToolActionLine(previous), env)
 	case "edit":
 		return editLine(toolName, "", env)
 	default:
@@ -172,16 +176,67 @@ func explorationLine(toolName, fallback string, env toolResultEnvelope) string {
 		path := firstNonEmpty(asString(payload["path"]), asString(data["path"]), fallback, ".")
 		return "List " + path
 	case "search_files":
-		return "Search " + firstNonEmpty(fallback, "files")
+		return formatSearchActionLine(firstNonEmpty(searchDetailFromPayload(payload, data, ""), fallback), "files")
 	case "grep", "search_content":
-		return "Search " + firstNonEmpty(fallback, "content")
+		return formatSearchActionLine(firstNonEmpty(searchDetailFromPayload(payload, data, asString(payload["include"])), fallback), "content")
 	case "fetch", "web_fetch":
 		return "Fetch " + firstNonEmpty(asString(payload["url"]), asString(data["url"]), fallback, "url")
 	case "web_search":
+		query := firstNonEmpty(webSearchQueryFromMaps(payload, data), fallback)
+		if query != "" {
+			return "Search web for " + query
+		}
 		return "Search web"
 	default:
 		return "Run " + firstNonEmpty(fallback, toolName)
 	}
+}
+
+func searchDetailFromPayload(payload, data map[string]any, includeFallback string) string {
+	pattern := firstNonEmpty(asString(payload["pattern"]), asString(data["pattern"]))
+	path := firstNonEmpty(asString(payload["path"]), asString(data["path"]))
+	include := firstNonEmpty(asString(payload["include"]), asString(data["include"]), includeFallback)
+	return appendSearchDetail(pattern, path, include)
+}
+
+func webSearchQueryFromMaps(payload, data map[string]any) string {
+	return firstNonEmpty(asString(payload["query"]), asString(data["query"]))
+}
+
+func formatSearchActionLine(detail, fallback string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		detail = fallback
+	}
+	if strings.HasPrefix(detail, "Search ") {
+		return detail
+	}
+	return "Search " + detail
+}
+
+func appendSearchDetail(subject, path, include string) string {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return ""
+	}
+	if strings.TrimSpace(path) != "" {
+		subject += " in " + strings.TrimSpace(path)
+	}
+	if strings.TrimSpace(include) != "" {
+		subject += " (" + strings.TrimSpace(include) + ")"
+	}
+	return subject
+}
+
+func previousToolActionLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) >= 2 {
+		return strings.TrimSpace(lines[1])
+	}
+	if len(lines) == 1 {
+		return strings.TrimSpace(lines[0])
+	}
+	return ""
 }
 
 func editLine(toolName, fallback string, env toolResultEnvelope) string {

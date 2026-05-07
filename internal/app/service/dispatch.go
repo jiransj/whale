@@ -195,7 +195,7 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 		s.emit(Event{Kind: EventTurnDone, LastResponse: out})
 		return
 	}
-	if strings.HasPrefix(line, "/") {
+	if appcommands.LooksLikeSlashCommand(line) {
 		s.emit(Event{Kind: EventError, Text: fmt.Sprintf("• Unrecognized command %q. Type \"/\" for a list of supported commands.", line)})
 		s.emit(Event{Kind: EventTurnDone})
 		return

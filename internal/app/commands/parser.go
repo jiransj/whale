@@ -111,9 +111,24 @@ func AskPromptFromSlash(line string) (string, bool) {
 	return payload, true
 }
 
+func LooksLikeSlashCommand(line string) bool {
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "/") {
+		return false
+	}
+	head := line
+	if idx := strings.IndexAny(head, " \t"); idx >= 0 {
+		head = head[:idx]
+	}
+	if len(head) <= 1 {
+		return true
+	}
+	return !strings.Contains(head[1:], "/")
+}
+
 func ExpandUniqueSlashPrefix(line, help string, localCommands ...string) string {
 	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "/") || strings.Contains(line, " ") {
+	if !LooksLikeSlashCommand(line) || strings.Contains(line, " ") {
 		return line
 	}
 	commands := append(ParseSlashCommands(help), localCommands...)

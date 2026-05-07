@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appcommands "github.com/usewhale/whale/internal/app/commands"
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/store"
 )
@@ -73,6 +74,29 @@ func TestExpandUniqueSlashPrefix(t *testing.T) {
 	}
 	if got := expandUniqueSlashPrefix("/as"); got != "/ask" {
 		t.Fatalf("expected /ask, got %q", got)
+	}
+	if got := expandUniqueSlashPrefix("/Users/goranka/Engineer/ai/dsk"); got != "/Users/goranka/Engineer/ai/dsk" {
+		t.Fatalf("absolute path should stay unchanged, got %q", got)
+	}
+}
+
+func TestLooksLikeSlashCommand(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{line: "/", want: true},
+		{line: "/plan", want: true},
+		{line: "/plan inspect parser", want: true},
+		{line: "/Users/goranka/Engineer/ai/dsk", want: false},
+		{line: "/tmp/project 里有几个 go 项目", want: false},
+		{line: " /status", want: true},
+		{line: "inspect /tmp/project", want: false},
+	}
+	for _, tc := range cases {
+		if got := appcommands.LooksLikeSlashCommand(tc.line); got != tc.want {
+			t.Fatalf("LooksLikeSlashCommand(%q) = %v, want %v", tc.line, got, tc.want)
+		}
 	}
 }
 

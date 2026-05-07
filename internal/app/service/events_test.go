@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/usewhale/whale/internal/core"
 )
 
 func TestCriticalEventsDeliverAfterDeltaBackpressure(t *testing.T) {
@@ -134,5 +136,35 @@ func TestShouldSuppressCancelledTurnErrorOnlyForCancelledContext(t *testing.T) {
 	}
 	if shouldSuppressCancelledTurnError(ctx, fmt.Errorf("request failed: boom")) {
 		t.Fatal("did not expect unrelated errors to be suppressed")
+	}
+}
+
+func TestSummarizeToolCall_GrepShowsPatternPathAndInclude(t *testing.T) {
+	got := summarizeToolCall(core.ToolCall{
+		Name:  "grep",
+		Input: `{"pattern":"assistant_delta","path":"internal/tui","include":"*.go"}`,
+	})
+	if got != "grep: assistant_delta in internal/tui (*.go)" {
+		t.Fatalf("unexpected grep summary: %q", got)
+	}
+}
+
+func TestSummarizeToolCall_SearchFilesShowsPatternAndPath(t *testing.T) {
+	got := summarizeToolCall(core.ToolCall{
+		Name:  "search_files",
+		Input: `{"pattern":"markdown.go","path":"internal/tui"}`,
+	})
+	if got != "search_files: markdown.go in internal/tui" {
+		t.Fatalf("unexpected search_files summary: %q", got)
+	}
+}
+
+func TestSummarizeToolCall_WebSearchUsesNestedSearchQuery(t *testing.T) {
+	got := summarizeToolCall(core.ToolCall{
+		Name:  "web_search",
+		Input: `{"search_query":[{"q":"F1 pit strategy tools"}]}`,
+	})
+	if got != "web_search: F1 pit strategy tools" {
+		t.Fatalf("unexpected web_search summary: %q", got)
 	}
 }
