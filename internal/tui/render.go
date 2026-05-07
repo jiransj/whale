@@ -30,20 +30,16 @@ func (m model) renderLiveArea(width, bodyHeight int) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	committed := clampInt(m.liveCommittedLines, 0, len(lines))
-	if committed > 0 {
-		lines = lines[committed:]
-	}
 	maxLines := max(3, bodyHeight)
 	truncated := false
 	if len(lines) > maxLines {
 		truncated = true
 		lines = lines[len(lines)-maxLines:]
 	}
-	if truncated && committed == 0 {
+	if truncated {
 		prefix := lipgloss.NewStyle().
 			Foreground(tuitheme.Default.Muted).
-			Render("... live output truncated; full turn will be added to scrollback when complete")
+			Render("... live output truncated; streaming history has been added to scrollback")
 		lines = append([]string{prefix}, lines...)
 	}
 	return lipgloss.NewStyle().

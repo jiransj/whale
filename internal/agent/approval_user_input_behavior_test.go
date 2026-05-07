@@ -10,11 +10,13 @@ import (
 )
 
 type approvalProvider struct {
-	calls int
+	calls     int
+	histories [][]Message
 }
 
-func (p *approvalProvider) StreamResponse(_ context.Context, _ []Message, _ []Tool) <-chan ProviderEvent {
+func (p *approvalProvider) StreamResponse(_ context.Context, history []Message, _ []Tool) <-chan ProviderEvent {
 	p.calls++
+	p.histories = append(p.histories, append([]Message(nil), history...))
 	if p.calls == 1 {
 		return eventStream(toolUseEvent(toolCall("tc-w-1", "write", `{"file_path":"a.txt","content":"x"}`)))
 	}
@@ -136,6 +138,43 @@ func TestApprovalRequiredAndDenied(t *testing.T) {
 	if !sawDone {
 		t.Fatal("expected turn to finish after denied approval")
 	}
+	assertApprovalDeniedMarker(t, store, "s-approval-deny", "write")
+}
+
+func TestApprovalDeniedMarkerIsVisibleToNextTurn(t *testing.T) {
+	store := NewInMemoryStore()
+	prov := &approvalProvider{}
+	a := NewAgentWithRegistry(
+		prov,
+		store,
+		NewToolRegistry([]Tool{writeLikeTool{}}),
+		WithApprovalFunc(func(req ApprovalRequest) bool {
+			return false
+		}),
+	)
+
+	events, err := a.RunStream(context.Background(), "s-approval-deny-next", "do the denied task")
+	if err != nil {
+		t.Fatalf("first run stream failed: %v", err)
+	}
+	for range events {
+	}
+	events, err = a.RunStream(context.Background(), "s-approval-deny-next", "make build")
+	if err != nil {
+		t.Fatalf("second run stream failed: %v", err)
+	}
+	for range events {
+	}
+
+	if prov.calls != 2 {
+		t.Fatalf("expected provider calls=2, got %d", prov.calls)
+	}
+	if len(prov.histories) != 2 {
+		t.Fatalf("expected two provider histories, got %d", len(prov.histories))
+	}
+	if !historyContainsApprovalDeniedMarker(prov.histories[1], "write") {
+		t.Fatalf("expected second provider history to include approval-denied marker:\n%+v", prov.histories[1])
+	}
 }
 
 type multiToolApprovalProvider struct{}
@@ -178,6 +217,34 @@ func TestApprovalDeniedSkipsRemainingToolCalls(t *testing.T) {
 	if counting.calls != 0 {
 		t.Fatalf("expected later tool calls to be skipped after approval deny, got %d", counting.calls)
 	}
+	assertApprovalDeniedMarker(t, store, "s-approval-deny-multi", "write")
+}
+
+func assertApprovalDeniedMarker(t *testing.T, store interface {
+	List(context.Context, string) ([]Message, error)
+}, sessionID, toolName string) {
+	t.Helper()
+	msgs, err := store.List(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if !historyContainsApprovalDeniedMarker(msgs, toolName) {
+		t.Fatalf("expected approval-denied marker for %s in history:\n%+v", toolName, msgs)
+	}
+}
+
+func historyContainsApprovalDeniedMarker(msgs []Message, toolName string) bool {
+	for _, msg := range msgs {
+		if msg.Role != RoleUser || !msg.Hidden || msg.FinishReason != FinishReasonCanceled {
+			continue
+		}
+		if strings.Contains(msg.Text, "<approval_denied>") &&
+			strings.Contains(msg.Text, "tool: "+toolName) &&
+			strings.Contains(msg.Text, "Do not retry or continue") {
+			return true
+		}
+	}
+	return false
 }
 
 type approvalCacheProvider struct {

@@ -359,10 +359,14 @@ func (m *model) refreshViewportContent() {
 }
 
 func (m model) renderChatLines(width int) []string {
-	if m.assembler == nil {
+	messages := m.liveStreamMessages()
+	if m.assembler != nil {
+		messages = append(messages, m.assembler.Snapshot()...)
+	}
+	if len(messages) == 0 {
 		return nil
 	}
-	return tuirender.ChatLines(m.assembler.Snapshot(), width)
+	return tuirender.ChatLines(messages, width)
 }
 
 func (m model) scrollbackText(messages []tuirender.UIMessage) string {
@@ -445,74 +449,10 @@ func (m model) busySubmitNoticeText() string {
 }
 
 func (m *model) commitLiveScrollbackCmd() tea.Cmd {
-	if m.assembler == nil {
-		m.resetLiveCommitState()
-		return nil
+	cmds := []tea.Cmd{m.flushAllStreamsCmd()}
+	if m.assembler != nil {
+		cmds = append(cmds, m.commitMessagesScrollbackCmd(m.assembler.Snapshot()))
+		m.assembler.Reset()
 	}
-	lines := m.renderChatLines(m.chatRenderWidth())
-	committed := clampInt(m.liveCommittedLines, 0, len(lines))
-	cmd := m.commitLinesScrollbackCmd(lines[committed:])
-	m.assembler.Reset()
-	m.resetLiveCommitState()
-	return cmd
-}
-
-func (m *model) commitOverflowLiveScrollbackCmd() tea.Cmd {
-	if m.assembler == nil || len(m.livePendingTools) > 0 {
-		return nil
-	}
-	width := m.chatRenderWidth()
-	if m.liveCommittedLines > 0 && m.liveCommitWidth != width {
-		return nil
-	}
-	lines := m.renderChatLines(width)
-	committed := clampInt(m.liveCommittedLines, 0, len(lines))
-	retain := m.liveRetainLines()
-	if len(lines)-committed <= retain {
-		return nil
-	}
-	targetCommit := len(lines) - retain
-	if targetCommit <= committed {
-		return nil
-	}
-	if m.liveCommitWidth == 0 {
-		m.liveCommitWidth = width
-	}
-	cmd := m.commitLinesScrollbackCmd(lines[committed:targetCommit])
-	if cmd == nil {
-		return nil
-	}
-	m.liveCommittedLines = targetCommit
-	return cmd
-}
-
-func (m model) liveRetainLines() int {
-	_, bodyHeight := m.layoutDims()
-	return max(24, bodyHeight*2)
-}
-
-func (m *model) trackPendingTool(toolCallID string) {
-	if toolCallID == "" {
-		return
-	}
-	if m.livePendingTools == nil {
-		m.livePendingTools = map[string]bool{}
-	}
-	m.livePendingTools[toolCallID] = true
-}
-
-func (m *model) untrackPendingTool(toolCallID string) {
-	if toolCallID == "" || m.livePendingTools == nil {
-		return
-	}
-	delete(m.livePendingTools, toolCallID)
-	if len(m.livePendingTools) == 0 {
-		m.livePendingTools = nil
-	}
-}
-
-func (m *model) resetLiveCommitState() {
-	m.liveCommittedLines = 0
-	m.liveCommitWidth = 0
-	m.livePendingTools = nil
+	return sequenceCmds(cmds...)
 }

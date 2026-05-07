@@ -305,6 +305,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 				if err != nil {
 					return core.Message{}, nil, llm.Usage{}, "", false, fmt.Errorf("create tool message: %w", err)
 				}
+				a.persistApprovalDeniedMarker(sessionID, call.Name)
 				return assistant, &toolMsg, lastUsage, lastModel, true, nil
 			}
 		}

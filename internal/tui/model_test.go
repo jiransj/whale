@@ -469,10 +469,13 @@ func TestPlanCompletedReplacesPartialPlanAndTurnDoneShowsPicker(t *testing.T) {
 	}
 	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventPlanDelta, Text: "partial"}))
 	m = next.(model)
-	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: "complete final plan"}))
+	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: "complete final plan"}))
 	m = next.(model)
-	if snap := m.assembler.Snapshot(); len(snap) != 1 || snap[0].Text != "complete final plan" {
-		t.Fatalf("expected complete plan to replace partial plan before commit, got %+v", snap)
+	if cmd == nil {
+		t.Fatal("expected completed plan to be committed to scrollback")
+	}
+	if snap := m.assembler.Snapshot(); len(snap) != 0 {
+		t.Fatalf("expected completed plan to leave live assembler empty, got %+v", snap)
 	}
 	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "done"}))
 	m = next.(model)
@@ -518,10 +521,13 @@ func TestPlanCompletedWithoutDeltasStillRendersPlan(t *testing.T) {
 		busy:      true,
 	}
 	plan := strings.Repeat("final plan\n", 100)
-	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: plan}))
+	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: plan}))
 	m = next.(model)
-	if snap := m.assembler.Snapshot(); len(snap) != 1 || !strings.Contains(snap[0].Text, "final plan") {
-		t.Fatalf("expected final plan rendered from completion event before commit, got %+v", snap)
+	if cmd == nil {
+		t.Fatal("expected final plan to be committed to scrollback")
+	}
+	if snap := m.assembler.Snapshot(); len(snap) != 0 {
+		t.Fatalf("expected final plan to leave live assembler empty, got %+v", snap)
 	}
 	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "done"}))
 	m = next.(model)
@@ -556,65 +562,41 @@ func TestCommitLiveScrollbackClearsAssembler(t *testing.T) {
 	if got := len(m.assembler.Snapshot()); got != 0 {
 		t.Fatalf("expected live assembler cleared after commit, got %d entries", got)
 	}
-	if m.liveCommittedLines != 0 || m.liveCommitWidth != 0 || m.livePendingTools != nil {
-		t.Fatalf("expected live commit state reset, got lines=%d width=%d pending=%v", m.liveCommittedLines, m.liveCommitWidth, m.livePendingTools)
-	}
 }
 
-func TestCommitLiveScrollbackSkipsAlreadyCommittedLines(t *testing.T) {
-	m := model{assembler: tuirender.NewAssembler(), width: 80, height: 24}
-	m.append("assistant", "streamed answer")
-	m.liveCommittedLines = 1
-	m.liveCommitWidth = 78
-	m.livePendingTools = map[string]bool{"tool": true}
-	cmd := m.commitLiveScrollbackCmd()
-	if cmd != nil {
-		t.Fatalf("expected no remainder command after all lines were already committed")
-	}
-	if got := len(m.assembler.Snapshot()); got != 0 {
-		t.Fatalf("expected live assembler cleared after commit, got %d entries", got)
-	}
-	if m.liveCommittedLines != 0 || m.liveCommitWidth != 0 || m.livePendingTools != nil {
-		t.Fatalf("expected live commit state reset, got lines=%d width=%d pending=%v", m.liveCommittedLines, m.liveCommitWidth, m.livePendingTools)
-	}
-}
-
-func TestCommitOverflowLiveScrollbackAdvancesCursor(t *testing.T) {
+func TestAssistantDeltaCommitsStableLinesAndKeepsTailLive(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
-	m.height = 8
-	m.append("assistant", "```\n"+strings.Repeat("line\n", 80)+"```")
-	cmd := m.commitOverflowLiveScrollbackCmd()
+	m.height = 24
+	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "stable line\nlive tail"}))
+	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected overflow scrollback command")
-	}
-	if m.liveCommittedLines <= 0 {
-		t.Fatalf("expected committed line cursor to advance, got %d", m.liveCommittedLines)
+		t.Fatal("expected stable line to be committed to scrollback")
 	}
 	view := m.View()
-	if strings.Contains(view, "live output truncated") {
-		t.Fatalf("expected progressively committed output to avoid stale truncation marker:\n%s", view)
+	if strings.Contains(view, "stable line") {
+		t.Fatalf("expected committed line to be removed from live view:\n%s", view)
 	}
-	if !strings.Contains(view, "Type message or command") {
-		t.Fatalf("expected composer to remain visible after live commit:\n%s", view)
+	if !strings.Contains(view, "live tail") {
+		t.Fatalf("expected unfinished tail to remain live:\n%s", view)
 	}
 }
 
-func TestCommitOverflowLiveScrollbackWaitsForPendingTool(t *testing.T) {
+func TestCommitLiveScrollbackFlushesOnlyStreamTailAfterStableLines(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
-	m.height = 8
-	m.trackPendingTool("tool-1")
-	m.append("assistant", "```\n"+strings.Repeat("line\n", 80)+"```")
-	if cmd := m.commitOverflowLiveScrollbackCmd(); cmd != nil {
-		t.Fatal("expected no progressive commit while a tool call is pending")
+	m.height = 24
+	next, firstCmd := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "stable line\nlive tail"}))
+	m = next.(model)
+	if firstCmd == nil {
+		t.Fatal("expected first stable line commit")
 	}
-	if m.liveCommittedLines != 0 {
-		t.Fatalf("expected committed cursor to stay at zero, got %d", m.liveCommittedLines)
+	cmd := m.commitLiveScrollbackCmd()
+	if cmd == nil {
+		t.Fatal("expected final tail commit")
 	}
-	m.untrackPendingTool("tool-1")
-	if cmd := m.commitOverflowLiveScrollbackCmd(); cmd == nil {
-		t.Fatal("expected progressive commit after pending tool completes")
+	if got := m.assistantStream.tailMessage(); got != nil {
+		t.Fatalf("expected stream tail cleared after final commit, got %+v", got)
 	}
 }
 
@@ -740,7 +722,7 @@ func TestToolResultShowsDiffMetadata(t *testing.T) {
 		Text:       `edit: a.txt`,
 	}))
 	m = next.(model)
-	next, _ = m.Update(svcMsg(service.Event{
+	next, cmd := m.Update(svcMsg(service.Event{
 		Kind:       service.EventToolResult,
 		ToolCallID: "tc-1",
 		ToolName:   "edit",
@@ -748,12 +730,12 @@ func TestToolResultShowsDiffMetadata(t *testing.T) {
 		Metadata:   testFileDiffMetadata(),
 	}))
 	m = next.(model)
-	snap := m.assembler.Snapshot()
-	if len(snap) != 1 {
-		t.Fatalf("expected updated tool call, got %+v", snap)
+	if cmd == nil {
+		t.Fatal("expected completed tool cell to be committed to scrollback")
 	}
-	if !strings.Contains(snap[0].Text, "```diff") || !strings.Contains(snap[0].Text, "+whale") {
-		t.Fatalf("expected diff metadata in tool result:\n%s", snap[0].Text)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 0 {
+		t.Fatalf("expected completed tool cell to leave live assembler empty, got %+v", snap)
 	}
 	if got := strings.Join(m.renderDiffs(), "\n"); !strings.Contains(got, "+whale") {
 		t.Fatalf("expected /diff content from metadata:\n%s", got)
@@ -951,17 +933,14 @@ func TestToolResultUpdatesToolCellWithoutRawJSON(t *testing.T) {
 	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventToolCall, ToolCallID: "tc-1", ToolName: "read_file", Text: `read_file: {"file_path":"internal/tui/model.go"}`}))
 	m = next.(model)
 	raw := `{"success":true,"data":{"status":"ok","metrics":{"returned_lines":24,"total_lines":100},"payload":{"file_path":"internal/tui/model.go","content":"package tui"}}}`
-	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventToolResult, ToolCallID: "tc-1", ToolName: "read_file", Text: raw}))
+	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventToolResult, ToolCallID: "tc-1", ToolName: "read_file", Text: raw}))
 	m = next.(model)
+	if cmd == nil {
+		t.Fatal("expected completed read cell to be committed to scrollback")
+	}
 	snap := m.assembler.Snapshot()
-	if len(snap) != 1 {
-		t.Fatalf("expected one updated tool cell, got %+v", snap)
-	}
-	if !strings.Contains(snap[0].Text, "Explored") || !strings.Contains(snap[0].Text, "Read internal/tui/model.go") {
-		t.Fatalf("expected codex-style read summary, got: %q", snap[0].Text)
-	}
-	if strings.Contains(snap[0].Text, "payload") || strings.Contains(snap[0].Text, "package tui") {
-		t.Fatalf("tool cell must not expose raw json/content: %q", snap[0].Text)
+	if len(snap) != 0 {
+		t.Fatalf("expected completed read cell to leave live assembler empty, got %+v", snap)
 	}
 }
 
@@ -994,20 +973,19 @@ func TestToolResultKeepsSearchDetailAndAddsSummary(t *testing.T) {
 	}))
 	m = next.(model)
 	raw := `{"success":true,"data":{"status":"ok","metrics":{"total_matches":1,"files_matched":1},"payload":{"matches":[]}}}`
-	next, _ = m.Update(svcMsg(service.Event{
+	next, cmd := m.Update(svcMsg(service.Event{
 		Kind:       service.EventToolResult,
 		ToolCallID: "tc-search",
 		ToolName:   "grep",
 		Text:       raw,
 	}))
 	m = next.(model)
-	snap := m.assembler.Snapshot()
-	if len(snap) != 1 {
-		t.Fatalf("expected one updated tool cell, got %+v", snap)
+	if cmd == nil {
+		t.Fatal("expected completed search cell to be committed to scrollback")
 	}
-	want := "Explored\nSearch assistant_delta in internal/tui (*.go)\n✓ · 1 matches in 1 files"
-	if snap[0].Text != want {
-		t.Fatalf("unexpected completed search cell:\nwant: %q\ngot:  %q", want, snap[0].Text)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 0 {
+		t.Fatalf("expected completed search cell to leave live assembler empty, got %+v", snap)
 	}
 }
 
