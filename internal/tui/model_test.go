@@ -191,6 +191,27 @@ func TestMarkNoFinalAnswerIfNeeded(t *testing.T) {
 	}
 }
 
+func TestMarkNoFinalAnswerIfNeededAddsPlanNotice(t *testing.T) {
+	m := model{
+		assembler:            tuirender.NewAssembler(),
+		chatMode:             "plan",
+		sawReasoningThisTurn: true,
+	}
+	if !m.markNoFinalAnswerIfNeeded() {
+		t.Fatal("expected no-final-answer status to be marked")
+	}
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected one notice entry, got %+v", snap)
+	}
+	if snap[0].Kind != tuirender.KindNotice || snap[0].Role != "notice" {
+		t.Fatalf("expected notice entry, got %+v", snap[0])
+	}
+	if !strings.Contains(snap[0].Text, "No plan was produced") {
+		t.Fatalf("expected missing-plan notice, got %q", snap[0].Text)
+	}
+}
+
 func TestMarkNoFinalAnswerIfNeededSkippedWithAssistant(t *testing.T) {
 	m := model{
 		assembler:            tuirender.NewAssembler(),

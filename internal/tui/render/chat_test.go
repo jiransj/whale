@@ -89,6 +89,55 @@ func TestMarkdown_NarrowWidthFallback(t *testing.T) {
 	}
 }
 
+func TestMarkdown_TableBareURLDoesNotDuplicate(t *testing.T) {
+	input := "| 项目 | 地址 |\n|---|---|\n| A | https://example.com |\n"
+	got := Markdown(input, 80, false)
+	if strings.Count(got, "https://example.com") != 1 {
+		t.Fatalf("expected bare URL once, got: %q", got)
+	}
+}
+
+func TestMarkdown_TableSelfLinkDoesNotDuplicate(t *testing.T) {
+	input := "| 项目 | 地址 |\n|---|---|\n| A | [https://example.com](https://example.com) |\n"
+	got := Markdown(input, 80, false)
+	if strings.Count(got, "https://example.com") != 1 {
+		t.Fatalf("expected self link once, got: %q", got)
+	}
+}
+
+func TestMarkdown_ExplicitLinkShowsTextAndURL(t *testing.T) {
+	input := "[示例](https://example.com)"
+	got := Markdown(input, 80, false)
+	if !strings.Contains(got, "示例") || !strings.Contains(got, "https://example.com") {
+		t.Fatalf("expected link text and URL, got: %q", got)
+	}
+	if !strings.Contains(got, "示例 (https://example.com)") {
+		t.Fatalf("expected terminal link format, got: %q", got)
+	}
+}
+
+func TestMarkdown_CodeBlockKeepsLinksLiteral(t *testing.T) {
+	input := "```md\n[示例](https://example.com)\nhttps://example.com\n```"
+	got := Markdown(input, 80, false)
+	if strings.Count(got, "https://example.com") != 2 {
+		t.Fatalf("expected code block links preserved literally, got: %q", got)
+	}
+	if !strings.Contains(got, "[示例](https://example.com)") {
+		t.Fatalf("expected markdown link preserved in code block, got: %q", got)
+	}
+}
+
+func TestMarkdown_InlineCodeKeepsLinksLiteral(t *testing.T) {
+	input := "`[示例](https://example.com)` and `https://example.com`"
+	got := Markdown(input, 80, false)
+	if !strings.Contains(got, "[示例](https://example.com)") {
+		t.Fatalf("expected inline markdown link preserved, got: %q", got)
+	}
+	if strings.Contains(got, "示例 (https://example.com)") {
+		t.Fatalf("did not expect inline code link to be rewritten, got: %q", got)
+	}
+}
+
 func TestChatLines_ChineseParagraphAndList_NoCollapsedList(t *testing.T) {
 	entries := []UIMessage{
 		{
