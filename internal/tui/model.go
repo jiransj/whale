@@ -69,6 +69,7 @@ type model struct {
 		toolCallID string
 		toolName   string
 		reason     string
+		metadata   map[string]any
 		selected   int
 	}
 	sessionChoices []string
@@ -307,10 +308,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if suppressesNoFinalAnswer(role) {
 				m.sawTerminalToolOutcomeThisTurn = true
 			}
-			if !m.updateToolCallFromResult(ev.ToolCallID, ev.ToolName, ev.Text, role, text) {
+			if !m.updateToolCallFromResult(ev.ToolCallID, ev.ToolName, ev.Text, role, text, ev.Metadata) {
 				m.assembler.AddToolResultWithRole("", text, role)
 			}
 			m.addLog(logEntry{Kind: "tool_result", Source: ev.ToolName, Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
+			m.captureDiffMetadata(ev.ToolName, ev.Metadata)
 			m.captureDiff(ev.ToolName, ev.Text)
 			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventApprovalRequired:
@@ -318,6 +320,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.approval.toolCallID = ev.ToolCallID
 			m.approval.toolName = ev.ToolName
 			m.approval.reason = ev.Text
+			m.approval.metadata = ev.Metadata
 			m.approval.selected = 0
 			m.addLog(logEntry{Kind: "approval_required", Source: ev.ToolName, Summary: ev.Text, Raw: ev.Text})
 			m.status = "approval required"
@@ -719,6 +722,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.stopping {
 					m.status = "stopping"
 				}
+				m.appendNotice(m.busySubmitNoticeText())
+				m.input.Reset()
 				return m, nil
 			}
 			if m.hasSlashSuggestions() {

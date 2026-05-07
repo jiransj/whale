@@ -67,7 +67,7 @@ func (m *model) appendToolCall(toolCallID, toolName, text string) {
 	m.assembler.AddToolCall(toolCallID, summarizeToolCallForChat(toolName, text))
 }
 
-func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, summary string) bool {
+func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, summary string, metadata map[string]any) bool {
 	if toolCallID == "" {
 		return false
 	}
@@ -78,6 +78,9 @@ func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, sum
 	title := completedToolTitle(toolName, result, previous)
 	if summary != "" && summary != "✓" {
 		title += "\n" + summary
+	}
+	if diff := renderFileDiffMetadataMarkdown(metadata, 80); diff != "" && role == "result_ok" {
+		title += "\n\n" + diff
 	}
 	return m.assembler.UpdateToolCall(toolCallID, title, role)
 }
@@ -432,6 +435,13 @@ func (m model) turnInterruptedNoticeText() string {
 		Foreground(tuitheme.Default.Error).
 		Bold(true).
 		Render("■ Conversation interrupted - tell the model what to do differently.")
+}
+
+func (m model) busySubmitNoticeText() string {
+	return lipgloss.NewStyle().
+		Foreground(tuitheme.Default.Warn).
+		Bold(true).
+		Render("■ Agent is working, please wait...")
 }
 
 func (m *model) commitLiveScrollbackCmd() tea.Cmd {
