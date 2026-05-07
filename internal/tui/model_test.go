@@ -220,6 +220,20 @@ func TestMarkNoFinalAnswerIfNeededAddsPlanNotice(t *testing.T) {
 	}
 }
 
+func TestMarkNoFinalAnswerIfNeededSkippedWithTerminalToolOutcome(t *testing.T) {
+	m := model{
+		assembler:                      tuirender.NewAssembler(),
+		sawReasoningThisTurn:           true,
+		sawTerminalToolOutcomeThisTurn: true,
+	}
+	if m.markNoFinalAnswerIfNeeded() {
+		t.Fatal("did not expect no-final-answer status after terminal tool outcome")
+	}
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("expected no chat entries, got %d", got)
+	}
+}
+
 func TestMarkNoFinalAnswerIfNeededSkippedWithAssistant(t *testing.T) {
 	m := model{
 		assembler:            tuirender.NewAssembler(),
@@ -788,6 +802,34 @@ func TestSummarizeToolResultForChat_Canceled(t *testing.T) {
 	role, got := summarizeToolResultForChat("exec_shell", raw)
 	if role != "result_canceled" || got != "CANCELED" {
 		t.Fatalf("unexpected canceled summary: role=%q text=%q", role, got)
+	}
+}
+
+func TestToolDeniedDoesNotAddNoFinalAnswerNotice(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 80, height: 24, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventReasoningDelta, Text: "I should edit the file."}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-1",
+		ToolName:   "edit",
+		Text:       `edit: internal/tui/model.go`,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-1",
+		ToolName:   "edit",
+		Text:       `{"success":false,"code":"approval_denied","message":"tool approval denied"}`,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+	snap := m.assembler.Snapshot()
+	for _, entry := range snap {
+		if strings.Contains(entry.Text, "No final answer was produced") {
+			t.Fatalf("unexpected no-final-answer notice after tool denial: %+v", snap)
+		}
 	}
 }
 

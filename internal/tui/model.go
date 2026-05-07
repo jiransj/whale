@@ -109,15 +109,16 @@ type model struct {
 	planImplementation struct {
 		index int
 	}
-	sawPlanThisTurn      bool
-	sawAssistantThisTurn bool
-	sawReasoningThisTurn bool
-	quitArmedUntil       time.Time
-	promptHistory        []string
-	historyIndex         int
-	historyDraft         string
-	lastHistoryText      string
-	inHistoryNav         bool
+	sawPlanThisTurn                bool
+	sawAssistantThisTurn           bool
+	sawReasoningThisTurn           bool
+	sawTerminalToolOutcomeThisTurn bool
+	quitArmedUntil                 time.Time
+	promptHistory                  []string
+	historyIndex                   int
+	historyDraft                   string
+	lastHistoryText                string
+	inHistoryNav                   bool
 }
 
 type paletteAction struct {
@@ -303,6 +304,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case service.EventToolResult:
 			m.untrackPendingTool(ev.ToolCallID)
 			role, text := summarizeToolResultForChat(ev.ToolName, ev.Text)
+			if suppressesNoFinalAnswer(role) {
+				m.sawTerminalToolOutcomeThisTurn = true
+			}
 			if !m.updateToolCallFromResult(ev.ToolCallID, ev.ToolName, ev.Text, role, text) {
 				m.assembler.AddToolResultWithRole("", text, role)
 			}
@@ -348,6 +352,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
+			m.sawTerminalToolOutcomeThisTurn = false
 		case service.EventModelPicker:
 			m.mode = modeModelPicker
 			m.modelPicker.stage = 0
@@ -367,6 +372,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
+			m.sawTerminalToolOutcomeThisTurn = false
 			m.logs = nil
 			m.diffs = nil
 			m.append("info", buildHeaderBanner(m.model, m.effort, m.cwd, m.version))
@@ -378,6 +384,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
+			m.sawTerminalToolOutcomeThisTurn = false
 			m.logs = nil
 			m.diffs = nil
 			m.hydrateSessionMessages(ev.Messages)

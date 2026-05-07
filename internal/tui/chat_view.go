@@ -27,7 +27,7 @@ func (m *model) appendNotice(text string) {
 }
 
 func (m *model) markNoFinalAnswerIfNeeded() bool {
-	if !m.sawReasoningThisTurn || m.sawAssistantThisTurn || m.sawPlanThisTurn {
+	if !m.sawReasoningThisTurn || m.sawAssistantThisTurn || m.sawPlanThisTurn || m.sawTerminalToolOutcomeThisTurn {
 		return false
 	}
 	if m.chatMode == "plan" {
@@ -42,6 +42,15 @@ func (m *model) markNoFinalAnswerIfNeeded() bool {
 		Raw:     "The model produced reasoning content but no assistant content.",
 	})
 	return true
+}
+
+func suppressesNoFinalAnswer(role string) bool {
+	switch strings.TrimSpace(role) {
+	case "result_denied", "result_canceled", "result_timeout":
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *model) appendPlanDelta(text string) {

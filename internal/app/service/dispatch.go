@@ -60,6 +60,7 @@ func (s *Service) Dispatch(in Intent) {
 			s.app.SetThinkingEnabled(false)
 		}
 		s.emit(Event{Kind: EventInfo, Text: fmt.Sprintf("model set: %s  effort: %s  thinking: %s", s.app.Model(), s.app.ReasoningEffort(), onOff(s.app.ThinkingEnabled()))})
+		s.emit(Event{Kind: EventTurnDone})
 	case IntentSetApprovalMode:
 		mode, err := policy.ParseApprovalMode(in.ApprovalMode)
 		if err != nil {
@@ -68,6 +69,7 @@ func (s *Service) Dispatch(in Intent) {
 		}
 		s.app.SetApprovalMode(mode)
 		s.emit(Event{Kind: EventInfo, Text: fmt.Sprintf("approval set: %s", approvalModeDisplay(s.app.ApprovalMode()))})
+		s.emit(Event{Kind: EventTurnDone})
 	case IntentToggleMode:
 		msg, err := s.app.ToggleMode()
 		if err != nil {
@@ -105,7 +107,6 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 			ThinkingChoices: []string{"on", "off"},
 			CurrentThinking: onOff(s.app.ThinkingEnabled()),
 		})
-		s.emit(Event{Kind: EventTurnDone})
 		return
 	}
 	if line == "/permissions" {
@@ -114,7 +115,6 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 			ApprovalChoices: []string{"Ask first", "Auto approve"},
 			CurrentApproval: approvalModeDisplay(s.app.ApprovalMode()),
 		})
-		s.emit(Event{Kind: EventTurnDone})
 		return
 	}
 	if prompt, ok := appcommands.PlanPromptFromSlash(line); ok {
