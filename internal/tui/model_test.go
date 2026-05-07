@@ -541,6 +541,66 @@ func TestCommitLiveScrollbackClearsAssembler(t *testing.T) {
 	if got := len(m.assembler.Snapshot()); got != 0 {
 		t.Fatalf("expected live assembler cleared after commit, got %d entries", got)
 	}
+	if m.liveCommittedLines != 0 || m.liveCommitWidth != 0 || m.livePendingTools != nil {
+		t.Fatalf("expected live commit state reset, got lines=%d width=%d pending=%v", m.liveCommittedLines, m.liveCommitWidth, m.livePendingTools)
+	}
+}
+
+func TestCommitLiveScrollbackSkipsAlreadyCommittedLines(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), width: 80, height: 24}
+	m.append("assistant", "streamed answer")
+	m.liveCommittedLines = 1
+	m.liveCommitWidth = 78
+	m.livePendingTools = map[string]bool{"tool": true}
+	cmd := m.commitLiveScrollbackCmd()
+	if cmd != nil {
+		t.Fatalf("expected no remainder command after all lines were already committed")
+	}
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("expected live assembler cleared after commit, got %d entries", got)
+	}
+	if m.liveCommittedLines != 0 || m.liveCommitWidth != 0 || m.livePendingTools != nil {
+		t.Fatalf("expected live commit state reset, got lines=%d width=%d pending=%v", m.liveCommittedLines, m.liveCommitWidth, m.livePendingTools)
+	}
+}
+
+func TestCommitOverflowLiveScrollbackAdvancesCursor(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.append("assistant", "```\n"+strings.Repeat("line\n", 80)+"```")
+	cmd := m.commitOverflowLiveScrollbackCmd()
+	if cmd == nil {
+		t.Fatal("expected overflow scrollback command")
+	}
+	if m.liveCommittedLines <= 0 {
+		t.Fatalf("expected committed line cursor to advance, got %d", m.liveCommittedLines)
+	}
+	view := m.View()
+	if strings.Contains(view, "live output truncated") {
+		t.Fatalf("expected progressively committed output to avoid stale truncation marker:\n%s", view)
+	}
+	if !strings.Contains(view, "Type message or command") {
+		t.Fatalf("expected composer to remain visible after live commit:\n%s", view)
+	}
+}
+
+func TestCommitOverflowLiveScrollbackWaitsForPendingTool(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.trackPendingTool("tool-1")
+	m.append("assistant", "```\n"+strings.Repeat("line\n", 80)+"```")
+	if cmd := m.commitOverflowLiveScrollbackCmd(); cmd != nil {
+		t.Fatal("expected no progressive commit while a tool call is pending")
+	}
+	if m.liveCommittedLines != 0 {
+		t.Fatalf("expected committed cursor to stay at zero, got %d", m.liveCommittedLines)
+	}
+	m.untrackPendingTool("tool-1")
+	if cmd := m.commitOverflowLiveScrollbackCmd(); cmd == nil {
+		t.Fatal("expected progressive commit after pending tool completes")
+	}
 }
 
 func TestSessionHydrationCommitsTranscriptAndClearsLiveAssembler(t *testing.T) {

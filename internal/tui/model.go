@@ -39,29 +39,32 @@ const (
 )
 
 type model struct {
-	svc       *service.Service
-	dispatch  func(service.Intent)
-	input     composer.Composer
-	viewport  viewport.Model
-	assembler *tuirender.Assembler
-	logs      []logEntry
-	diffs     []diffEntry
-	width     int
-	height    int
-	mode      mode
-	page      page
-	status    string
-	busy      bool
-	stopping  bool
-	sidebar   bool
-	model     string
-	effort    string
-	thinking  string
-	chatMode  string
-	product   string
-	version   string
-	cwd       string
-	approval  struct {
+	svc                *service.Service
+	dispatch           func(service.Intent)
+	input              composer.Composer
+	viewport           viewport.Model
+	assembler          *tuirender.Assembler
+	logs               []logEntry
+	diffs              []diffEntry
+	width              int
+	height             int
+	mode               mode
+	page               page
+	status             string
+	busy               bool
+	stopping           bool
+	sidebar            bool
+	model              string
+	effort             string
+	thinking           string
+	chatMode           string
+	product            string
+	version            string
+	cwd                string
+	liveCommittedLines int
+	liveCommitWidth    int
+	livePendingTools   map[string]bool
+	approval           struct {
 		toolCallID string
 		toolName   string
 		reason     string
@@ -235,15 +238,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sawAssistantThisTurn = true
 			}
 			m.busy = true
+			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventReasoningDelta:
 			m.append("think", ev.Text)
 			m.addLog(logEntry{Kind: "reasoning_delta", Source: "reasoning", Summary: ev.Text, Raw: ev.Text})
 			if strings.TrimSpace(ev.Text) != "" {
 				m.sawReasoningThisTurn = true
 			}
+			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventPlanDelta:
 			m.appendPlanDelta(ev.Text)
 			m.addLog(logEntry{Kind: "plan_delta", Source: "plan", Summary: ev.Text, Raw: ev.Text})
+			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventPlanCompleted:
 			if strings.TrimSpace(ev.Text) != "" {
 				if m.assembler == nil {
@@ -253,6 +259,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sawPlanThisTurn = true
 			}
 			m.addLog(logEntry{Kind: "plan_completed", Source: "plan", Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
+			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventInfo:
 			if !isEnvironmentInventoryBlock(ev.Text) {
 				m.append("info", ev.Text)
@@ -272,6 +279,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog(logEntry{Kind: "error", Source: "system", Summary: ev.Text, Raw: ev.Text})
 			m.status = "error"
 		case service.EventToolCall:
+			m.trackPendingTool(ev.ToolCallID)
 			m.appendToolCall(ev.ToolCallID, ev.ToolName, ev.Text)
 			m.addLog(logEntry{
 				Kind:    "tool_call",
@@ -280,12 +288,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Raw:     fmt.Sprintf("id=%s\ninput=%s", ev.ToolCallID, ev.Text),
 			})
 		case service.EventToolResult:
+			m.untrackPendingTool(ev.ToolCallID)
 			role, text := summarizeToolResultForChat(ev.ToolName, ev.Text)
 			if !m.updateToolCallFromResult(ev.ToolCallID, ev.ToolName, ev.Text, role, text) {
 				m.assembler.AddToolResultWithRole("", text, role)
 			}
 			m.addLog(logEntry{Kind: "tool_result", Source: ev.ToolName, Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
 			m.captureDiff(ev.ToolName, ev.Text)
+			eventCmd = m.commitOverflowLiveScrollbackCmd()
 		case service.EventApprovalRequired:
 			m.mode = modeApproval
 			m.approval.toolCallID = ev.ToolCallID
@@ -340,6 +350,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.permissionsPicker.index = indexOf(ev.ApprovalChoices, ev.CurrentApproval)
 		case service.EventClearScreen:
 			m.assembler.Reset()
+			m.resetLiveCommitState()
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
@@ -350,6 +361,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Sequence(clearScreenCmd(), waitEventCmd(m.svc))
 		case service.EventSessionHydrated:
 			m.assembler.Reset()
+			m.resetLiveCommitState()
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false

@@ -74,3 +74,13 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+func clampInt(v, low, high int) int {
+	if v < low {
+		return low
+	}
+	if v > high {
+		return high
+	}
+	return v
+}
