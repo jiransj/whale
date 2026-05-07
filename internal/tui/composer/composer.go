@@ -17,11 +17,19 @@ const (
 	composerCollapseThreshold = 20
 	composerHeadLines         = 3
 	composerTailLines         = 2
+	largePasteCharThreshold   = 1000
 )
 
 type Composer struct {
-	textarea textarea.Model
-	width    int
+	textarea         textarea.Model
+	width            int
+	pendingPastes    []pendingPaste
+	largePasteCounts map[int]int
+}
+
+type pendingPaste struct {
+	placeholder string
+	text        string
 }
 
 func New() Composer {
@@ -46,40 +54,62 @@ func New() Composer {
 }
 
 func (c Composer) Value() string {
-	return c.textarea.Value()
+	return c.expandPendingPastes(c.rawValue())
 }
 
 func (c *Composer) SetValue(value string) {
-	c.textarea.SetValue(value)
+	c.ensureInitialized()
+	c.pendingPastes = nil
+	c.textarea.SetValue(c.collapseLargeValue(value))
 	c.moveToEnd()
 	c.reflow()
 }
 
 func (c *Composer) Reset() {
+	c.ensureInitialized()
+	c.pendingPastes = nil
 	c.textarea.Reset()
 	c.reflow()
 }
 
 func (c *Composer) SetCursorEnd() {
+	c.ensureInitialized()
 	c.moveToEnd()
 }
 
 func (c *Composer) SetWidth(width int) {
+	c.ensureInitialized()
 	c.width = max(20, width)
 	c.textarea.SetWidth(max(16, c.width-2))
 	c.reflow()
 }
 
 func (c *Composer) InsertNewline() {
+	c.ensureInitialized()
 	c.textarea.InsertRune('\n')
 	c.reflow()
 }
 
+func (c *Composer) HandlePaste(value string) {
+	c.ensureInitialized()
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	if len([]rune(value)) > largePasteCharThreshold {
+		c.textarea.InsertString(c.addPendingPaste(value))
+	} else {
+		c.textarea.InsertString(value)
+	}
+	c.prunePendingPastes()
+	c.reflow()
+}
+
 func (c *Composer) Update(msg tea.Msg) tea.Cmd {
+	c.ensureInitialized()
 	wasAtEnd := c.AtEnd()
 	prevHeight := c.textarea.Height()
 	var cmd tea.Cmd
 	c.textarea, cmd = c.textarea.Update(msg)
+	c.prunePendingPastes()
 	c.reflow()
 	if wasAtEnd && c.textarea.Height() > prevHeight {
 		c.realignViewportAtEnd()
@@ -88,6 +118,7 @@ func (c *Composer) Update(msg tea.Msg) tea.Cmd {
 }
 
 func (c *Composer) HandleKey(msg tea.KeyMsg) bool {
+	c.ensureInitialized()
 	switch msg.String() {
 	case "ctrl+u":
 		c.Reset()
@@ -112,12 +143,12 @@ func (c *Composer) HandleKey(msg tea.KeyMsg) bool {
 
 func (c Composer) View() string {
 	var view string
-	if c.Value() == "" && c.textarea.Height() != 1 {
+	if c.rawValue() == "" && c.textarea.Height() != 1 {
 		copy := c.textarea
 		copy.SetHeight(1)
 		view = copy.View()
 	} else {
-		value := c.Value()
+		value := c.rawValue()
 		lines := splitComposerLines(value)
 		if len(lines) <= composerCollapseThreshold {
 			view = c.textarea.View()
@@ -145,7 +176,11 @@ func (c Composer) AtEnd() bool {
 		return false
 	}
 	info := c.textarea.LineInfo()
-	line := splitComposerLines(c.Value())[c.textarea.Line()]
+	lines := splitComposerLines(c.rawValue())
+	if c.textarea.Line() < 0 || c.textarea.Line() >= len(lines) {
+		return false
+	}
+	line := lines[c.textarea.Line()]
 	return info.StartColumn+info.ColumnOffset >= len([]rune(line))
 }
 
@@ -252,10 +287,10 @@ func (c Composer) normalizeView(view string) string {
 func (c Composer) visualLineCount() int {
 	width := c.textarea.Width()
 	if width <= 0 {
-		return len(splitComposerLines(c.Value()))
+		return len(splitComposerLines(c.rawValue()))
 	}
 	total := 0
-	for _, line := range splitComposerLines(c.Value()) {
+	for _, line := range splitComposerLines(c.rawValue()) {
 		total += wrappedLineCount([]rune(line), width)
 	}
 	return total
@@ -326,4 +361,64 @@ func repeatSpaces(n int) []rune {
 func (c *Composer) realignViewportAtEnd() {
 	value := c.textarea.Value()
 	c.textarea.SetValue(value)
+}
+
+func (c *Composer) ensureInitialized() {
+	if c.width != 0 {
+		return
+	}
+	*c = New()
+}
+
+func (c Composer) rawValue() string {
+	return c.textarea.Value()
+}
+
+func (c *Composer) collapseLargeValue(value string) string {
+	if len([]rune(value)) <= largePasteCharThreshold {
+		return value
+	}
+	return c.addPendingPaste(value)
+}
+
+func (c *Composer) addPendingPaste(value string) string {
+	placeholder := c.nextLargePastePlaceholder(len([]rune(value)))
+	c.pendingPastes = append(c.pendingPastes, pendingPaste{
+		placeholder: placeholder,
+		text:        value,
+	})
+	return placeholder
+}
+
+func (c *Composer) nextLargePastePlaceholder(charCount int) string {
+	if c.largePasteCounts == nil {
+		c.largePasteCounts = map[int]int{}
+	}
+	c.largePasteCounts[charCount]++
+	base := fmt.Sprintf("[Pasted Content %d chars]", charCount)
+	if c.largePasteCounts[charCount] == 1 {
+		return base
+	}
+	return fmt.Sprintf("%s #%d", base, c.largePasteCounts[charCount])
+}
+
+func (c Composer) expandPendingPastes(value string) string {
+	for _, paste := range c.pendingPastes {
+		value = strings.ReplaceAll(value, paste.placeholder, paste.text)
+	}
+	return value
+}
+
+func (c *Composer) prunePendingPastes() {
+	if len(c.pendingPastes) == 0 {
+		return
+	}
+	value := c.rawValue()
+	kept := c.pendingPastes[:0]
+	for _, paste := range c.pendingPastes {
+		if strings.Contains(value, paste.placeholder) {
+			kept = append(kept, paste)
+		}
+	}
+	c.pendingPastes = kept
 }

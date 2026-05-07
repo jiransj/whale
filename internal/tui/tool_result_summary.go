@@ -57,6 +57,7 @@ type toolResultEnvelope struct {
 	data       map[string]any
 	metrics    map[string]any
 	payload    map[string]any
+	metadata   map[string]any
 }
 
 func summarizeShellResult(env toolResultEnvelope, successBySignal bool) (string, string) {

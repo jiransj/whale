@@ -44,5 +44,6 @@ type ToolResult struct {
 	ToolCallID string
 	Name       string
 	Content    string
+	Metadata   map[string]any `json:"metadata,omitempty"`
 	IsError    bool
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/usewhale/whale/internal/core"
@@ -174,6 +175,42 @@ func TestToDeepSeekMessagesDropsStrayToolResults(t *testing.T) {
 	}
 	if out[0]["role"] != "user" {
 		t.Fatalf("unexpected first role: %+v", out[0])
+	}
+}
+
+func TestToDeepSeekMessagesDoesNotSendToolResultMetadata(t *testing.T) {
+	history := []core.Message{
+		{
+			Role: core.RoleAssistant,
+			ToolCalls: []core.ToolCall{
+				{ID: "call_1", Name: "edit", Input: `{"file_path":"a.txt"}`},
+			},
+		},
+		{
+			Role: core.RoleTool,
+			ToolResults: []core.ToolResult{
+				{
+					ToolCallID: "call_1",
+					Name:       "edit",
+					Content:    `{"success":true}`,
+					Metadata: map[string]any{
+						"kind":  "file_diff",
+						"files": []any{map[string]any{"unified_diff": "-old\n+new"}},
+					},
+				},
+			},
+		},
+	}
+	out := toDeepSeekMessages(history)
+	if len(out) != 2 {
+		t.Fatalf("expected assistant and tool messages, got %d", len(out))
+	}
+	toolMsg := out[1]
+	if _, ok := toolMsg["metadata"]; ok {
+		t.Fatalf("metadata must not be sent to provider: %+v", toolMsg)
+	}
+	if content, _ := toolMsg["content"].(string); strings.Contains(content, "unified_diff") || strings.Contains(content, "-old") {
+		t.Fatalf("tool content must not include metadata diff: %q", content)
 	}
 }
 

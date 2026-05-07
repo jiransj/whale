@@ -16,7 +16,7 @@ func (s *Service) awaitApproval(req policy.ApprovalRequest) bool {
 	ch := make(chan approvalDecision, 1)
 	s.approvals[toolCallID] = ch
 	s.approveMu.Unlock()
-	s.emit(Event{Kind: EventApprovalRequired, ToolCallID: toolCallID, ToolName: req.ToolCall.Name, Text: policy.ApprovalSummary(req.ToolCall)})
+	s.emit(Event{Kind: EventApprovalRequired, ToolCallID: toolCallID, ToolName: req.ToolCall.Name, Text: policy.ApprovalSummary(req.ToolCall), Metadata: req.Metadata})
 	decision := <-ch
 	s.approveMu.Lock()
 	delete(s.approvals, toolCallID)

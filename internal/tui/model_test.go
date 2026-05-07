@@ -717,6 +717,63 @@ func TestApprovalViewHidesToolCallID(t *testing.T) {
 	}
 }
 
+func TestApprovalViewShowsDiffMetadata(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 100
+	m.height = 30
+	m.mode = modeApproval
+	m.approval.toolName = "edit"
+	m.approval.reason = "edit: a.txt"
+	m.approval.metadata = testFileDiffMetadata()
+	view := m.View()
+	if !strings.Contains(view, "--- a/a.txt") || !strings.Contains(view, "+whale") {
+		t.Fatalf("expected approval diff metadata in view:\n%s", view)
+	}
+}
+
+func TestToolResultShowsDiffMetadata(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-1",
+		ToolName:   "edit",
+		Text:       `edit: a.txt`,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-1",
+		ToolName:   "edit",
+		Text:       `{"success":true,"data":{"payload":{"file_path":"a.txt","replacements":1}}}`,
+		Metadata:   testFileDiffMetadata(),
+	}))
+	m = next.(model)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected updated tool call, got %+v", snap)
+	}
+	if !strings.Contains(snap[0].Text, "```diff") || !strings.Contains(snap[0].Text, "+whale") {
+		t.Fatalf("expected diff metadata in tool result:\n%s", snap[0].Text)
+	}
+	if got := strings.Join(m.renderDiffs(), "\n"); !strings.Contains(got, "+whale") {
+		t.Fatalf("expected /diff content from metadata:\n%s", got)
+	}
+}
+
+func testFileDiffMetadata() map[string]any {
+	return map[string]any{
+		"kind": "file_diff",
+		"files": []any{
+			map[string]any{
+				"path":         "a.txt",
+				"unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-world\n+whale",
+				"additions":    1,
+				"deletions":    1,
+			},
+		},
+	}
+}
+
 func TestChatLiveViewTruncatesLongOutput(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80

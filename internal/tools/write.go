@@ -23,11 +23,39 @@ func (b *Toolset) writeFile(_ context.Context, call core.ToolCall) (core.ToolRes
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}
+	beforeBytes, readErr := os.ReadFile(abs)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return marshalToolError(call, "read_failed", readErr.Error()), nil
+	}
+	before := string(beforeBytes)
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
 	}
 	if err := os.WriteFile(abs, []byte(in.Content), 0o644); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
 	}
-	return marshalToolResult(call, map[string]any{"file_path": in.FilePath, "bytes": len(in.Content)})
+	metadata := fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: in.Content}})
+	return marshalToolResultWithMetadata(call, map[string]any{"file_path": in.FilePath, "bytes": len(in.Content)}, metadata)
+}
+
+func (b *Toolset) previewWriteFile(_ context.Context, call core.ToolCall) (map[string]any, error) {
+	var in struct {
+		FilePath string `json:"file_path"`
+		Content  string `json:"content"`
+	}
+	if err := decodeInput(call.Input, &in); err != nil {
+		return nil, err
+	}
+	if in.FilePath == "" {
+		return nil, os.ErrInvalid
+	}
+	abs, err := b.safePath(in.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	beforeBytes, err := os.ReadFile(abs)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	return fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: string(beforeBytes), after: in.Content}}), nil
 }

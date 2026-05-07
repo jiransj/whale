@@ -72,7 +72,7 @@ func (s *Service) runTurn(line string, hiddenInput bool) {
 		case agent.AgentEventTypeToolResult:
 			if ev.Result != nil {
 				deltas.flushReliable()
-				s.emit(Event{Kind: EventToolResult, ToolCallID: ev.Result.ToolCallID, ToolName: ev.Result.Name, Text: ev.Result.Content})
+				s.emit(Event{Kind: EventToolResult, ToolCallID: ev.Result.ToolCallID, ToolName: ev.Result.Name, Text: ev.Result.Content, Metadata: ev.Result.Metadata})
 			}
 		case agent.AgentEventTypeUserInputRequired:
 			if ev.ToolCall != nil && ev.UserInputReq != nil {

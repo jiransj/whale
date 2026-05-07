@@ -93,8 +93,9 @@ func (p *cacheMetricsProvider) StreamResponse(_ context.Context, _ []Message, _ 
 			Content:      "ok",
 			Model:        "deepseek-chat",
 			Usage: Usage{
-				PromptTokens:         100,
-				PromptCacheHitTokens: 80,
+				PromptTokens:          120,
+				PromptCacheHitTokens:  80,
+				PromptCacheMissTokens: 20,
 			},
 		},
 	}
@@ -113,7 +114,7 @@ func TestRunStreamEmitsPrefixCacheMetrics(t *testing.T) {
 	seen := false
 	for ev := range events {
 		if ev.Type == AgentEventTypePrefixCacheMetrics && ev.CacheMetrics != nil {
-			if ev.CacheMetrics.PromptTokens != 100 || ev.CacheMetrics.CachedTokens != 80 {
+			if ev.CacheMetrics.PromptTokens != 120 || ev.CacheMetrics.CachedTokens != 80 || ev.CacheMetrics.CacheHitRatio != 0.8 {
 				t.Fatalf("unexpected metrics: %+v", ev.CacheMetrics)
 			}
 			seen = true

@@ -38,6 +38,10 @@ func NewToolset(root string) (*Toolset, error) {
 }
 
 func marshalToolResult(call core.ToolCall, data any) (core.ToolResult, error) {
+	return marshalToolResultWithMetadata(call, data, nil)
+}
+
+func marshalToolResultWithMetadata(call core.ToolCall, data any, metadata map[string]any) (core.ToolResult, error) {
 	dataMap, ok := data.(map[string]any)
 	if !ok {
 		dataMap = map[string]any{"payload": data}
@@ -46,7 +50,7 @@ func marshalToolResult(call core.ToolCall, data any) (core.ToolResult, error) {
 	if err != nil {
 		return core.ToolResult{}, err
 	}
-	return core.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: content}, nil
+	return core.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: content, Metadata: metadata}, nil
 }
 
 func marshalToolError(call core.ToolCall, code, msg string) core.ToolResult {

@@ -57,6 +57,90 @@ func TestViewWriteEdit(t *testing.T) {
 	}
 }
 
+func TestWriteAndEditReturnDiffMetadata(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	res, err := ts.editFile(context.Background(), tc("edit", map[string]any{
+		"file_path": "a.txt",
+		"search":    "world",
+		"replace":   "whale",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("edit failed: err=%v res=%+v", err, res)
+	}
+	diff := firstMetadataDiff(t, res.Metadata)
+	if !strings.Contains(diff, "-world") || !strings.Contains(diff, "+whale") {
+		t.Fatalf("expected edit diff metadata, got:\n%s", diff)
+	}
+
+	res, err = ts.writeFile(context.Background(), tc("write", map[string]any{
+		"file_path": "b.txt",
+		"content":   "new file\n",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("write failed: err=%v res=%+v", err, res)
+	}
+	diff = firstMetadataDiff(t, res.Metadata)
+	if !strings.Contains(diff, "+++ b/b.txt") || !strings.Contains(diff, "+new file") {
+		t.Fatalf("expected write diff metadata, got:\n%s", diff)
+	}
+}
+
+func TestApplyPatchPreviewAndResultMetadataMatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	call := tc("apply_patch", map[string]any{"patch": strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		" hello",
+		"-world",
+		"+whale",
+		"*** End Patch",
+	}, "\n")})
+
+	preview, err := ts.previewApplyPatch(context.Background(), call)
+	if err != nil {
+		t.Fatalf("preview patch: %v", err)
+	}
+	res, err := ts.applyPatch(context.Background(), call)
+	if err != nil || res.IsError {
+		t.Fatalf("apply patch failed: err=%v res=%+v", err, res)
+	}
+	if got, want := firstMetadataDiff(t, res.Metadata), firstMetadataDiff(t, preview); got != want {
+		t.Fatalf("preview/result diff mismatch:\npreview:\n%s\nresult:\n%s", want, got)
+	}
+}
+
+func firstMetadataDiff(t *testing.T, metadata map[string]any) string {
+	t.Helper()
+	if metadata["kind"] != fileDiffMetadataKind {
+		t.Fatalf("expected file diff metadata, got %+v", metadata)
+	}
+	files, ok := metadata["files"].([]map[string]any)
+	if !ok || len(files) == 0 {
+		t.Fatalf("expected metadata files, got %+v", metadata["files"])
+	}
+	diff, _ := files[0]["unified_diff"].(string)
+	if diff == "" {
+		t.Fatalf("expected unified diff, got %+v", files[0])
+	}
+	return diff
+}
+
 func TestPathEscapeDenied(t *testing.T) {
 	dir := t.TempDir()
 	ts, err := NewToolset(dir)

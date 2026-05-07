@@ -30,6 +30,14 @@ type patchOp struct {
 	added []string
 }
 
+type patchFilePlan struct {
+	path   string
+	abs    string
+	before string
+	after  string
+	remove bool
+}
+
 func (b *Toolset) applyPatch(_ context.Context, call core.ToolCall) (core.ToolResult, error) {
 	var in struct {
 		Patch string `json:"patch"`
@@ -45,78 +53,170 @@ func (b *Toolset) applyPatch(_ context.Context, call core.ToolCall) (core.ToolRe
 	if err != nil {
 		return marshalToolError(call, "patch_parse_failed", err.Error()), nil
 	}
-	filesChanged := make([]string, 0, len(ops))
-	additions := 0
-	deletions := 0
-
-	for _, op := range ops {
-		abs, err := b.safePath(op.path)
-		if err != nil {
-			return marshalToolError(call, "permission_denied", err.Error()), nil
+	plans, err := b.planPatch(ops)
+	if err != nil {
+		return marshalToolError(call, patchApplyErrorCode(err), err.Error()), nil
+	}
+	changes := patchPlanChanges(plans)
+	metadata := fileDiffMetadata(changes)
+	for _, plan := range plans {
+		if plan.remove {
+			if err := os.Remove(plan.abs); err != nil {
+				return marshalToolError(call, "patch_apply_failed", err.Error()), nil
+			}
+			continue
 		}
-		switch op.kind {
-		case patchOpAdd:
-			if _, err := os.Stat(abs); err == nil {
-				return marshalToolError(call, "patch_apply_failed", "add file already exists: "+op.path), nil
-			}
-			if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-				return marshalToolError(call, "patch_apply_failed", err.Error()), nil
-			}
-			content := strings.Join(op.added, "\n")
-			if err := os.WriteFile(abs, []byte(content), 0o644); err != nil {
-				return marshalToolError(call, "patch_apply_failed", err.Error()), nil
-			}
-			additions += len(op.added)
-			filesChanged = append(filesChanged, op.path)
-		case patchOpDelete:
-			if err := os.Remove(abs); err != nil {
-				if os.IsNotExist(err) {
-					return marshalToolError(call, "patch_apply_failed", "delete target missing: "+op.path), nil
-				}
-				return marshalToolError(call, "patch_apply_failed", err.Error()), nil
-			}
-			filesChanged = append(filesChanged, op.path)
-		case patchOpUpdate:
-			raw, err := os.ReadFile(abs)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return marshalToolError(call, "patch_apply_failed", "update target missing: "+op.path), nil
-				}
-				return marshalToolError(call, "patch_apply_failed", err.Error()), nil
-			}
-			lines, hadTrailingNewline := splitLinesKeepFlag(string(raw))
-			next := make([]string, len(lines))
-			copy(next, lines)
-			for _, h := range op.hunks {
-				idx := findSubslice(next, h.oldLines)
-				if idx < 0 {
-					return marshalToolError(call, "patch_apply_failed", fmt.Sprintf("hunk context not found in %s", op.path)), nil
-				}
-				before := append([]string{}, next[:idx]...)
-				after := append([]string{}, next[idx+len(h.oldLines):]...)
-				next = append(before, append(h.newLines, after...)...)
-				if len(h.newLines) > len(h.oldLines) {
-					additions += len(h.newLines) - len(h.oldLines)
-				} else {
-					deletions += len(h.oldLines) - len(h.newLines)
-				}
-			}
-			out := strings.Join(next, "\n")
-			if hadTrailingNewline {
-				out += "\n"
-			}
-			if err := os.WriteFile(abs, []byte(out), 0o644); err != nil {
-				return marshalToolError(call, "patch_apply_failed", err.Error()), nil
-			}
-			filesChanged = append(filesChanged, op.path)
+		if err := os.MkdirAll(filepath.Dir(plan.abs), 0o755); err != nil {
+			return marshalToolError(call, "patch_apply_failed", err.Error()), nil
+		}
+		if err := os.WriteFile(plan.abs, []byte(plan.after), 0o644); err != nil {
+			return marshalToolError(call, "patch_apply_failed", err.Error()), nil
 		}
 	}
 
-	return marshalToolResult(call, map[string]any{
+	filesChanged := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		filesChanged = append(filesChanged, plan.path)
+	}
+	additions, deletions := fileDiffCounts(changes)
+	return marshalToolResultWithMetadata(call, map[string]any{
 		"files_changed": filesChanged,
 		"additions":     additions,
 		"deletions":     deletions,
-	})
+	}, metadata)
+}
+
+func patchApplyErrorCode(err error) string {
+	if err != nil && strings.Contains(err.Error(), "path escapes workspace") {
+		return "permission_denied"
+	}
+	return "patch_apply_failed"
+}
+
+func (b *Toolset) previewApplyPatch(_ context.Context, call core.ToolCall) (map[string]any, error) {
+	var in struct {
+		Patch string `json:"patch"`
+	}
+	if err := decodeInput(call.Input, &in); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(in.Patch) == "" {
+		return nil, fmt.Errorf("patch is required")
+	}
+	ops, err := parseBeginPatch(in.Patch)
+	if err != nil {
+		return nil, err
+	}
+	plans, err := b.planPatch(ops)
+	if err != nil {
+		return nil, err
+	}
+	return fileDiffMetadata(patchPlanChanges(plans)), nil
+}
+
+func patchPlanChanges(plans []patchFilePlan) []fileChangePreview {
+	changes := make([]fileChangePreview, 0, len(plans))
+	for _, plan := range plans {
+		changes = append(changes, fileChangePreview{path: plan.path, before: plan.before, after: plan.after})
+	}
+	return changes
+}
+
+type patchFileState struct {
+	path   string
+	abs    string
+	before string
+	after  string
+	exists bool
+	remove bool
+}
+
+func (b *Toolset) planPatch(ops []patchOp) ([]patchFilePlan, error) {
+	states := map[string]*patchFileState{}
+	order := make([]string, 0, len(ops))
+	getState := func(path string) (*patchFileState, error) {
+		if st, ok := states[path]; ok {
+			return st, nil
+		}
+		abs, err := b.safePath(path)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := os.ReadFile(abs)
+		exists := true
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return nil, err
+			}
+			exists = false
+		}
+		st := &patchFileState{path: path, abs: abs, before: string(raw), after: string(raw), exists: exists}
+		states[path] = st
+		order = append(order, path)
+		return st, nil
+	}
+
+	for _, op := range ops {
+		st, err := getState(op.path)
+		if err != nil {
+			return nil, err
+		}
+		switch op.kind {
+		case patchOpAdd:
+			if st.exists && !st.remove {
+				return nil, fmt.Errorf("add file already exists: %s", op.path)
+			}
+			st.after = strings.Join(op.added, "\n")
+			st.exists = true
+			st.remove = false
+		case patchOpDelete:
+			if !st.exists || st.remove {
+				return nil, fmt.Errorf("delete target missing: %s", op.path)
+			}
+			st.after = ""
+			st.exists = false
+			st.remove = true
+		case patchOpUpdate:
+			if !st.exists || st.remove {
+				return nil, fmt.Errorf("update target missing: %s", op.path)
+			}
+			out, err := applyPatchHunks(op.path, st.after, op.hunks)
+			if err != nil {
+				return nil, err
+			}
+			st.after = out
+		}
+	}
+
+	plans := make([]patchFilePlan, 0, len(order))
+	for _, path := range order {
+		st := states[path]
+		if st.before == st.after && !st.remove {
+			continue
+		}
+		plans = append(plans, patchFilePlan{path: st.path, abs: st.abs, before: st.before, after: st.after, remove: st.remove})
+	}
+	return plans, nil
+}
+
+func applyPatchHunks(path, content string, hunks []patchHunk) (string, error) {
+	lines, hadTrailingNewline := splitLinesKeepFlag(content)
+	next := make([]string, len(lines))
+	copy(next, lines)
+	for _, h := range hunks {
+		idx := findSubslice(next, h.oldLines)
+		if idx < 0 {
+			return "", fmt.Errorf("hunk context not found in %s", path)
+		}
+		before := append([]string{}, next[:idx]...)
+		after := append([]string{}, next[idx+len(h.oldLines):]...)
+		next = append(before, append(h.newLines, after...)...)
+	}
+	out := strings.Join(next, "\n")
+	if hadTrailingNewline {
+		out += "\n"
+	}
+	return out, nil
 }
 
 func parseBeginPatch(patch string) ([]patchOp, error) {

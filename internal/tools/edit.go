@@ -50,8 +50,44 @@ func (b *Toolset) editFile(_ context.Context, call core.ToolCall) (core.ToolResu
 	if err := os.WriteFile(abs, []byte(after), 0o644); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
 	}
-	return marshalToolResult(call, map[string]any{
+	metadata := fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: after}})
+	return marshalToolResultWithMetadata(call, map[string]any{
 		"file_path":    in.FilePath,
 		"replacements": replacements,
-	})
+	}, metadata)
+}
+
+func (b *Toolset) previewEditFile(_ context.Context, call core.ToolCall) (map[string]any, error) {
+	var in struct {
+		FilePath string `json:"file_path"`
+		Search   string `json:"search"`
+		Replace  string `json:"replace"`
+		All      bool   `json:"all"`
+	}
+	if err := decodeInput(call.Input, &in); err != nil {
+		return nil, err
+	}
+	if in.FilePath == "" {
+		return nil, os.ErrInvalid
+	}
+	abs, err := b.safePath(in.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return nil, err
+	}
+	before := string(data)
+	if in.Search == "" {
+		return nil, os.ErrInvalid
+	}
+	if !strings.Contains(before, in.Search) {
+		return nil, os.ErrNotExist
+	}
+	after := strings.Replace(before, in.Search, in.Replace, 1)
+	if in.All {
+		after = strings.ReplaceAll(before, in.Search, in.Replace)
+	}
+	return fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: after}}), nil
 }

@@ -262,6 +262,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 			key := policy.ApprovalKey(call)
 			approved := a.approvalCache.Has(sessionID, key)
 			if !approved {
+				metadata := a.previewTool(ctx, call)
 				events <- AgentEvent{
 					Type: AgentEventTypeToolApprovalRequired,
 					Approval: &ToolApprovalRequired{
@@ -272,6 +273,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 						Key:        key,
 						Summary:    policy.ApprovalSummary(call),
 						Scope:      policy.ApprovalScope(call),
+						Metadata:   metadata,
 					},
 				}
 				if a.approve != nil {
@@ -282,6 +284,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 						Reason:    decision.Reason,
 						Code:      decision.Code,
 						Key:       key,
+						Metadata:  metadata,
 					})
 				}
 				if approved {

@@ -16,6 +16,7 @@ type ApprovalRequest struct {
 	Reason    string
 	Code      string
 	Key       string
+	Metadata  map[string]any
 }
 
 type ApprovalFunc func(req ApprovalRequest) bool

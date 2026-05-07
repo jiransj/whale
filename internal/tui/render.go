@@ -80,11 +80,15 @@ func (m model) View() string {
 				opts[i] = "[" + opts[i] + "]"
 			}
 		}
+		approvalBody := m.approval.reason
+		if diff := renderFileDiffMetadataPlain(m.approval.metadata, 80); diff != "" {
+			approvalBody += "\n\n" + diff
+		}
 		view += "\n\n" + lipgloss.NewStyle().Foreground(tuitheme.Default.Error).Render(
 			fmt.Sprintf(
 				"approval: %s\n%s\n\n%s\n(←/→/tab select, enter confirm, esc deny)",
 				m.approval.toolName,
-				m.approval.reason,
+				approvalBody,
 				strings.Join(opts, "   "),
 			),
 		)

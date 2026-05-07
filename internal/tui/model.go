@@ -428,6 +428,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.updateSlashMatches()
+		if m.mode == modeChat && msg.Paste {
+			m.input.HandlePaste(string(msg.Runes))
+			m.resetHistoryNavigation()
+			m.updateSlashMatches()
+			m.refreshViewportContent()
+			return m, nil
+		}
 		if m.mode == modeChat {
 			switch msg.String() {
 			case "shift+tab", "backtab":

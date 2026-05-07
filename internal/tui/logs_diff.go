@@ -42,6 +42,19 @@ func (m *model) captureDiff(source, text string) {
 	}
 }
 
+func (m *model) captureDiffMetadata(source string, metadata map[string]any) {
+	diff := renderFileDiffMetadataPlain(metadata, 0)
+	if strings.TrimSpace(diff) == "" {
+		return
+	}
+	for _, line := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		m.diffs = append(m.diffs, diffEntry{Source: source, Line: line})
+	}
+}
+
 func (m model) renderDiffs() []string {
 	if len(m.diffs) == 0 {
 		return []string{"[diff] no diff-like output yet"}

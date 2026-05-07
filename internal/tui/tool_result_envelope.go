@@ -35,5 +35,6 @@ func parseToolEnvelopeOK(raw string) (toolResultEnvelope, bool) {
 		data:       data,
 		metrics:    metrics,
 		payload:    payload,
+		metadata:   body.Metadata,
 	}, true
 }

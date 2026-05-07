@@ -50,15 +50,13 @@ func (a *Agent) recordTurnCost(sessionID string, usage llm.Usage, modelName, pre
 func buildPrefixCacheMetrics(model string, usage llm.Usage, fingerprint string) *PrefixCacheMetricsInfo {
 	prompt := usage.PromptTokens
 	cached := usage.PromptCacheHitTokens
-	if prompt <= 0 && cached <= 0 {
+	missed := usage.PromptCacheMissTokens
+	if prompt <= 0 && cached <= 0 && missed <= 0 {
 		return nil
 	}
 	ratio := 0.0
-	if prompt > 0 && cached > 0 {
-		ratio = float64(cached) / float64(prompt)
-		if ratio > 1 {
-			ratio = 1
-		}
+	if denom := cached + missed; denom > 0 && cached > 0 {
+		ratio = float64(cached) / float64(denom)
 	}
 	return &PrefixCacheMetricsInfo{
 		Model:             model,

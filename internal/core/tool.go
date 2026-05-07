@@ -10,6 +10,10 @@ type Tool interface {
 	Run(ctx context.Context, call ToolCall) (ToolResult, error)
 }
 
+type ToolPreviewer interface {
+	Preview(ctx context.Context, call ToolCall) (map[string]any, error)
+}
+
 type ToolSpec struct {
 	Name             string
 	Description      string

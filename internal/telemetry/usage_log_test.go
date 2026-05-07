@@ -40,4 +40,7 @@ func TestAppendUsage_WritesJSONL(t *testing.T) {
 	if !strings.Contains(s, `"cache_hit_ratio"`) {
 		t.Fatalf("missing cache hit ratio in log: %s", s)
 	}
+	if !strings.Contains(s, `"cache_hit_ratio":0.4166666666666667`) {
+		t.Fatalf("unexpected cache hit ratio in log: %s", s)
+	}
 }

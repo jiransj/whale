@@ -86,6 +86,7 @@ type ToolApprovalRequired struct {
 	Key        string
 	Summary    string
 	Scope      string
+	Metadata   map[string]any
 }
 
 type ToolCallScavenged struct {

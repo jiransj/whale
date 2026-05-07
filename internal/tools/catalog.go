@@ -189,7 +189,8 @@ func (b *Toolset) Tools() []core.Tool {
 				},
 				"required": []string{"file_path", "search", "replace"},
 			},
-			fn: b.editFile,
+			fn:      b.editFile,
+			preview: b.previewEditFile,
 		},
 		toolFn{
 			name:        "write",
@@ -203,7 +204,8 @@ func (b *Toolset) Tools() []core.Tool {
 				},
 				"required": []string{"file_path", "content"},
 			},
-			fn: b.writeFile,
+			fn:      b.writeFile,
+			preview: b.previewWriteFile,
 		},
 		toolFn{
 			name:        "apply_patch",
@@ -216,7 +218,8 @@ func (b *Toolset) Tools() []core.Tool {
 				},
 				"required": []string{"patch"},
 			},
-			fn: b.applyPatch,
+			fn:      b.applyPatch,
+			preview: b.previewApplyPatch,
 		},
 		toolFn{
 			name:        "exec_shell",
@@ -338,6 +341,7 @@ type toolFn struct {
 	readOnly      bool
 	readOnlyCheck func(args map[string]any) bool
 	fn            func(context.Context, core.ToolCall) (core.ToolResult, error)
+	preview       func(context.Context, core.ToolCall) (map[string]any, error)
 }
 
 func (t toolFn) Name() string               { return t.name }
@@ -352,6 +356,13 @@ func (t toolFn) ReadOnlyCheck(args map[string]any) bool {
 }
 func (t toolFn) Run(ctx context.Context, call core.ToolCall) (core.ToolResult, error) {
 	return t.fn(ctx, call)
+}
+
+func (t toolFn) Preview(ctx context.Context, call core.ToolCall) (map[string]any, error) {
+	if t.preview == nil {
+		return nil, nil
+	}
+	return t.preview(ctx, call)
 }
 
 var shellReadOnlyAllowPrefixes = []string{

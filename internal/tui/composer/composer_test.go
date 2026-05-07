@@ -175,3 +175,38 @@ func TestComposerViewPadsVisibleWidth(t *testing.T) {
 		}
 	}
 }
+
+func TestComposerLargePasteUsesSingleLinePlaceholder(t *testing.T) {
+	c := New()
+	paste := strings.Repeat("x\n", largePasteCharThreshold/2+2)
+
+	c.HandlePaste(paste)
+
+	if got := c.Value(); got != paste {
+		t.Fatalf("expected expanded paste value, got %q", got)
+	}
+	view := c.View()
+	if !strings.Contains(view, "[Pasted Content") {
+		t.Fatalf("expected pasted-content placeholder, got %q", view)
+	}
+	if strings.Contains(view, "\nx") {
+		t.Fatalf("expected large paste to render as one placeholder line, got %q", view)
+	}
+	if c.Height() != 1 {
+		t.Fatalf("expected collapsed large paste height 1, got %d", c.Height())
+	}
+}
+
+func TestComposerSetValueCollapsesLargeHistoryEntry(t *testing.T) {
+	c := New()
+	value := strings.Repeat("line\n", largePasteCharThreshold/4+1)
+
+	c.SetValue(value)
+
+	if got := c.Value(); got != value {
+		t.Fatalf("expected expanded value after SetValue, got %q", got)
+	}
+	if got := c.Height(); got != 1 {
+		t.Fatalf("expected recalled large value to render as one line, got height %d", got)
+	}
+}

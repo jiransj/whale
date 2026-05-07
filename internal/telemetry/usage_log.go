@@ -67,13 +67,11 @@ func AppendUsage(path, sessionID, model, prefixFingerprint string, usage llm.Usa
 }
 
 func cacheHitRatio(usage llm.Usage) float64 {
-	prompt := usage.PromptTokens
 	hit := usage.PromptCacheHitTokens
-	if prompt <= 0 || hit <= 0 {
+	miss := usage.PromptCacheMissTokens
+	denom := hit + miss
+	if denom <= 0 || hit <= 0 {
 		return 0
 	}
-	if hit >= prompt {
-		return 1
-	}
-	return float64(hit) / float64(prompt)
+	return float64(hit) / float64(denom)
 }

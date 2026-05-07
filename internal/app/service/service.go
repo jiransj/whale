@@ -68,6 +68,7 @@ type Event struct {
 	Text            string
 	ToolCallID      string
 	ToolName        string
+	Metadata        map[string]any
 	Questions       []core.UserInputQuestion
 	Choices         []string
 	Approval        *policy.ApprovalRequest
