@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <strong>一个面向 DeepSeek 的终端 AI 编程 Agent。</strong><br>
-  在本地仓库里读代码、改代码、跑命令、调用 MCP/Skills，目标是做国内开发者更容易用的 DeepSeek-native Claude Code 替代方案。
+  <strong>Whale 是一个非官方的 DeepSeek CLI / DeepSeek 编程 Agent。</strong><br>
+  运行在终端里，支持读代码、改代码、运行命令、MCP 和 Skills。
 </p>
 
 <p align="center">

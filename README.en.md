@@ -16,8 +16,8 @@
 </p>
 
 <p align="center">
-  <strong>A terminal AI coding agent built for DeepSeek.</strong><br>
-  Read code, edit files, run commands, and extend the agent with MCP and Skills inside your local repository.
+  <strong>Whale is an unofficial DeepSeek CLI / DeepSeek coding agent for the terminal.</strong><br>
+  It can read code, edit files, run commands, and extend the agent with MCP and Skills.
 </p>
 
 <p align="center">
