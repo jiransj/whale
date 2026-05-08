@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="170" viewBox="0 0 760 170" role="img" aria-label="Whale — DeepSeek-native coding agent for the terminal">
+<svg xmlns="http://www.w3.org/2000/svg" width="620" height="170" viewBox="0 0 620 170" role="img" aria-label="Whale — DeepSeek-native coding agent for the terminal">
   <title>Whale</title>
   <defs>
     <!-- DeepSeek brand blue gradient: light periwinkle → #4D6BFE → deep indigo.
@@ -132,7 +132,7 @@
   </text>
 
   <!-- Tagline -->
-  <text x="172" y="136"
+  <text x="44" y="136"
         font-family="ui-monospace, SFMono-Regular, 'Cascadia Code', Menlo, Consolas, 'DejaVu Sans Mono', monospace"
         font-size="15"
         fill="#64748b"
