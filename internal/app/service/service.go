@@ -144,3 +144,10 @@ func (s *Service) WorkspaceRoot() string {
 func (s *Service) Model() string           { return s.app.Model() }
 func (s *Service) ReasoningEffort() string { return s.app.ReasoningEffort() }
 func (s *Service) ThinkingEnabled() bool   { return s.app.ThinkingEnabled() }
+
+func (s *Service) Close() error {
+	if s == nil || s.app == nil {
+		return nil
+	}
+	return s.app.Close()
+}

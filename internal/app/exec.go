@@ -32,6 +32,7 @@ func RunExec(ctx context.Context, cfg Config, start StartOptions, prompt string)
 			Error:  err.Error(),
 		}, err
 	}
+	defer a.Close()
 	res, err := a.ExecPrompt(ctx, prompt, false)
 	if err != nil {
 		return res, err

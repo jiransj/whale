@@ -22,6 +22,7 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	if err != nil {
 		return err
 	}
+	defer coreApp.Close()
 	for _, line := range coreApp.StartupLines() {
 		fmt.Println(line)
 	}

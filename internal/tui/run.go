@@ -20,6 +20,7 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	if err != nil {
 		return err
 	}
+	defer svc.Close()
 	modelName := svc.Model()
 	effort := svc.ReasoningEffort()
 	thinking := "on"

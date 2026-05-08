@@ -84,6 +84,15 @@ func (p DefaultToolPolicy) Decide(spec core.ToolSpec, call core.ToolCall) Policy
 	switch spec.Name {
 	case "edit", "write", "apply_patch", "exec_shell":
 	default:
+		if strings.HasPrefix(spec.Name, "mcp__") {
+			return PolicyDecision{
+				Allow:            true,
+				RequiresApproval: true,
+				Reason:           "MCP tool requires approval",
+				Code:             "approval_required",
+				Phase:            "needs_approval",
+			}
+		}
 		return PolicyDecision{Allow: true, Code: "non_mutating_default", Phase: "allowed"}
 	}
 	return PolicyDecision{

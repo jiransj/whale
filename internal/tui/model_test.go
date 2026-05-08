@@ -159,6 +159,51 @@ func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
 	}
 }
 
+func TestPickerEventsClearBusyState(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   service.Event
+		mode mode
+	}{
+		{
+			name: "model picker",
+			ev: service.Event{
+				Kind:            service.EventModelPicker,
+				ModelChoices:    []string{"deepseek-v4-pro"},
+				EffortChoices:   []string{"normal"},
+				ThinkingChoices: []string{"on", "off"},
+				CurrentModel:    "deepseek-v4-pro",
+				CurrentEffort:   "normal",
+				CurrentThinking: "on",
+			},
+			mode: modeModelPicker,
+		},
+		{
+			name: "permissions picker",
+			ev: service.Event{
+				Kind:            service.EventPermissionsPicker,
+				ApprovalChoices: []string{"Ask first", "Auto approve"},
+				CurrentApproval: "Ask first",
+			},
+			mode: modePermissionsPicker,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := model{assembler: tuirender.NewAssembler(), mode: modeChat, busy: true, stopping: true}
+			m.busySince = time.Now().Add(-5 * time.Minute)
+			next, _ := m.Update(svcMsg(tt.ev))
+			m = next.(model)
+			if m.busy || m.stopping || !m.busySince.IsZero() {
+				t.Fatalf("expected picker event to clear busy state, busy=%v stopping=%v busySince=%v", m.busy, m.stopping, m.busySince)
+			}
+			if m.mode != tt.mode {
+				t.Fatalf("expected mode %v, got %v", tt.mode, m.mode)
+			}
+		})
+	}
+}
+
 func TestTurnDoneReasoningOnlyCommitsFallback(t *testing.T) {
 	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 80, height: 24, busy: true}
 	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventReasoningDelta, Text: "I should answer."}))
@@ -642,6 +687,36 @@ func TestChatIdleViewDoesNotRenderEmptyViewportFrame(t *testing.T) {
 	}
 }
 
+func TestChatFooterStaysPinnedAfterSlashSuggestionsClose(t *testing.T) {
+	m := newModel(nil, "deepseek-v4-pro", "normal", "on")
+	m.width = 80
+	m.height = 24
+	m.cwd = "~/Engineer/ai/dsk/whale"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	m = next.(model)
+	withSlash := m.View()
+	assertFooterLastLine(t, withSlash, "model: deepseek-v4-pro")
+	assertFooterLastLine(t, withSlash, "whale")
+	assertFooterLastLineNotContains(t, withSlash, "dir:")
+	if !strings.Contains(withSlash, "Tab/Enter pick") {
+		t.Fatalf("expected slash suggestions while / is present:\n%s", withSlash)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(model)
+	afterDelete := m.View()
+	assertFooterLastLine(t, afterDelete, "model: deepseek-v4-pro")
+	assertFooterLastLine(t, afterDelete, "whale")
+	assertFooterLastLineNotContains(t, afterDelete, "dir:")
+	if strings.Contains(afterDelete, "Tab/Enter pick") {
+		t.Fatalf("expected slash suggestions to disappear after deleting /:\n%s", afterDelete)
+	}
+	if got := strings.Count(afterDelete, "\n") + 1; got != m.height {
+		t.Fatalf("expected view to keep terminal height %d after slash closes, got %d:\n%s", m.height, got, afterDelete)
+	}
+}
+
 func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
@@ -653,6 +728,28 @@ func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 	}
 	if strings.Contains(view, "┌") {
 		t.Fatalf("live chat view should not render bordered viewport:\n%s", view)
+	}
+}
+
+func assertFooterLastLine(t *testing.T, view, want string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("empty view")
+	}
+	if got := lines[len(lines)-1]; !strings.Contains(got, want) {
+		t.Fatalf("expected footer %q on last line, got %q in view:\n%s", want, got, view)
+	}
+}
+
+func assertFooterLastLineNotContains(t *testing.T, view, unwanted string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("empty view")
+	}
+	if got := lines[len(lines)-1]; strings.Contains(got, unwanted) {
+		t.Fatalf("expected footer not to contain %q, got %q in view:\n%s", unwanted, got, view)
 	}
 }
 

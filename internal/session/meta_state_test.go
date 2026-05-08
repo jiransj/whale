@@ -11,6 +11,7 @@ func TestSessionMetaPatchAndLoad(t *testing.T) {
 	_, err := PatchSessionMeta(dir, "s1", SessionMeta{
 		Workspace: "/tmp/work",
 		Branch:    "main",
+		Title:     "first request",
 		TurnCount: 2,
 		Summary:   "hello",
 	})
@@ -21,8 +22,25 @@ func TestSessionMetaPatchAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load meta: %v", err)
 	}
-	if got.Workspace != "/tmp/work" || got.Branch != "main" || got.TurnCount != 2 || got.Summary != "hello" {
+	if got.Workspace != "/tmp/work" || got.Branch != "main" || got.Title != "first request" || got.TurnCount != 2 || got.Summary != "hello" {
 		t.Fatalf("unexpected meta: %+v", got)
+	}
+}
+
+func TestSessionMetaTitleIsSetOnce(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := PatchSessionMeta(dir, "s1", SessionMeta{Title: "first request"}); err != nil {
+		t.Fatalf("patch title: %v", err)
+	}
+	if _, err := PatchSessionMeta(dir, "s1", SessionMeta{Title: "second request"}); err != nil {
+		t.Fatalf("patch second title: %v", err)
+	}
+	got, err := LoadSessionMeta(dir, "s1")
+	if err != nil {
+		t.Fatalf("load meta: %v", err)
+	}
+	if got.Title != "first request" {
+		t.Fatalf("expected first title to be preserved, got %q", got.Title)
 	}
 }
 
@@ -43,5 +61,39 @@ func TestListSessionsIncludesMeta(t *testing.T) {
 	}
 	if out[0].Meta.Branch != "dev" || out[0].Meta.TurnCount != 3 {
 		t.Fatalf("unexpected meta: %+v", out[0].Meta)
+	}
+}
+
+func TestListSessionsConversationTitlePriorityAndFallback(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveSessionMeta(dir, "titled", SessionMeta{Title: "Saved title"}); err != nil {
+		t.Fatalf("save titled meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "titled.jsonl"), []byte("{\"Role\":\"user\",\"Text\":\"fallback\"}\n"), 0o600); err != nil {
+		t.Fatalf("write titled session: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fallback.jsonl"), []byte("{\"Role\":\"assistant\",\"Text\":\"skip\"}\n{\"Role\":\"user\",\"Text\":\"  hello\\nworld  \"}\n"), 0o600); err != nil {
+		t.Fatalf("write fallback session: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty.jsonl"), []byte("{\"Role\":\"user\",\"Hidden\":true,\"Text\":\"hidden\"}\n"), 0o600); err != nil {
+		t.Fatalf("write empty session: %v", err)
+	}
+
+	out, err := ListSessions(dir, 10)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	byID := map[string]SessionSummary{}
+	for _, s := range out {
+		byID[s.ID] = s
+	}
+	if byID["titled"].Conversation != "Saved title" {
+		t.Fatalf("expected saved title, got %q", byID["titled"].Conversation)
+	}
+	if byID["fallback"].Conversation != "hello world" {
+		t.Fatalf("expected first visible user fallback, got %q", byID["fallback"].Conversation)
+	}
+	if byID["empty"].Conversation != "(no message yet)" {
+		t.Fatalf("expected empty placeholder, got %q", byID["empty"].Conversation)
 	}
 }

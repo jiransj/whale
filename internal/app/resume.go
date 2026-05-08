@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/usewhale/whale/internal/session"
 )
@@ -21,14 +22,54 @@ func (a *App) ListResumeChoices(limit int) ([]string, error) {
 	}
 	out := make([]string, 0, len(summaries)+1)
 	out = append(out, "recent sessions:")
+	out = append(out, "   #   Updated   Branch                    Conversation")
 	for i, s := range summaries {
 		marker := " "
 		if s.ID == a.sessionID {
 			marker = "*"
 		}
-		out = append(out, fmt.Sprintf("%s %2d) %s  updated:%s  branch:%s", marker, i+1, s.ID, s.ModTime.Local().Format("2006-01-02 15:04:05"), s.Meta.Branch))
+		branch := strings.TrimSpace(s.Meta.Branch)
+		if branch == "" {
+			branch = "-"
+		}
+		out = append(out, fmt.Sprintf("%s %2d) %-9s %-24s %s", marker, i+1, humanAgo(s.ModTime), truncateRunes(branch, 24), truncateRunes(s.Conversation, 80)))
 	}
 	return out, nil
+}
+
+func humanAgo(ts time.Time) string {
+	if ts.IsZero() {
+		return "-"
+	}
+	d := time.Since(ts)
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+}
+
+func truncateRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max == 1 {
+		return "…"
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 func (a *App) ApplyResumeChoice(choice string) (string, error) {

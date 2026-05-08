@@ -1,6 +1,8 @@
 package session
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -9,10 +11,11 @@ import (
 )
 
 type SessionSummary struct {
-	ID      string
-	ModTime time.Time
-	Size    int64
-	Meta    SessionMeta
+	ID           string
+	ModTime      time.Time
+	Size         int64
+	Meta         SessionMeta
+	Conversation string
 }
 
 func ListSessions(sessionsDir string, limit int) ([]SessionSummary, error) {
@@ -54,7 +57,68 @@ func ListSessions(sessionsDir string, limit int) ([]SessionSummary, error) {
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
+	for i := range out {
+		out[i].Conversation = SessionConversationTitle(sessionsDir, out[i].ID, out[i].Meta)
+	}
 	return out, nil
+}
+
+func SessionConversationTitle(sessionsDir, sessionID string, meta SessionMeta) string {
+	if title := strings.TrimSpace(meta.Title); title != "" {
+		return singleLine(title)
+	}
+	if title, err := FirstVisibleUserMessage(sessionsDir, sessionID); err == nil && title != "" {
+		return title
+	}
+	return "(no message yet)"
+}
+
+func FirstVisibleUserMessage(sessionsDir, sessionID string) (string, error) {
+	path := FindSessionPathByID(sessionsDir, sessionID)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 2*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var msg struct {
+			Role   string
+			Text   string
+			Hidden bool
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if msg.Role != "user" || msg.Hidden {
+			continue
+		}
+		if text := strings.TrimSpace(msg.Text); text != "" {
+			return singleLine(text), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+func singleLine(text string) string {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Join(fields, " ")
 }
 
 func FindSessionPathByID(sessionsDir, sessionID string) string {

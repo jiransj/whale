@@ -12,13 +12,14 @@ import (
 	"github.com/usewhale/whale/internal/agent"
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/defaults"
+	whalemcp "github.com/usewhale/whale/internal/mcp"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
 	"github.com/usewhale/whale/internal/store"
 	"github.com/usewhale/whale/internal/tools"
 )
 
-const CommandsHelp = "/model, /permissions, /ask [prompt], /plan [prompt], /new [id], /resume, /clear, /status, /compact, /init, /exit"
+const CommandsHelp = "/model, /permissions, /ask [prompt], /plan [prompt], /new [id], /resume, /clear, /status, /mcp, /compact, /init, /exit"
 
 type Config struct {
 	DataDir              string
@@ -36,6 +37,7 @@ type Config struct {
 	ModelExplicit        bool
 	ReasoningEffort      string
 	ThinkingEnabled      bool
+	MCPConfigPath        string
 }
 
 type StartOptions struct {
@@ -72,6 +74,7 @@ type App struct {
 	model            string
 	reasoningEffort  string
 	thinkingEnabled  bool
+	mcpManager       *whalemcp.Manager
 
 	a          *agent.Agent
 	apiKey     string
@@ -123,7 +126,19 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init tools failed: %w", err)
 	}
-	toolRegistry, err := core.NewToolRegistryChecked(toolset.Tools())
+	mcpConfigPath := strings.TrimSpace(cfg.MCPConfigPath)
+	if mcpConfigPath == "" {
+		mcpConfigPath = whalemcp.DefaultConfigPath(cfg.DataDir)
+	}
+	mcpConfig, err := whalemcp.LoadConfig(mcpConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("load mcp config: %w", err)
+	}
+	mcpManager := whalemcp.NewManager(mcpConfig)
+	mcpManager.Initialize(ctx)
+	registeredTools := append([]core.Tool{}, toolset.Tools()...)
+	registeredTools = append(registeredTools, mcpManager.Tools()...)
+	toolRegistry, err := core.NewToolRegistryChecked(registeredTools)
 	if err != nil {
 		return nil, fmt.Errorf("init tool registry failed: %w", err)
 	}
@@ -192,6 +207,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		model:            model,
 		reasoningEffort:  effort,
 		thinkingEnabled:  thinking,
+		mcpManager:       mcpManager,
 		apiKey:           apiKey,
 		approvalFn:       defaultApprovalFunc(start.ApprovalFunc),
 		userInput:        defaultUserInputFunc(start.UserInputFunc),
@@ -240,6 +256,21 @@ func (a *App) StartupLines() []string {
 	}
 	if len(a.hookSources) > 0 {
 		lines = append(lines, fmt.Sprintf("hooks: %s", strings.Join(a.hookSources, ", ")))
+	}
+	if a.mcpManager != nil {
+		states := a.mcpManager.States()
+		if len(states) > 0 {
+			connected := 0
+			failed := 0
+			for _, st := range states {
+				if st.Connected {
+					connected++
+				} else if st.Error != "" {
+					failed++
+				}
+			}
+			lines = append(lines, fmt.Sprintf("mcp: %d server(s), %d connected, %d failed", len(states), connected, failed))
+		}
 	}
 	lines = append(lines, "commands: "+CommandsHelp, "env: DEEPSEEK_API_KEY=...")
 	if ust, err := session.LoadUserInputState(a.sessionsDir, a.sessionID); err == nil && ust.Pending {
@@ -311,6 +342,13 @@ func (a *App) SetThinkingEnabled(enabled bool) {
 	a.thinkingEnabled = enabled
 	a.a = nil
 	a.savePreferences()
+}
+
+func (a *App) Close() error {
+	if a == nil || a.mcpManager == nil {
+		return nil
+	}
+	return a.mcpManager.Close()
 }
 
 func (a *App) savePreferences() {

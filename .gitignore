@@ -19,6 +19,8 @@ session.json
 .env
 .env.*
 !.env.example
+docs/local-roost-workflow.md
+scripts/local/
 
 # --- IDE / Editor ---
 .vscode/

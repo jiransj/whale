@@ -26,11 +26,14 @@ func (m model) renderBody(mainWidth, bodyHeight int) string {
 }
 
 func (m model) renderLiveArea(width, bodyHeight int) string {
+	if bodyHeight <= 0 {
+		return ""
+	}
 	lines := m.renderChatLines(max(20, width-2))
 	if len(lines) == 0 {
 		return ""
 	}
-	maxLines := max(3, bodyHeight)
+	maxLines := bodyHeight
 	truncated := false
 	if len(lines) > maxLines {
 		truncated = true
@@ -48,26 +51,22 @@ func (m model) renderLiveArea(width, bodyHeight int) string {
 }
 
 func (m model) View() string {
-	mainWidth, bodyHeight := m.layoutDims()
+	mainWidth, _ := m.layoutDims()
 	m.refreshViewportContent()
-	body := m.renderBody(mainWidth, bodyHeight)
 	footerText := "model: " + m.model + "  effort: " + m.effort + "  thinking: " + m.thinking
 	if m.chatMode == "ask" || m.chatMode == "plan" {
 		footerText += "  mode: " + m.chatMode + " (Shift+Tab to switch)"
 	}
-	footer := lipgloss.JoinHorizontal(lipgloss.Left, footerText)
-	parts := make([]string, 0, 4)
-	if body != "" {
-		parts = append(parts, body)
-		parts = append(parts, "\n")
+	if m.cwd != "" {
+		footerText = appendFooterDir(footerText, m.cwd, mainWidth)
 	}
+	footer := lipgloss.NewStyle().Width(mainWidth).MaxWidth(mainWidth).Render(lipgloss.JoinHorizontal(lipgloss.Left, footerText))
+	bottomParts := make([]string, 0, 8)
 	if statusLine := m.renderBusyStatusLine(mainWidth); statusLine != "" {
-		parts = append(parts, statusLine)
+		bottomParts = append(bottomParts, statusLine)
 	}
-	parts = append(parts, m.input.View(), footer)
-	view := strings.Join(parts, "\n")
 	if m.mode == modeChat && m.hasSlashSuggestions() {
-		view += "\n" + m.renderSlashSuggestions()
+		bottomParts = append(bottomParts, m.renderSlashSuggestions())
 	}
 	if m.mode == modeApproval {
 		opts := []string{"Allow (a)", "Allow for Session (s)", "Deny (d)"}
@@ -80,7 +79,7 @@ func (m model) View() string {
 		if diff := renderFileDiffMetadataPlain(m.approval.metadata, 80); diff != "" {
 			approvalBody += "\n\n" + diff
 		}
-		view += "\n\n" + lipgloss.NewStyle().Foreground(tuitheme.Default.Error).Render(
+		approval := lipgloss.NewStyle().Foreground(tuitheme.Default.Error).Render(
 			fmt.Sprintf(
 				"approval: %s\n%s\n\n%s\n(←/→/tab select, enter confirm, esc deny)",
 				m.approval.toolName,
@@ -88,9 +87,10 @@ func (m model) View() string {
 				strings.Join(opts, "   "),
 			),
 		)
+		bottomParts = append(bottomParts, approval)
 	}
 	if m.mode == modePlanImplementation {
-		view += "\n\n" + m.renderPlanImplementationPicker()
+		bottomParts = append(bottomParts, m.renderPlanImplementationPicker())
 	}
 	if m.mode == modeSessionPicker {
 		rows := []string{"sessions (↑/↓ select, enter confirm, esc cancel):"}
@@ -103,9 +103,9 @@ func (m model) View() string {
 			if i == m.sessionIndex {
 				prefix = "> "
 			}
-			rows = append(rows, prefix+stripSessionOrdinal(row))
+			rows = append(rows, prefix+displaySessionChoiceRow(row))
 		}
-		view += "\n\n" + lipgloss.NewStyle().Foreground(tuitheme.Default.Plan).Render(strings.Join(rows, "\n"))
+		bottomParts = append(bottomParts, lipgloss.NewStyle().Foreground(tuitheme.Default.Plan).Render(strings.Join(rows, "\n")))
 	}
 	if m.mode == modeUserInput {
 		if m.userInput.index < len(m.userInput.questions) {
@@ -121,16 +121,90 @@ func (m model) View() string {
 				rows = append(rows, fmt.Sprintf("%s%s - %s", prefix, opt.Label, opt.Description))
 			}
 			rows = append(rows, "", "(up/down choose, enter confirm, esc cancel)")
-			view += "\n\n" + lipgloss.NewStyle().Foreground(tuitheme.Default.Info).Render(strings.Join(rows, "\n"))
+			bottomParts = append(bottomParts, lipgloss.NewStyle().Foreground(tuitheme.Default.Info).Render(strings.Join(rows, "\n")))
 		}
 	}
 	if m.mode == modeModelPicker {
-		view += "\n\n" + m.renderModelPicker()
+		bottomParts = append(bottomParts, m.renderModelPicker())
 	}
 	if m.mode == modePermissionsPicker {
-		view += "\n\n" + m.renderPermissionsPicker()
+		bottomParts = append(bottomParts, m.renderPermissionsPicker())
 	}
-	return view
+	bottomParts = append(bottomParts, m.input.View(), footer)
+	bottom := strings.Join(bottomParts, "\n")
+
+	bodyHeight := m.height - countVisibleLines(bottom)
+	if m.height <= 0 {
+		bodyHeight = 0
+	}
+	bodyHeight = max(0, bodyHeight)
+	body := m.renderBody(mainWidth, bodyHeight)
+	body = padVisibleLines(body, bodyHeight, mainWidth)
+	if body == "" {
+		return bottom
+	}
+	return body + "\n" + bottom
+}
+
+func countVisibleLines(s string) int {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
+}
+
+func padVisibleLines(s string, targetLines, width int) string {
+	if targetLines <= 0 {
+		return ""
+	}
+	s = strings.TrimRight(s, "\n")
+	lines := []string{}
+	if s != "" {
+		lines = strings.Split(s, "\n")
+	}
+	if len(lines) > targetLines {
+		lines = lines[len(lines)-targetLines:]
+	}
+	for len(lines) < targetLines {
+		lines = append(lines, "")
+	}
+	style := lipgloss.NewStyle().Width(width).MaxWidth(width)
+	for i, line := range lines {
+		lines[i] = style.Render(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func appendFooterDir(base, cwd string, width int) string {
+	segment := "  "
+	available := width - lipgloss.Width(base) - lipgloss.Width(segment)
+	if available <= 0 {
+		return base
+	}
+	return base + segment + fitTail(cwd, available)
+}
+
+func fitTail(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width <= 3 {
+		return strings.Repeat(".", width)
+	}
+	runes := []rune(s)
+	tail := ""
+	for i := len(runes) - 1; i >= 0; i-- {
+		next := string(runes[i:])
+		if lipgloss.Width("..."+next) > width {
+			break
+		}
+		tail = next
+	}
+	return "..." + tail
 }
 
 func (m model) renderBusyStatusLine(width int) string {

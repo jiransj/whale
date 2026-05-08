@@ -95,6 +95,9 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 }
 
 func (a *App) HandleLocalCommand(line string) (handled bool, output string, err error) {
+	if strings.TrimSpace(line) == "/mcp" {
+		return true, a.buildMCPStatus(), nil
+	}
 	if strings.TrimSpace(line) == "/tools" {
 		specs := a.toolRegistry.Specs()
 		if len(specs) == 0 {

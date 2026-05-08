@@ -66,6 +66,9 @@ func (a *App) ensureAgent() (*agent.Agent, error) {
 }
 
 func (a *App) RunTurn(ctx context.Context, input string, hiddenInput bool) (<-chan agent.AgentEvent, error) {
+	if !hiddenInput && strings.TrimSpace(input) != "" {
+		_, _ = session.PatchSessionMeta(a.sessionsDir, a.sessionID, session.SessionMeta{Title: input})
+	}
 	ag, err := a.ensureAgent()
 	if err != nil {
 		return nil, err

@@ -9,19 +9,11 @@ func isSessionHeaderRow(row string) bool {
 	return strings.HasSuffix(strings.TrimSpace(row), ":")
 }
 
-func stripSessionOrdinal(row string) string {
-	s := strings.TrimSpace(row)
-	if s == "" {
-		return row
-	}
-	// examples: "1) xxx", "*  2) xxx", " 3) xxx"
-	if strings.HasPrefix(s, "*") {
-		s = strings.TrimSpace(strings.TrimPrefix(s, "*"))
-	}
-	if n, ok := strings.CutSuffix(strings.Fields(s)[0], ")"); ok {
-		if _, err := strconv.Atoi(n); err == nil {
-			return strings.TrimSpace(strings.TrimPrefix(s, strings.Fields(s)[0]))
-		}
+func displaySessionChoiceRow(row string) string {
+	// The TUI owns the left gutter for selection. Preserve the numeric column
+	// from the app row, but hide the app-level current-session marker.
+	if strings.HasPrefix(row, "*") {
+		return " " + strings.TrimPrefix(row, "*")
 	}
 	return row
 }

@@ -61,7 +61,62 @@ func (a *App) buildStatus() string {
 		fmt.Sprintf("- thinking: %s", onOff(a.thinkingEnabled)),
 	}
 	parts = append(parts, formatContextWindowStatus(a))
+	if mcpLine := a.formatMCPStatusLine(); mcpLine != "" {
+		parts = append(parts, mcpLine)
+	}
 	return strings.Join(parts, "\n")
+}
+
+func (a *App) formatMCPStatusLine() string {
+	if a == nil || a.mcpManager == nil {
+		return ""
+	}
+	states := a.mcpManager.States()
+	if len(states) == 0 {
+		return "- mcp: no configured servers"
+	}
+	connected := 0
+	failed := 0
+	tools := 0
+	for _, st := range states {
+		if st.Connected {
+			connected++
+			tools += st.Tools
+		} else if st.Error != "" {
+			failed++
+		}
+	}
+	return fmt.Sprintf("- mcp: %d server(s), %d connected, %d failed, %d tool(s)", len(states), connected, failed, tools)
+}
+
+func (a *App) buildMCPStatus() string {
+	if a == nil || a.mcpManager == nil {
+		return "MCP\n\nconfig: unavailable\nservers: none"
+	}
+	lines := []string{"MCP", "", fmt.Sprintf("config: %s", a.mcpManager.ConfigPath())}
+	states := a.mcpManager.States()
+	if len(states) == 0 {
+		lines = append(lines, "servers: none")
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines, fmt.Sprintf("servers: %d", len(states)))
+	for _, st := range states {
+		status := "disabled"
+		if st.Connected {
+			status = "connected"
+		} else if st.Error != "" {
+			status = "failed"
+		}
+		line := fmt.Sprintf("- %s: %s", st.Name, status)
+		if st.Tools > 0 {
+			line += fmt.Sprintf(" (%d tool(s))", st.Tools)
+		}
+		lines = append(lines, line)
+		if st.Error != "" {
+			lines = append(lines, "  error: "+st.Error)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func modeDisplay(mode session.Mode) string {

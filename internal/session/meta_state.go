@@ -12,6 +12,7 @@ import (
 
 type SessionMeta struct {
 	Branch       string    `json:"branch,omitempty"`
+	Title        string    `json:"title,omitempty"`
 	Summary      string    `json:"summary,omitempty"`
 	TotalCostUSD float64   `json:"total_cost_usd,omitempty"`
 	TurnCount    int       `json:"turn_count,omitempty"`
@@ -62,6 +63,9 @@ func PatchSessionMeta(sessionsDir, sessionID string, patch SessionMeta) (Session
 	}
 	if strings.TrimSpace(patch.Branch) != "" {
 		cur.Branch = strings.TrimSpace(patch.Branch)
+	}
+	if strings.TrimSpace(cur.Title) == "" && strings.TrimSpace(patch.Title) != "" {
+		cur.Title = strings.TrimSpace(patch.Title)
 	}
 	if strings.TrimSpace(patch.Summary) != "" {
 		cur.Summary = strings.TrimSpace(patch.Summary)

@@ -352,6 +352,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sawReasoningThisTurn = false
 			m.sawTerminalToolOutcomeThisTurn = false
 		case service.EventModelPicker:
+			m.stopBusy()
+			m.stopping = false
 			m.mode = modeModelPicker
 			m.modelPicker.stage = 0
 			m.modelPicker.models = ev.ModelChoices
@@ -361,6 +363,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.modelPicker.effIx = indexOf(ev.EffortChoices, ev.CurrentEffort)
 			m.modelPicker.thinkIx = indexOf(ev.ThinkingChoices, ev.CurrentThinking)
 		case service.EventPermissionsPicker:
+			m.stopBusy()
+			m.stopping = false
 			m.mode = modePermissionsPicker
 			m.permissionsPicker.choices = ev.ApprovalChoices
 			m.permissionsPicker.index = indexOf(ev.ApprovalChoices, ev.CurrentApproval)
