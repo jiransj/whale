@@ -145,6 +145,8 @@ func summarizeFailedResult(env toolResultEnvelope, fallback string) (string, str
 	))
 
 	switch env.code {
+	case "request_replan":
+		return "result_failed", summarizeReplanRequired(env)
 	case "approval_denied", "policy_denied", "permission_denied":
 		return "result_denied", "DENIED · " + detail
 	case "timeout":
@@ -178,6 +180,23 @@ func summarizeFailedResult(env toolResultEnvelope, fallback string) (string, str
 		return "result_failed", fmt.Sprintf("%s · %s · %s", prefix, duration, detail)
 	}
 	return "result_failed", fmt.Sprintf("%s · %s", prefix, detail)
+}
+
+func summarizeReplanRequired(env toolResultEnvelope) string {
+	last := strings.TrimSpace(asString(env.data["last_error"]))
+	if last != "" {
+		if inner, ok := parseToolEnvelopeOK(last); ok {
+			_, text := summarizeFailedResult(inner, "tool failed")
+			if strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+		return "✗ · " + firstLine(last)
+	}
+	if tool := strings.TrimSpace(asString(env.data["tool_name"])); tool != "" {
+		return "✗ · " + tool + " failed; choose a different approach"
+	}
+	return "✗ · tool failed; choose a different approach"
 }
 
 func summarizeExploreResult(toolName string, env toolResultEnvelope, successBySignal bool) (string, string) {

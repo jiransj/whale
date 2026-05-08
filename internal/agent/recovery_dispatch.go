@@ -89,6 +89,9 @@ func (a *Agent) dispatchWithRecovery(ctx context.Context, sessionID string, call
 			}
 			return replanRes, true
 		}
+		if rule.Action == RecoveryActionPassThrough {
+			return res, true
+		}
 		if attempt > rule.MaxAttempts || rule.Action == RecoveryActionHardBlock {
 			events <- AgentEvent{
 				Type: AgentEventTypeToolRecoveryExhausted,

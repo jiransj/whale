@@ -341,7 +341,7 @@ func (p *execFailureProvider) StreamResponse(_ context.Context, _ []core.Message
 	return out
 }
 
-func TestRuntimeExecFailureWrapsIntoReplanResult(t *testing.T) {
+func TestRuntimeExecFailurePassesThroughWithoutReplan(t *testing.T) {
 	root := t.TempDir()
 	toolset, err := tools.NewToolset(root)
 	if err != nil {
@@ -358,14 +358,17 @@ func TestRuntimeExecFailureWrapsIntoReplanResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run stream failed: %v", err)
 	}
-	var sawReplan bool
+	var sawExecFailed bool
 	for ev := range events {
 		if ev.Type == agent.AgentEventTypeToolResult && ev.Result != nil && strings.Contains(ev.Result.Content, `"code":"request_replan"`) {
-			sawReplan = true
+			t.Fatalf("unexpected request_replan for exec failure: %s", ev.Result.Content)
+		}
+		if ev.Type == agent.AgentEventTypeToolResult && ev.Result != nil && strings.Contains(ev.Result.Content, `"code":"exec_failed"`) {
+			sawExecFailed = true
 		}
 	}
-	if !sawReplan {
-		t.Fatal("expected exec failure to be wrapped into request_replan")
+	if !sawExecFailed {
+		t.Fatal("expected original exec_failed tool result")
 	}
 }
 

@@ -10,14 +10,17 @@ import (
 type FailureClass string
 
 const (
-	FailureClassTimeout        FailureClass = "timeout"
-	FailureClassExecFailed     FailureClass = "exec_failed"
-	FailureClassParseFailed    FailureClass = "parse_failed"
-	FailureClassEmptyOutput    FailureClass = "empty_output"
-	FailureClassPolicyDenied   FailureClass = "policy_denied"
-	FailureClassApprovalDenied FailureClass = "approval_denied"
-	FailureClassPlanRequired   FailureClass = "plan_required"
-	FailureClassUnknown        FailureClass = "unknown"
+	FailureClassTimeout          FailureClass = "timeout"
+	FailureClassExecFailed       FailureClass = "exec_failed"
+	FailureClassParseFailed      FailureClass = "parse_failed"
+	FailureClassEmptyOutput      FailureClass = "empty_output"
+	FailureClassPolicyDenied     FailureClass = "policy_denied"
+	FailureClassApprovalDenied   FailureClass = "approval_denied"
+	FailureClassPlanRequired     FailureClass = "plan_required"
+	FailureClassPermissionDenied FailureClass = "permission_denied"
+	FailureClassMCPToolError     FailureClass = "mcp_tool_error"
+	FailureClassToolUnavailable  FailureClass = "tool_unavailable"
+	FailureClassUnknown          FailureClass = "unknown"
 )
 
 type RecoveryAction string
@@ -28,6 +31,7 @@ const (
 	RecoveryActionFallbackReadOnly RecoveryAction = "fallback_readonly"
 	RecoveryActionRequestReplan    RecoveryAction = "request_replan"
 	RecoveryActionHardBlock        RecoveryAction = "hard_block"
+	RecoveryActionPassThrough      RecoveryAction = "pass_through"
 )
 
 type RecoveryRule struct {
@@ -45,14 +49,17 @@ func DefaultRecoveryPolicy() RecoveryPolicy {
 	return RecoveryPolicy{
 		Enabled: true,
 		Rules: map[FailureClass]RecoveryRule{
-			FailureClassTimeout:        {Action: RecoveryActionRetryWithBackoff, MaxAttempts: 2, BackoffMS: 200},
-			FailureClassParseFailed:    {Action: RecoveryActionRetrySame, MaxAttempts: 1},
-			FailureClassEmptyOutput:    {Action: RecoveryActionRetrySame, MaxAttempts: 1},
-			FailureClassExecFailed:     {Action: RecoveryActionRequestReplan, MaxAttempts: 0},
-			FailureClassPolicyDenied:   {Action: RecoveryActionHardBlock, MaxAttempts: 0},
-			FailureClassApprovalDenied: {Action: RecoveryActionHardBlock, MaxAttempts: 0},
-			FailureClassPlanRequired:   {Action: RecoveryActionHardBlock, MaxAttempts: 0},
-			FailureClassUnknown:        {Action: RecoveryActionRequestReplan, MaxAttempts: 0},
+			FailureClassTimeout:          {Action: RecoveryActionRetryWithBackoff, MaxAttempts: 2, BackoffMS: 200},
+			FailureClassParseFailed:      {Action: RecoveryActionRetrySame, MaxAttempts: 1},
+			FailureClassEmptyOutput:      {Action: RecoveryActionRetrySame, MaxAttempts: 1},
+			FailureClassExecFailed:       {Action: RecoveryActionPassThrough, MaxAttempts: 0},
+			FailureClassPolicyDenied:     {Action: RecoveryActionHardBlock, MaxAttempts: 0},
+			FailureClassApprovalDenied:   {Action: RecoveryActionHardBlock, MaxAttempts: 0},
+			FailureClassPlanRequired:     {Action: RecoveryActionHardBlock, MaxAttempts: 0},
+			FailureClassPermissionDenied: {Action: RecoveryActionPassThrough, MaxAttempts: 0},
+			FailureClassMCPToolError:     {Action: RecoveryActionPassThrough, MaxAttempts: 0},
+			FailureClassToolUnavailable:  {Action: RecoveryActionPassThrough, MaxAttempts: 0},
+			FailureClassUnknown:          {Action: RecoveryActionPassThrough, MaxAttempts: 0},
 		},
 	}
 }
@@ -83,6 +90,13 @@ func classifyToolFailure(res core.ToolResult, dispatchErr error) FailureClass {
 			return FailureClassTimeout
 		case "exec_failed":
 			return FailureClassExecFailed
+		case "mcp_call_failed":
+			return FailureClassToolUnavailable
+		case "mcp_tool_error":
+			if isAccessDeniedText(env.Error) {
+				return FailureClassPermissionDenied
+			}
+			return FailureClassMCPToolError
 		case "parse_failed", "invalid_args", "invalid_plan_update":
 			return FailureClassParseFailed
 		case "not_found", "read_failed", "permission_denied":
@@ -100,4 +114,11 @@ func classifyToolFailure(res core.ToolResult, dispatchErr error) FailureClass {
 		return FailureClassTimeout
 	}
 	return FailureClassUnknown
+}
+
+func isAccessDeniedText(s string) bool {
+	lc := strings.ToLower(s)
+	return strings.Contains(lc, "access denied") ||
+		strings.Contains(lc, "outside allowed directories") ||
+		strings.Contains(lc, "permission denied")
 }

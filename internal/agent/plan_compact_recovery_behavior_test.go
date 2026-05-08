@@ -390,6 +390,92 @@ func TestRecoveryFallbackReadonlyExecutesTool(t *testing.T) {
 	}
 }
 
+type failExecDefaultTool struct{}
+
+func (f failExecDefaultTool) Name() string { return "exec_default_fail" }
+func (f failExecDefaultTool) Run(_ context.Context, call ToolCall) (ToolResult, error) {
+	return ToolResult{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Content:    `{"success":false,"error":"command failed","code":"exec_failed"}`,
+		IsError:    true,
+	}, nil
+}
+
+type unknownDefaultTool struct{}
+
+func (u unknownDefaultTool) Name() string { return "unknown_default_fail" }
+func (u unknownDefaultTool) Run(_ context.Context, call ToolCall) (ToolResult, error) {
+	return ToolResult{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Content:    `{"success":false,"error":"opaque failure","code":"opaque_failure"}`,
+		IsError:    true,
+	}, nil
+}
+
+type mcpDeniedDefaultTool struct{}
+
+func (m mcpDeniedDefaultTool) Name() string { return "mcp__fs__search_files" }
+func (m mcpDeniedDefaultTool) Run(_ context.Context, call ToolCall) (ToolResult, error) {
+	return ToolResult{
+		ToolCallID: call.ID,
+		Name:       call.Name,
+		Content:    `{"success":false,"error":"Error: Access denied - path outside allowed directories: /workspace not in /tmp","code":"mcp_tool_error"}`,
+		IsError:    true,
+	}, nil
+}
+
+func TestDefaultRecoveryPassesThroughCommonToolFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		tool string
+		reg  Tool
+		code string
+	}{
+		{name: "exec failed", tool: "exec_default_fail", reg: failExecDefaultTool{}, code: `"code":"exec_failed"`},
+		{name: "unknown", tool: "unknown_default_fail", reg: unknownDefaultTool{}, code: `"code":"opaque_failure"`},
+		{name: "mcp access denied", tool: "mcp__fs__search_files", reg: mcpDeniedDefaultTool{}, code: `"code":"mcp_tool_error"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewInMemoryStore()
+			prov := &oneToolProvider{tool: tt.tool, input: `{}`}
+			a := NewAgentWithRegistry(
+				prov,
+				store,
+				NewToolRegistry([]Tool{tt.reg}),
+				WithToolPolicy(DefaultToolPolicy{Mode: ApprovalModeNever}),
+				WithRecoveryPolicy(DefaultRecoveryPolicy()),
+			)
+			sessionID := "s-pass-through-" + strings.ReplaceAll(tt.name, " ", "-")
+			events, err := a.RunStream(context.Background(), sessionID, "go")
+			if err != nil {
+				t.Fatalf("run stream failed: %v", err)
+			}
+			var sawOriginal bool
+			for ev := range events {
+				switch ev.Type {
+				case AgentEventTypeToolRecoveryExhausted, AgentEventTypeReplanRequiredSet:
+					t.Fatalf("unexpected recovery event for %s: %s", tt.name, ev.Type)
+				case AgentEventTypeToolResult:
+					if ev.Result != nil {
+						if strings.Contains(ev.Result.Content, `"code":"request_replan"`) {
+							t.Fatalf("unexpected request_replan: %s", ev.Result.Content)
+						}
+						if strings.Contains(ev.Result.Content, tt.code) {
+							sawOriginal = true
+						}
+					}
+				}
+			}
+			if !sawOriginal {
+				t.Fatalf("expected original code %s", tt.code)
+			}
+		})
+	}
+}
+
 func TestRecoveryRequestReplanBuildsStructuredResult(t *testing.T) {
 	store := NewInMemoryStore()
 	prov := &oneToolProvider{tool: "always_fail", input: `{}`}

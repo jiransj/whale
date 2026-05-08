@@ -989,6 +989,32 @@ func TestSummarizeToolResultForChat_ExecShellFailureShowsReason(t *testing.T) {
 	}
 }
 
+func TestSummarizeToolResultForChat_RequestReplanHidesInternalRecoveryText(t *testing.T) {
+	raw := `{"success":false,"code":"request_replan","error":"recovery exhausted, replan required","data":{"tool_name":"mcp__fs__search_files","last_error":"{\"success\":false,\"code\":\"mcp_tool_error\",\"error\":\"Error: Access denied - path outside allowed directories: /workspace not in /tmp\"}"}}`
+	role, got := summarizeToolResultForChat("mcp__fs__search_files", raw)
+	if role != "result_failed" {
+		t.Fatalf("expected result_failed role, got %q", role)
+	}
+	if strings.Contains(got, "recovery exhausted") || strings.Contains(got, "replan required") {
+		t.Fatalf("summary leaked internal recovery text: %q", got)
+	}
+	if !strings.Contains(got, "DENIED") || !strings.Contains(got, "outside allowed directories") {
+		t.Fatalf("expected user-facing access denial, got %q", got)
+	}
+}
+
+func TestSummarizeToolResultForChat_PermissionDeniedShowsDenied(t *testing.T) {
+	raw := `{"success":false,"code":"permission_denied","message":"path outside MCP fs allowed directories: /workspace not in /tmp"}`
+	role, got := summarizeToolResultForChat("mcp__fs__search_files", raw)
+	if role != "result_denied" {
+		t.Fatalf("expected result_denied role, got %q", role)
+	}
+	want := "DENIED · path outside MCP fs allowed directories: /workspace not in /tmp"
+	if got != want {
+		t.Fatalf("unexpected summary:\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
 func TestSummarizeToolResultForChat_NonShellSummarized(t *testing.T) {
 	raw := `{"success":true,"data":{"metrics":{"total_matches":3},"payload":{"items":["a.go","b.go","c.go"]}}}`
 	role, got := summarizeToolResultForChat("search_files", raw)

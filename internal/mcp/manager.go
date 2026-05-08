@@ -25,11 +25,12 @@ import (
 const httpErrorBodyPreviewBytes = 200
 
 type Manager struct {
-	mu       sync.RWMutex
-	cfg      Config
-	sessions map[string]*clientSession
-	states   map[string]ServerState
-	tools    []core.Tool
+	mu            sync.RWMutex
+	cfg           Config
+	sessions      map[string]*clientSession
+	states        map[string]ServerState
+	tools         []core.Tool
+	workspaceRoot string
 }
 
 type ServerState struct {
@@ -38,6 +39,15 @@ type ServerState struct {
 	Connected bool
 	Error     string
 	Tools     int
+}
+
+func (m *Manager) SetWorkspaceRoot(root string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workspaceRoot = strings.TrimSpace(root)
 }
 
 type clientSession struct {
@@ -183,13 +193,17 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[st
 		return nil, startupErr(srv, "list_tools", err, httpDiag)
 	}
 	disabled := srv.disabledToolSet()
+	allowedDirs := srv.filesystemAllowedDirs()
 	tools := make([]core.Tool, 0, len(listed.Tools))
 	for _, tool := range listed.Tools {
 		if tool == nil || strings.TrimSpace(tool.Name) == "" || disabled[tool.Name] {
 			continue
 		}
 		name := UniqueToolName(QualifyToolName(srv.Name, tool.Name), seen)
-		tools = append(tools, &Tool{manager: m, serverName: srv.Name, toolName: tool.Name, registeredName: name, spec: tool})
+		m.mu.RLock()
+		workspaceRoot := m.workspaceRoot
+		m.mu.RUnlock()
+		tools = append(tools, &Tool{manager: m, serverName: srv.Name, toolName: tool.Name, registeredName: name, spec: tool, allowedDirs: allowedDirs, workspaceRoot: workspaceRoot})
 	}
 	m.mu.Lock()
 	m.sessions[srv.Name] = &clientSession{cfg: srv, session: session, cancel: cancel}

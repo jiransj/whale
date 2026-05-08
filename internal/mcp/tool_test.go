@@ -97,3 +97,44 @@ func TestToolRunRejectsInvalidJSON(t *testing.T) {
 		t.Fatalf("result: %+v", res)
 	}
 }
+
+func TestToolDescriptionIncludesFilesystemAllowedDirsAndWorkspaceGuidance(t *testing.T) {
+	tool := &Tool{
+		registeredName: "mcp__fs__search_files",
+		serverName:     "fs",
+		toolName:       "search_files",
+		spec:           &sdk.Tool{Name: "search_files", Description: "Search files"},
+		allowedDirs:    []string{"/tmp"},
+		workspaceRoot:  "/Users/goranka/Engineer/ai/dsk/whale",
+	}
+	desc := tool.Description()
+	if !strings.Contains(desc, "Allowed directories: /tmp") {
+		t.Fatalf("expected allowed dirs in description: %s", desc)
+	}
+	if !strings.Contains(desc, "Current workspace is outside those directories") {
+		t.Fatalf("expected workspace guidance in description: %s", desc)
+	}
+}
+
+func TestToolRunPreflightsFilesystemPathOutsideAllowedDirs(t *testing.T) {
+	tool := &Tool{
+		registeredName: "mcp__fs__search_files",
+		serverName:     "fs",
+		toolName:       "search_files",
+		allowedDirs:    []string{"/tmp"},
+	}
+	res, err := tool.Run(context.Background(), core.ToolCall{
+		ID:    "call",
+		Name:  tool.Name(),
+		Input: `{"path":"/Users/goranka/Engineer/ai/dsk/whale","pattern":"init_skill.py"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, `"code":"permission_denied"`) {
+		t.Fatalf("expected permission_denied result, got %+v", res)
+	}
+	if !strings.Contains(res.Content, "allowed directories") || !strings.Contains(res.Content, "/tmp") {
+		t.Fatalf("expected allowed-dir explanation, got %s", res.Content)
+	}
+}

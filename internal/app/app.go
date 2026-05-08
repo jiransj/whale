@@ -135,6 +135,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		return nil, fmt.Errorf("load mcp config: %w", err)
 	}
 	mcpManager := whalemcp.NewManager(mcpConfig)
+	mcpManager.SetWorkspaceRoot(workspaceRoot)
 	mcpManager.Initialize(ctx)
 	registeredTools := append([]core.Tool{}, toolset.Tools()...)
 	registeredTools = append(registeredTools, mcpManager.Tools()...)
