@@ -167,6 +167,8 @@ Whale 会把本地状态存放在 `~/.whale/` 下。API key、偏好设置、会
 
 Whale 仍在快速迭代中，建议先用于个人项目、实验仓库或可回滚的开发流程。功能和交互可能会继续变化。
 
+> **免责声明：** 本项目与 DeepSeek Inc. 无关，系独立开源社区项目。
+
 ## 参与贡献
 
 关于克隆、开发、测试、issues 和 pull requests，请查看 [CONTRIBUTING.md](CONTRIBUTING.md)。

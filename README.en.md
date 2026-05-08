@@ -167,6 +167,8 @@ See [docs/configuration.md](docs/configuration.md) for details.
 
 Whale is moving quickly. It is best used first on personal projects, experimental repositories, or workflows where changes can be reviewed and rolled back.
 
+> **Disclaimer:** This project is not affiliated with DeepSeek Inc. It is an independent open-source community project.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for cloning, local development, testing, issues, and pull requests.
