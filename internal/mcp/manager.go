@@ -2,13 +2,17 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -140,20 +144,26 @@ func (m *Manager) CallTool(ctx context.Context, serverName, toolName string, arg
 }
 
 func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[string]bool) ([]core.Tool, error) {
-	if strings.TrimSpace(srv.Command) == "" {
-		return nil, fmt.Errorf("mcp server %q requires command", srv.Name)
+	kind, err := srv.transportKind()
+	if err != nil {
+		return nil, fmt.Errorf("mcp server %q: %w", srv.Name, err)
 	}
 	mcpCtx, cancel := context.WithCancel(ctx)
 	timeoutCtx, timeoutCancel := context.WithTimeout(mcpCtx, srv.TimeoutDuration())
 	defer timeoutCancel()
 
-	cmd := exec.CommandContext(mcpCtx, expandHome(srv.Command), srv.Args...)
-	cmd.Env = append(os.Environ(), envPairs(srv.Env)...)
-	transport := &sdk.CommandTransport{Command: cmd}
+	transport, stdioCmd, err := createTransport(mcpCtx, kind, srv)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	client := sdk.NewClient(&sdk.Implementation{Name: "whale", Title: "Whale", Version: build.CurrentVersion()}, nil)
 	session, err := client.Connect(timeoutCtx, transport, nil)
 	if err != nil {
 		cancel()
+		if errors.Is(err, io.EOF) && stdioCmd != nil {
+			err = maybeStdioErr(err, stdioCmd)
+		}
 		return nil, err
 	}
 	listed, err := session.ListTools(timeoutCtx, &sdk.ListToolsParams{})
@@ -178,6 +188,58 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[st
 	return tools, nil
 }
 
+func createTransport(ctx context.Context, kind string, srv ServerConfig) (sdk.Transport, *exec.Cmd, error) {
+	switch kind {
+	case "stdio":
+		if strings.TrimSpace(srv.Command) == "" {
+			return nil, nil, fmt.Errorf("mcp server %q requires command", srv.Name)
+		}
+		env, err := resolvedEnvPairs(srv.Env)
+		if err != nil {
+			return nil, nil, fmt.Errorf("mcp server %q env config: %w", srv.Name, err)
+		}
+		cmd := exec.CommandContext(ctx, expandHome(srv.Command), srv.Args...)
+		cmd.Env = append(os.Environ(), env...)
+		return &sdk.CommandTransport{Command: cmd}, cmd, nil
+	case "http":
+		if strings.TrimSpace(srv.URL) == "" {
+			return nil, nil, fmt.Errorf("mcp server %q requires url", srv.Name)
+		}
+		headers, err := resolvedHeaders(srv.Headers)
+		if err != nil {
+			return nil, nil, fmt.Errorf("mcp server %q headers config: %w", srv.Name, err)
+		}
+		return &sdk.StreamableClientTransport{
+			Endpoint: strings.TrimSpace(srv.URL),
+			HTTPClient: &http.Client{Transport: headerRoundTripper{
+				headers: headers,
+				base:    http.DefaultTransport,
+			}},
+		}, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("mcp server %q unsupported transport %q", srv.Name, kind)
+	}
+}
+
+type headerRoundTripper struct {
+	headers map[string]string
+	base    http.RoundTripper
+}
+
+func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if len(rt.headers) > 0 {
+		req = req.Clone(req.Context())
+		for k, v := range rt.headers {
+			req.Header.Set(k, v)
+		}
+	}
+	base := rt.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
+}
+
 func (m *Manager) setState(st ServerState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -193,22 +255,6 @@ func sortedServerNames(servers map[string]ServerConfig) []string {
 	return names
 }
 
-func envPairs(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(env))
-	for k := range env {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, k+"="+env[k])
-	}
-	return out
-}
-
 func expandHome(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "~" {
@@ -222,4 +268,38 @@ func expandHome(path string) string {
 		}
 	}
 	return path
+}
+
+func maybeStdioErr(err error, cmd *exec.Cmd) error {
+	checkErr := stdioCheck(cmd)
+	if checkErr == nil {
+		return err
+	}
+	return errors.Join(err, checkErr)
+}
+
+func stdioCheck(old *exec.Cmd) error {
+	if old == nil {
+		return nil
+	}
+	name := old.Path
+	if name == "" && len(old.Args) > 0 {
+		name = old.Args[0]
+	}
+	if name == "" {
+		return nil
+	}
+	args := []string{}
+	if len(old.Args) > 1 {
+		args = old.Args[1:]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = old.Env
+	out, err := cmd.CombinedOutput()
+	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 }
