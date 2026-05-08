@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -211,4 +212,124 @@ func TestManagerRecordsHTTPConfigErrorWithoutLeakingHeaderValue(t *testing.T) {
 	if strings.Contains(states[0].Error, "Bearer ") {
 		t.Fatalf("error leaked header value shape: %q", states[0].Error)
 	}
+}
+
+func TestManagerRecordsHTTPStatusErrorWithRedactedBody(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("missing Authorization: Bearer ctx-secret-token token=abc123\nretry later"))
+	}))
+	t.Cleanup(httpServer.Close)
+
+	mgr := NewManager(Config{
+		Servers: map[string]ServerConfig{
+			"remote": {
+				URL:     httpServer.URL + "/mcp?token=query-secret",
+				Headers: map[string]string{"Authorization": "Bearer request-secret"},
+				Timeout: 1,
+			},
+		},
+	})
+	mgr.Initialize(context.Background())
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	errText := singleFailedStateError(t, mgr)
+	for _, want := range []string{`mcp server "remote"`, "transport=http", "/mcp", "401 Unauthorized", "Bearer ***", "token=***", "retry later"} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("error missing %q: %q", want, errText)
+		}
+	}
+	for _, secret := range []string{"ctx-secret-token", "abc123", "request-secret", "query-secret"} {
+		if strings.Contains(errText, secret) {
+			t.Fatalf("error leaked secret %q: %q", secret, errText)
+		}
+	}
+}
+
+func TestManagerRecordsHTTPNotFoundBody(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not an MCP endpoint", http.StatusNotFound)
+	}))
+	t.Cleanup(httpServer.Close)
+
+	mgr := NewManager(Config{
+		Servers: map[string]ServerConfig{
+			"remote": {URL: httpServer.URL + "/wrong", Timeout: 1},
+		},
+	})
+	mgr.Initialize(context.Background())
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	errText := singleFailedStateError(t, mgr)
+	for _, want := range []string{"404 Not Found", "/wrong", "not an MCP endpoint"} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("error missing %q: %q", want, errText)
+		}
+	}
+}
+
+func TestManagerRecordsHTTPServerErrorWithBoundedBody(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(strings.Repeat("x", httpErrorBodyPreviewBytes+20)))
+	}))
+	t.Cleanup(httpServer.Close)
+
+	mgr := NewManager(Config{
+		Servers: map[string]ServerConfig{
+			"remote": {URL: httpServer.URL, Timeout: 1},
+		},
+	})
+	mgr.Initialize(context.Background())
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	errText := singleFailedStateError(t, mgr)
+	if !strings.Contains(errText, "500 Internal Server Error") || !strings.Contains(errText, "...") {
+		t.Fatalf("unexpected error: %q", errText)
+	}
+	if strings.Count(errText, "x") > httpErrorBodyPreviewBytes {
+		t.Fatalf("error body was not bounded: %q", errText)
+	}
+}
+
+func TestManagerRecordsHTTPStartupTimeout(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(2 * time.Second):
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(func() {
+		httpServer.CloseClientConnections()
+		httpServer.Close()
+	})
+
+	mgr := NewManager(Config{
+		Servers: map[string]ServerConfig{
+			"slow": {URL: httpServer.URL, Timeout: 1},
+		},
+	})
+	mgr.Initialize(context.Background())
+	t.Cleanup(func() { _ = mgr.Close() })
+
+	errText := singleFailedStateError(t, mgr)
+	for _, want := range []string{`mcp server "slow"`, "timed out after 1s", "connect"} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("error missing %q: %q", want, errText)
+		}
+	}
+}
+
+func singleFailedStateError(t *testing.T, mgr *Manager) string {
+	t.Helper()
+	if tools := mgr.Tools(); len(tools) != 0 {
+		t.Fatalf("tools: %+v", tools)
+	}
+	states := mgr.States()
+	if len(states) != 1 || states[0].Error == "" || states[0].Connected {
+		t.Fatalf("states: %+v", states)
+	}
+	return states[0].Error
 }

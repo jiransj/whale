@@ -18,6 +18,50 @@ func TestToolParametersCoerceSchema(t *testing.T) {
 	}
 }
 
+func TestToolReadOnlyUsesMCPAnnotation(t *testing.T) {
+	tests := []struct {
+		name string
+		spec *sdk.Tool
+		want bool
+	}{
+		{
+			name: "read only hint true",
+			spec: &sdk.Tool{
+				Name:        "read",
+				Annotations: &sdk.ToolAnnotations{ReadOnlyHint: true},
+			},
+			want: true,
+		},
+		{
+			name: "read only hint false",
+			spec: &sdk.Tool{
+				Name:        "write",
+				Annotations: &sdk.ToolAnnotations{ReadOnlyHint: false},
+			},
+			want: false,
+		},
+		{
+			name: "no annotations",
+			spec: &sdk.Tool{Name: "unknown"},
+			want: false,
+		},
+		{
+			name: "nil spec",
+			spec: nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := &Tool{registeredName: "mcp__fs__" + tt.name, spec: tt.spec}
+			if got := tool.ReadOnly(); got != tt.want {
+				t.Fatalf("ReadOnly() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMCPResultWrapsTextAndMedia(t *testing.T) {
 	res := mcpResult(core.ToolCall{ID: "call", Name: "mcp__img__show"}, "img", "show", &sdk.CallToolResult{
 		Content: []sdk.Content{

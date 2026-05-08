@@ -1,11 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,8 @@ import (
 	"github.com/usewhale/whale/internal/build"
 	"github.com/usewhale/whale/internal/core"
 )
+
+const httpErrorBodyPreviewBytes = 200
 
 type Manager struct {
 	mu       sync.RWMutex
@@ -152,7 +156,7 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[st
 	timeoutCtx, timeoutCancel := context.WithTimeout(mcpCtx, srv.TimeoutDuration())
 	defer timeoutCancel()
 
-	transport, stdioCmd, err := createTransport(mcpCtx, kind, srv)
+	transport, stdioCmd, httpDiag, err := createTransport(mcpCtx, kind, srv)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -161,16 +165,22 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[st
 	session, err := client.Connect(timeoutCtx, transport, nil)
 	if err != nil {
 		cancel()
+		if isContextTimeout(timeoutCtx, err) {
+			return nil, startupTimeoutErr(srv, "connect")
+		}
 		if errors.Is(err, io.EOF) && stdioCmd != nil {
 			err = maybeStdioErr(err, stdioCmd)
 		}
-		return nil, err
+		return nil, startupErr(srv, "connect", err, httpDiag)
 	}
 	listed, err := session.ListTools(timeoutCtx, &sdk.ListToolsParams{})
 	if err != nil {
 		_ = session.Close()
 		cancel()
-		return nil, err
+		if isContextTimeout(timeoutCtx, err) {
+			return nil, startupTimeoutErr(srv, "list_tools")
+		}
+		return nil, startupErr(srv, "list_tools", err, httpDiag)
 	}
 	disabled := srv.disabledToolSet()
 	tools := make([]core.Tool, 0, len(listed.Tools))
@@ -188,42 +198,47 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[st
 	return tools, nil
 }
 
-func createTransport(ctx context.Context, kind string, srv ServerConfig) (sdk.Transport, *exec.Cmd, error) {
+func createTransport(ctx context.Context, kind string, srv ServerConfig) (sdk.Transport, *exec.Cmd, *httpDiagnostics, error) {
 	switch kind {
 	case "stdio":
 		if strings.TrimSpace(srv.Command) == "" {
-			return nil, nil, fmt.Errorf("mcp server %q requires command", srv.Name)
+			return nil, nil, nil, fmt.Errorf("mcp server %q requires command", srv.Name)
 		}
 		env, err := resolvedEnvPairs(srv.Env)
 		if err != nil {
-			return nil, nil, fmt.Errorf("mcp server %q env config: %w", srv.Name, err)
+			return nil, nil, nil, fmt.Errorf("mcp server %q env config: %w", srv.Name, err)
 		}
 		cmd := exec.CommandContext(ctx, expandHome(srv.Command), srv.Args...)
 		cmd.Env = append(os.Environ(), env...)
-		return &sdk.CommandTransport{Command: cmd}, cmd, nil
+		return &sdk.CommandTransport{Command: cmd}, cmd, nil, nil
 	case "http":
 		if strings.TrimSpace(srv.URL) == "" {
-			return nil, nil, fmt.Errorf("mcp server %q requires url", srv.Name)
+			return nil, nil, nil, fmt.Errorf("mcp server %q requires url", srv.Name)
 		}
 		headers, err := resolvedHeaders(srv.Headers)
 		if err != nil {
-			return nil, nil, fmt.Errorf("mcp server %q headers config: %w", srv.Name, err)
+			return nil, nil, nil, fmt.Errorf("mcp server %q headers config: %w", srv.Name, err)
 		}
+		diag := &httpDiagnostics{}
 		return &sdk.StreamableClientTransport{
 			Endpoint: strings.TrimSpace(srv.URL),
 			HTTPClient: &http.Client{Transport: headerRoundTripper{
-				headers: headers,
-				base:    http.DefaultTransport,
+				serverName: srv.Name,
+				headers:    headers,
+				base:       http.DefaultTransport,
+				diag:       diag,
 			}},
-		}, nil, nil
+		}, nil, diag, nil
 	default:
-		return nil, nil, fmt.Errorf("mcp server %q unsupported transport %q", srv.Name, kind)
+		return nil, nil, nil, fmt.Errorf("mcp server %q unsupported transport %q", srv.Name, kind)
 	}
 }
 
 type headerRoundTripper struct {
-	headers map[string]string
-	base    http.RoundTripper
+	serverName string
+	headers    map[string]string
+	base       http.RoundTripper
+	diag       *httpDiagnostics
 }
 
 func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -237,7 +252,14 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	return base.RoundTrip(req)
+	resp, err := base.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("mcp server %q http request failed (transport=http url=%s): %w", rt.serverName, safeHTTPURL(req.URL), err)
+	}
+	if resp != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) && rt.diag != nil {
+		rt.diag.record(req.URL, resp)
+	}
+	return resp, nil
 }
 
 func (m *Manager) setState(st ServerState) {
@@ -278,6 +300,134 @@ func maybeStdioErr(err error, cmd *exec.Cmd) error {
 	return errors.Join(err, checkErr)
 }
 
+func startupErr(srv ServerConfig, phase string, err error, httpDiag *httpDiagnostics) error {
+	if err == nil {
+		return nil
+	}
+	if diag := httpDiag.summary(); diag != "" {
+		return fmt.Errorf("mcp server %q failed during %s: %w (%s)", srv.Name, phase, err, diag)
+	}
+	return fmt.Errorf("mcp server %q failed during %s: %w", srv.Name, phase, err)
+}
+
+func startupTimeoutErr(srv ServerConfig, phase string) error {
+	return fmt.Errorf("mcp server %q timed out after %s during %s", srv.Name, srv.TimeoutDuration(), phase)
+}
+
+func isContextTimeout(ctx context.Context, err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+type httpDiagnostics struct {
+	mu     sync.Mutex
+	url    string
+	status string
+	body   string
+}
+
+func (d *httpDiagnostics) record(reqURL *url.URL, resp *http.Response) {
+	if d == nil || resp == nil {
+		return
+	}
+	originalBody := resp.Body
+	body := boundedBodyPreview(resp.Body, httpErrorBodyPreviewBytes)
+	if originalBody != nil {
+		_ = originalBody.Close()
+	}
+	data := []byte(body)
+	resp.Body = io.NopCloser(bytes.NewReader(data))
+	if body == "" {
+		body = "<no body>"
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.url = safeHTTPURL(reqURL)
+	d.status = resp.Status
+	d.body = body
+}
+
+func (d *httpDiagnostics) summary() string {
+	if d == nil {
+		return ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.status == "" {
+		return ""
+	}
+	return fmt.Sprintf("transport=http url=%s status=%s body=%s", d.url, d.status, d.body)
+}
+
+func boundedBodyPreview(body io.Reader, maxBytes int) string {
+	if body == nil || maxBytes <= 0 {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(body, int64(maxBytes+1)))
+	if err != nil {
+		return "<failed to read body>"
+	}
+	truncated := len(data) > maxBytes
+	if truncated {
+		data = data[:maxBytes]
+	}
+	text := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(string(data), "\n", " "), "\r", " "))
+	text = redactErrorText(text)
+	if truncated {
+		text += "..."
+	}
+	return text
+}
+
+func safeHTTPURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	out := url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}
+	return out.String()
+}
+
+func redactErrorText(text string) string {
+	text = redactAfterCaseInsensitive(text, "bearer ", isSecretTerminator)
+	for _, needle := range []string{"api_key=", "apikey=", "api-key=", "token=", "authorization="} {
+		text = redactAfterCaseInsensitive(text, needle, isSecretTerminator)
+	}
+	return text
+}
+
+func redactAfterCaseInsensitive(text, needle string, terminator func(rune) bool) string {
+	needleLower := strings.ToLower(needle)
+	searchFrom := 0
+	for {
+		if searchFrom >= len(text) {
+			return text
+		}
+		idx := strings.Index(strings.ToLower(text[searchFrom:]), needleLower)
+		if idx < 0 {
+			return text
+		}
+		idx += searchFrom
+		start := idx + len(needle)
+		end := start
+		for end < len(text) {
+			r, size := rune(text[end]), 1
+			if terminator(r) {
+				break
+			}
+			end += size
+		}
+		if end > start {
+			text = text[:start] + "***" + text[end:]
+			searchFrom = start + len("***")
+			continue
+		}
+		searchFrom = start
+	}
+}
+
+func isSecretTerminator(r rune) bool {
+	return r == 0 || r == '"' || r == '\'' || r == ',' || r == '&' || r == ';' || r == ')' || r == ']' || r == '}' || r == '<' || r == '>' || r == ':' || r == ' ' || r == '\t'
+}
+
 func stdioCheck(old *exec.Cmd) error {
 	if old == nil {
 		return nil
@@ -301,5 +451,9 @@ func stdioCheck(old *exec.Cmd) error {
 	if err == nil || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return nil
 	}
-	return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	output := strings.TrimSpace(string(out))
+	if output == "" {
+		return fmt.Errorf("stdio diagnostic failed: %w", err)
+	}
+	return fmt.Errorf("%w: %s", err, output)
 }

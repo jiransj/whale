@@ -15,3 +15,13 @@ func TestDefaultToolPolicyRequiresApprovalForMCPTools(t *testing.T) {
 		t.Fatalf("decision: %+v", decision)
 	}
 }
+
+func TestDefaultToolPolicyAllowsReadOnlyMCPTools(t *testing.T) {
+	decision := DefaultToolPolicy{Mode: ApprovalModeOnRequest}.Decide(
+		core.ToolSpec{Name: "mcp__fs__read", ReadOnly: true},
+		core.ToolCall{Name: "mcp__fs__read", Input: `{}`},
+	)
+	if !decision.Allow || decision.RequiresApproval || decision.Code != "read_only" {
+		t.Fatalf("decision: %+v", decision)
+	}
+}

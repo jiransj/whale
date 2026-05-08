@@ -53,6 +53,10 @@ func (t *Tool) Parameters() map[string]any {
 	return out
 }
 
+func (t *Tool) ReadOnly() bool {
+	return t.spec != nil && t.spec.Annotations != nil && t.spec.Annotations.ReadOnlyHint
+}
+
 func (t *Tool) ApprovalHint() string {
 	return fmt.Sprintf("Calls MCP server %s tool %s; external tools may have side effects.", t.serverName, t.toolName)
 }
