@@ -168,6 +168,94 @@ func TestPathEscapeDenied(t *testing.T) {
 	if !res.IsError || !strings.Contains(res.Content, "permission_denied") {
 		t.Fatalf("expected permission_denied, got: %+v", res)
 	}
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("write outside fixture: %v", err)
+	}
+	res, err = ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": outside,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "permission_denied") {
+		t.Fatalf("expected absolute outside path to be denied, got: %+v", res)
+	}
+}
+
+func TestLoadSkillReadsGlobalSkillWithoutOpeningReadFileBoundary(t *testing.T) {
+	workspace := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	skillDir := filepath.Join(home, ".whale", "skills", "global-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("---\nname: global-skill\ndescription: Global test skill.\n---\n\n# Global Skill\n\nUse global instructions.\n"), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	ts, err := NewToolset(workspace)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	loadRes, err := ts.loadSkill(context.Background(), tc("load_skill", map[string]any{
+		"name":      "global-skill",
+		"arguments": "arg text",
+	}))
+	if err != nil || loadRes.IsError {
+		t.Fatalf("load_skill failed: err=%v res=%+v", err, loadRes)
+	}
+	if !strings.Contains(loadRes.Content, "Use global instructions") || !strings.Contains(loadRes.Content, "arg text") {
+		t.Fatalf("unexpected load_skill content: %s", loadRes.Content)
+	}
+	readRes, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": skillPath,
+	}))
+	if err != nil {
+		t.Fatalf("read_file err: %v", err)
+	}
+	if !readRes.IsError || !strings.Contains(readRes.Content, "permission_denied") {
+		t.Fatalf("expected read_file to deny global skill path, got: %+v", readRes)
+	}
+}
+
+func TestLoadSkillUnknownListsAvailableAndRegistryReadOnly(t *testing.T) {
+	workspace := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	skillDir := filepath.Join(workspace, ".whale", "skills", "known-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: known-skill\ndescription: Known skill.\n---\n\n# Known\n"), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+	ts, err := NewToolset(workspace)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	res, err := ts.loadSkill(context.Background(), tc("load_skill", map[string]any{
+		"name": "missing-skill",
+	}))
+	if err != nil {
+		t.Fatalf("load_skill err: %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "known-skill") {
+		t.Fatalf("expected available skill in error, got: %s", res.Content)
+	}
+	var found bool
+	for _, tool := range ts.Tools() {
+		if tool.Name() == "load_skill" {
+			found = true
+			if !core.DescribeTool(tool).ReadOnly {
+				t.Fatal("load_skill should be read-only")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("load_skill not registered")
+	}
 }
 
 func TestListDirAndExecShell(t *testing.T) {

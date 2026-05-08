@@ -200,12 +200,25 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 		s.emit(Event{Kind: EventTurnDone})
 		return
 	}
+	skillMention, skillOut, skillSynthetic, err := s.app.BuildSkillMentionSyntheticPrompt(line)
+	if err != nil {
+		s.emit(Event{Kind: EventError, Text: err.Error()})
+		s.emit(Event{Kind: EventTurnDone})
+		return
+	}
 	if blocked, out := s.app.RunUserPromptSubmitHook(line); out != "" {
 		s.emit(Event{Kind: EventInfo, Text: out})
 		if blocked {
 			s.emit(Event{Kind: EventTurnDone, LastResponse: out})
 			return
 		}
+	}
+	if skillMention {
+		if skillOut != "" {
+			s.emit(Event{Kind: EventInfo, Text: skillOut})
+		}
+		go s.runInjectedTurn(line, skillSynthetic)
+		return
 	}
 	go s.runTurn(line, hiddenInput)
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/memory"
 	"github.com/usewhale/whale/internal/session"
+	"github.com/usewhale/whale/internal/skills"
 )
 
 func (a *Agent) buildTurnProviderHistory(sessionID string, rt *memory.RuntimeState) []core.Message {
@@ -41,6 +42,11 @@ Agent mode is active.
 		systemBlocks = append(systemBlocks, "Current Whale workspace root: "+a.workspaceRoot+"\nShell commands run from this directory by default. Do not assume a synthetic path such as /workspace; use relative paths or the exec_shell cwd parameter for subdirectories.")
 	}
 	systemBlocks = append(systemBlocks, renderToolSpecsBlock(a.tools.Specs()))
+	if strings.TrimSpace(a.workspaceRoot) != "" {
+		if rendered := skills.RenderAvailableSkills(skills.Discover(skills.DefaultRoots(a.workspaceRoot))); rendered != "" {
+			systemBlocks = append(systemBlocks, rendered)
+		}
+	}
 	systemBlocks = append(systemBlocks, "For branch decisions or key assumptions requiring user choice, call request_user_input instead of presenting long A/B/C prose menus.")
 	if a.projectMemoryEnabled {
 		if mem, ok := memory.ReadProjectMemory(a.workspaceRoot, a.projectMemoryFileOrder, a.projectMemoryMaxChars); ok {

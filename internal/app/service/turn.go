@@ -12,6 +12,18 @@ import (
 )
 
 func (s *Service) runTurn(line string, hiddenInput bool) {
+	s.runTurnWith(func(ctx context.Context) (<-chan agent.AgentEvent, error) {
+		return s.app.RunTurn(ctx, line, hiddenInput)
+	})
+}
+
+func (s *Service) runInjectedTurn(visibleInput, hiddenInput string) {
+	s.runTurnWith(func(ctx context.Context) (<-chan agent.AgentEvent, error) {
+		return s.app.RunTurnWithInjectedInput(ctx, visibleInput, hiddenInput)
+	})
+}
+
+func (s *Service) runTurnWith(start func(context.Context) (<-chan agent.AgentEvent, error)) {
 	turnCtx, cancel := context.WithCancel(s.ctx)
 	s.cancelMu.Lock()
 	if s.active {
@@ -31,7 +43,7 @@ func (s *Service) runTurn(line string, hiddenInput bool) {
 		s.cancelMu.Unlock()
 		cancel()
 	}()
-	events, err := s.app.RunTurn(turnCtx, line, hiddenInput)
+	events, err := start(turnCtx)
 	if err != nil {
 		if shouldSuppressCancelledTurnError(turnCtx, err) {
 			s.emit(Event{Kind: EventTurnDone})

@@ -11,6 +11,22 @@ import (
 )
 
 func (a *Agent) RunStreamWithOptions(ctx context.Context, sessionID, input string, hiddenInput bool) (<-chan AgentEvent, error) {
+	return a.runStreamWithNewMessages(ctx, sessionID, []core.Message{{
+		SessionID: sessionID,
+		Role:      core.RoleUser,
+		Text:      input,
+		Hidden:    hiddenInput,
+	}})
+}
+
+func (a *Agent) RunStreamWithInjectedInput(ctx context.Context, sessionID, visibleInput, hiddenInput string) (<-chan AgentEvent, error) {
+	return a.runStreamWithNewMessages(ctx, sessionID, []core.Message{
+		{SessionID: sessionID, Role: core.RoleUser, Text: visibleInput},
+		{SessionID: sessionID, Role: core.RoleUser, Text: hiddenInput, Hidden: true},
+	})
+}
+
+func (a *Agent) runStreamWithNewMessages(ctx context.Context, sessionID string, newMessages []core.Message) (<-chan AgentEvent, error) {
 	if _, loaded := a.active.LoadOrStore(sessionID, struct{}{}); loaded {
 		return nil, ErrSessionBusy
 	}
@@ -19,13 +35,17 @@ func (a *Agent) RunStreamWithOptions(ctx context.Context, sessionID, input strin
 		return nil, fmt.Errorf("%w: spent $%.6f >= cap $%.6f", ErrBudgetExceeded, spent, a.budgetWarningUSD)
 	}
 
-	_, err := a.store.Create(ctx, core.Message{SessionID: sessionID, Role: core.RoleUser, Text: input, Hidden: hiddenInput})
-	if err != nil {
-		return nil, fmt.Errorf("create user message: %w", err)
+	for _, msg := range newMessages {
+		msg.SessionID = sessionID
+		if _, err := a.store.Create(ctx, msg); err != nil {
+			a.active.Delete(sessionID)
+			return nil, fmt.Errorf("create user message: %w", err)
+		}
 	}
 
 	history, err := a.store.List(ctx, sessionID)
 	if err != nil {
+		a.active.Delete(sessionID)
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
 

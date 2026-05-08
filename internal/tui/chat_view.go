@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	tuirender "github.com/usewhale/whale/internal/tui/render"
@@ -17,6 +16,7 @@ func (m *model) append(role, text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AppendDelta(role, text)
+	m.refreshViewportContentFollow(false)
 }
 
 func (m *model) appendNotice(text string) {
@@ -24,6 +24,7 @@ func (m *model) appendNotice(text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AddNotice(text)
+	m.refreshViewportContentFollow(false)
 }
 
 func (m *model) markNoFinalAnswerIfNeeded() bool {
@@ -58,6 +59,7 @@ func (m *model) appendPlanDelta(text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AddPlanDelta(text)
+	m.refreshViewportContentFollow(false)
 }
 
 func (m *model) appendToolCall(toolCallID, toolName, text string) {
@@ -65,6 +67,7 @@ func (m *model) appendToolCall(toolCallID, toolName, text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AddToolCall(toolCallID, summarizeToolCallForChat(toolName, text))
+	m.refreshViewportContentFollow(false)
 }
 
 func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, summary string, metadata map[string]any) bool {
@@ -82,7 +85,11 @@ func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, sum
 	if diff := renderFileDiffMetadataMarkdown(metadata, 80); diff != "" && role == "result_ok" {
 		title += "\n\n" + diff
 	}
-	return m.assembler.UpdateToolCall(toolCallID, title, role)
+	ok := m.assembler.UpdateToolCall(toolCallID, title, role)
+	if ok {
+		m.refreshViewportContentFollow(false)
+	}
+	return ok
 }
 
 func summarizeToolCallForChat(toolName, text string) string {
@@ -346,9 +353,25 @@ func visibleSubmittedText(value string) string {
 
 func (m *model) refreshViewportContent() {
 	mainWidth, bodyHeight := m.layoutDims()
-	m.viewport.Width = max(10, mainWidth-2)
-	m.viewport.Height = max(1, bodyHeight-2)
+	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+}
+
+func (m *model) refreshViewportContentFollow(forceBottom bool) {
+	mainWidth, bodyHeight := m.layoutDims()
+	m.refreshViewportContentForSize(mainWidth, bodyHeight, forceBottom)
+}
+
+func (m *model) refreshViewportContentForSize(mainWidth, bodyHeight int, forceBottom bool) {
+	wasAtBottom := m.viewport.AtBottom()
 	content := ""
+	if m.page == pageChat {
+		m.viewport.Width = max(10, mainWidth)
+		m.viewport.Height = max(1, bodyHeight)
+		content = m.chatContent(mainWidth)
+	} else {
+		m.viewport.Width = max(10, mainWidth-2)
+		m.viewport.Height = max(1, bodyHeight-2)
+	}
 	if m.page == pageLogs {
 		content = strings.Join(m.filteredLogs(), "\n")
 	}
@@ -356,13 +379,13 @@ func (m *model) refreshViewportContent() {
 		content = strings.Join(m.renderDiffs(), "\n")
 	}
 	m.viewport.SetContent(content)
+	if m.page == pageChat && (forceBottom || wasAtBottom) {
+		m.viewport.GotoBottom()
+	}
 }
 
 func (m model) renderChatLines(width int) []string {
-	if m.assembler == nil {
-		return nil
-	}
-	messages := m.assembler.Snapshot()
+	messages := m.chatMessages()
 	if len(messages) == 0 {
 		return nil
 	}
@@ -372,22 +395,6 @@ func (m model) renderChatLines(width int) []string {
 func (m model) scrollbackText(messages []tuirender.UIMessage) string {
 	lines := tuirender.ChatLines(messages, m.chatRenderWidth())
 	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
-}
-
-func (m model) commitMessagesScrollbackCmd(messages []tuirender.UIMessage) tea.Cmd {
-	text := m.scrollbackText(messages)
-	if strings.TrimSpace(text) == "" {
-		return nil
-	}
-	return tea.Println(text + "\n")
-}
-
-func (m model) commitMessageScrollbackCmd(role, text string) tea.Cmd {
-	return m.commitMessagesScrollbackCmd([]tuirender.UIMessage{{
-		Role: role,
-		Kind: tuirender.KindText,
-		Text: text,
-	}})
 }
 
 func (m model) approvalNoticeText(decision string) string {
@@ -440,11 +447,60 @@ func (m model) busySubmitNoticeText() string {
 		Render("■ Agent is working, please wait...")
 }
 
-func (m *model) commitLiveScrollbackCmd() tea.Cmd {
-	if m.assembler != nil {
-		cmd := m.commitMessagesScrollbackCmd(m.assembler.Snapshot())
-		m.assembler.Reset()
-		return cmd
+func (m *model) resetTranscriptWithHeader() {
+	m.transcript = nil
+	m.appendTranscript("info", tuirender.KindText, buildHeaderBanner(m.model, m.effort, m.cwd, m.version))
+}
+
+func (m *model) appendTranscript(role string, kind tuirender.MessageKind, text string) {
+	t := strings.TrimSpace(strings.TrimRight(text, "\n"))
+	if t == "" {
+		return
 	}
-	return nil
+	if kind == "" {
+		kind = tuirender.KindText
+	}
+	m.transcript = append(m.transcript, tuirender.UIMessage{
+		Role: role,
+		Kind: kind,
+		Text: t,
+	})
+	m.refreshViewportContentFollow(true)
+}
+
+func (m *model) appendTranscriptMessages(messages []tuirender.UIMessage) {
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.Text) == "" {
+			continue
+		}
+		m.transcript = append(m.transcript, msg)
+	}
+}
+
+func (m *model) commitLiveTranscript(forceBottom bool) {
+	if m.assembler == nil {
+		return
+	}
+	m.appendTranscriptMessages(m.assembler.Snapshot())
+	m.assembler.Reset()
+	m.refreshViewportContentFollow(forceBottom)
+}
+
+func (m model) chatMessages() []tuirender.UIMessage {
+	live := []tuirender.UIMessage(nil)
+	if m.assembler != nil {
+		live = m.assembler.Snapshot()
+	}
+	if len(m.transcript) == 0 && len(live) == 0 {
+		return nil
+	}
+	out := make([]tuirender.UIMessage, 0, len(m.transcript)+len(live))
+	out = append(out, m.transcript...)
+	out = append(out, live...)
+	return out
+}
+
+func (m model) chatContent(width int) string {
+	lines := tuirender.ChatLines(m.chatMessages(), max(20, width-2))
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }

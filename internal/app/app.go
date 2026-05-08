@@ -19,7 +19,7 @@ import (
 	"github.com/usewhale/whale/internal/tools"
 )
 
-const CommandsHelp = "/model, /permissions, /ask [prompt], /plan [prompt], /new [id], /resume, /clear, /status, /mcp, /compact, /init, /exit"
+const CommandsHelp = "/model, /permissions, /ask [prompt], /plan [prompt], /skills, /new [id], /resume, /clear, /status, /mcp, /compact, /init, /exit"
 
 type Config struct {
 	DataDir              string

@@ -13,6 +13,7 @@ import (
 	"github.com/usewhale/whale/internal/memory"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
+	"github.com/usewhale/whale/internal/skills"
 	"github.com/usewhale/whale/internal/store"
 )
 
@@ -266,6 +267,100 @@ func (a *App) showMemory() string {
 		return "memory: no project memory file found"
 	}
 	return fmt.Sprintf("memory: path=%s chars=%d truncated=%v", pm.Path, pm.OriginalChars, pm.Truncated)
+}
+
+func (a *App) buildSkillsList() string {
+	roots := skills.DefaultRoots(a.workspaceRoot)
+	discovered := skills.Discover(roots)
+	lines := []string{"Skills", ""}
+	if len(discovered) == 0 {
+		lines = append(lines, "no skills found", "", "roots:")
+		for _, root := range roots {
+			lines = append(lines, "- "+root)
+		}
+		return strings.Join(lines, "\n")
+	}
+	for _, skill := range discovered {
+		line := fmt.Sprintf("- %s: %s", skill.Name, skill.Description)
+		if skill.SkillFilePath != "" {
+			line += fmt.Sprintf(" (%s)", skill.SkillFilePath)
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (a *App) buildSkillSyntheticPrompt(name, args string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	args = strings.TrimSpace(args)
+	if !skills.ValidName(name) {
+		return "", "", fmt.Errorf("skill name must be alphanumeric with hyphens")
+	}
+	roots := skills.DefaultRoots(a.workspaceRoot)
+	skill, _, ok := skills.Find(roots, name)
+	if !ok {
+		available := skills.Discover(roots)
+		names := make([]string, 0, len(available))
+		for _, s := range available {
+			names = append(names, s.Name)
+		}
+		msg := fmt.Sprintf("skill not found: %s", name)
+		if len(names) > 0 {
+			msg += ". available skills: " + strings.Join(names, ", ")
+		}
+		return "", "", fmt.Errorf("%s", msg)
+	}
+	var b strings.Builder
+	b.WriteString("Use this skill for the current turn.\n\n")
+	b.WriteString("<skill>\n")
+	b.WriteString("<name>")
+	b.WriteString(skill.Name)
+	b.WriteString("</name>\n")
+	b.WriteString("<description>")
+	b.WriteString(skill.Description)
+	b.WriteString("</description>\n")
+	b.WriteString("<path>")
+	b.WriteString(skill.SkillFilePath)
+	b.WriteString("</path>\n")
+	if args != "" {
+		b.WriteString("<arguments>\n")
+		b.WriteString(args)
+		b.WriteString("\n</arguments>\n")
+	}
+	b.WriteString("<instructions>\n")
+	b.WriteString(skill.Instructions)
+	b.WriteString("\n</instructions>\n")
+	b.WriteString("</skill>")
+	return "loaded skill: " + skill.Name, strings.TrimSpace(b.String()), nil
+}
+
+func (a *App) BuildSkillMentionSyntheticPrompt(line string) (bool, string, string, error) {
+	name, args, ok := parseSkillMention(line)
+	if !ok {
+		return false, "", "", nil
+	}
+	out, synthetic, err := a.buildSkillSyntheticPrompt(name, args)
+	if err != nil {
+		return true, "", "", err
+	}
+	return true, out, synthetic, nil
+}
+
+func parseSkillMention(line string) (name, args string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "$") {
+		return "", "", false
+	}
+	head := trimmed
+	if idx := strings.IndexAny(trimmed, " \t\n"); idx >= 0 {
+		head = trimmed[:idx]
+		args = strings.TrimSpace(trimmed[idx:])
+	}
+	name = strings.TrimPrefix(head, "$")
+	if !skills.ValidName(name) {
+		return "", "", false
+	}
+	return name, args, true
 }
 
 func parseCSVList(raw string) []string {

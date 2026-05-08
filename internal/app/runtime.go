@@ -76,6 +76,17 @@ func (a *App) RunTurn(ctx context.Context, input string, hiddenInput bool) (<-ch
 	return ag.RunStreamWithOptions(ctx, a.sessionID, input, hiddenInput)
 }
 
+func (a *App) RunTurnWithInjectedInput(ctx context.Context, visibleInput, hiddenInput string) (<-chan agent.AgentEvent, error) {
+	if strings.TrimSpace(visibleInput) != "" {
+		_, _ = session.PatchSessionMeta(a.sessionsDir, a.sessionID, session.SessionMeta{Title: visibleInput})
+	}
+	ag, err := a.ensureAgent()
+	if err != nil {
+		return nil, err
+	}
+	return ag.RunStreamWithInjectedInput(ctx, a.sessionID, visibleInput, hiddenInput)
+}
+
 func (a *App) FinalizeTurn(lastAssistantText string) error {
 	meta, err := session.LoadSessionMeta(a.sessionsDir, a.sessionID)
 	if err != nil {

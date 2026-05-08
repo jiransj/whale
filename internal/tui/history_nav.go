@@ -78,9 +78,6 @@ func (m *model) recordPromptHistory(value string) {
 }
 
 func (m *model) handleViewportScrollKey(key string) {
-	if m.page == pageChat {
-		return
-	}
 	m.refreshViewportContent()
 	switch key {
 	case "pgup":

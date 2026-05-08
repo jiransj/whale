@@ -88,6 +88,8 @@ Whale is optimized for **DeepSeek-specific behavior** rather than a generic prov
 - **Interactive terminal workflow** with a local TUI and session resume.
 - `setup`, `doctor`, and `exec` entry points for first-run setup, diagnostics, and headless execution.
 - DeepSeek-aware tool loop with **shell, file, patch, search, and web tools**.
+- MCP support for stdio and Streamable HTTP servers.
+- Local skills from `SKILL.md` instruction folders, invoked with `$skill-name`.
 - Project memory loading from common repo instruction files such as `AGENTS.md`.
 - Hook support for policy and workflow customization.
 - Offline eval scaffolding and focused TUI test coverage in the repo.
@@ -114,6 +116,10 @@ Whale stores local state under `~/.whale/` and supports optional project and glo
 - project and global hook files
 - hook event names
 - runtime configuration notes
+
+For MCP setup, see [docs/mcp.md](docs/mcp.md).
+
+For local skills, see [docs/skills.md](docs/skills.md).
 
 ## Contributing
 

@@ -21,6 +21,9 @@ type Result struct {
 	PlanPrompt  string
 	InitMemory  bool
 	ShowMemory  bool
+	ShowSkills  bool
+	SkillName   string
+	SkillArgs   string
 }
 
 func NewSessionID(now time.Time) string {
@@ -83,6 +86,22 @@ func Parse(line, currentSessionID string, now time.Time) (Result, error) {
 	}
 	if trimmed == "/memory" {
 		return Result{Handled: true, SessionID: currentSessionID, ShowMemory: true}, nil
+	}
+	if trimmed == "/skills" {
+		return Result{Handled: true, SessionID: currentSessionID, ShowSkills: true}, nil
+	}
+	if trimmed == "/skill" {
+		return Result{}, fmt.Errorf("usage: /skill <name> [args]")
+	}
+	if strings.HasPrefix(trimmed, "/skill ") {
+		payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/skill"))
+		fields := strings.Fields(payload)
+		if len(fields) == 0 {
+			return Result{}, fmt.Errorf("usage: /skill <name> [args]")
+		}
+		name := fields[0]
+		args := strings.TrimSpace(strings.TrimPrefix(payload, name))
+		return Result{Handled: true, SessionID: currentSessionID, SkillName: name, SkillArgs: args}, nil
 	}
 	return Result{}, nil
 }

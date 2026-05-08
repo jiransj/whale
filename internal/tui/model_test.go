@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -211,7 +212,10 @@ func TestTurnDoneReasoningOnlyCommitsFallback(t *testing.T) {
 	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected scrollback command")
+		t.Fatal("expected wait-event command")
+	}
+	if got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n"); !strings.Contains(got, "No final answer was produced") {
+		t.Fatalf("expected fallback notice in transcript:\n%s", got)
 	}
 	if m.sawReasoningThisTurn || m.sawAssistantThisTurn {
 		t.Fatal("expected turn tracking flags to reset")
@@ -517,10 +521,13 @@ func TestPlanCompletedReplacesPartialPlanAndTurnDoneShowsPicker(t *testing.T) {
 	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: "complete final plan"}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected completed plan to be committed to scrollback")
+		t.Fatal("expected wait-event command")
 	}
 	if snap := m.assembler.Snapshot(); len(snap) != 0 {
 		t.Fatalf("expected completed plan to leave live assembler empty, got %+v", snap)
+	}
+	if len(m.transcript) != 1 || m.transcript[0].Kind != tuirender.KindPlan {
+		t.Fatalf("expected completed plan in transcript, got %+v", m.transcript)
 	}
 	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "done"}))
 	m = next.(model)
@@ -569,10 +576,13 @@ func TestPlanCompletedWithoutDeltasStillRendersPlan(t *testing.T) {
 	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: plan}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected final plan to be committed to scrollback")
+		t.Fatal("expected wait-event command")
 	}
 	if snap := m.assembler.Snapshot(); len(snap) != 0 {
 		t.Fatalf("expected final plan to leave live assembler empty, got %+v", snap)
+	}
+	if len(m.transcript) != 1 || m.transcript[0].Kind != tuirender.KindPlan {
+		t.Fatalf("expected final plan in transcript, got %+v", m.transcript)
 	}
 	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "done"}))
 	m = next.(model)
@@ -597,15 +607,15 @@ func TestScrollbackTextRendersUserMessage(t *testing.T) {
 	}
 }
 
-func TestCommitLiveScrollbackClearsAssembler(t *testing.T) {
+func TestCommitLiveTranscriptClearsAssembler(t *testing.T) {
 	m := model{assembler: tuirender.NewAssembler(), width: 80, height: 24}
 	m.append("assistant", "streamed answer")
-	cmd := m.commitLiveScrollbackCmd()
-	if cmd == nil {
-		t.Fatal("expected scrollback print command")
-	}
+	m.commitLiveTranscript(true)
 	if got := len(m.assembler.Snapshot()); got != 0 {
 		t.Fatalf("expected live assembler cleared after commit, got %d entries", got)
+	}
+	if len(m.transcript) != 1 || m.transcript[0].Text != "streamed answer" {
+		t.Fatalf("expected committed transcript entry, got %+v", m.transcript)
 	}
 }
 
@@ -661,10 +671,13 @@ func TestSessionHydrationCommitsTranscriptAndClearsLiveAssembler(t *testing.T) {
 	}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected hydration to return scrollback command")
+		t.Fatal("expected hydration to return wait-event command")
 	}
 	if got := len(m.assembler.Snapshot()); got != 0 {
 		t.Fatalf("expected hydrated transcript committed out of live assembler, got %d entries", got)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n"); !strings.Contains(got, "hi") || !strings.Contains(got, "hello") {
+		t.Fatalf("expected hydrated messages in transcript:\n%s", got)
 	}
 }
 
@@ -714,6 +727,66 @@ func TestChatFooterStaysPinnedAfterSlashSuggestionsClose(t *testing.T) {
 	}
 	if got := strings.Count(afterDelete, "\n") + 1; got != m.height {
 		t.Fatalf("expected view to keep terminal height %d after slash closes, got %d:\n%s", m.height, got, afterDelete)
+	}
+}
+
+func TestChatTranscriptRetainsLocalCommandResultsAcrossSubmits(t *testing.T) {
+	m, _ := newModelWithDispatchSpy()
+	m.width = 80
+	m.height = 14
+	m.appendTranscript("you", tuirender.KindText, "/mcp")
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventInfo, Text: "MCP\n\nconfig: /tmp/mcp.json servers: none"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "MCP"}))
+	m = next.(model)
+
+	m.input.SetValue("/status")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventInfo, Text: "Status\n\nsession: test-session"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "Status"}))
+	m = next.(model)
+
+	got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	for _, want := range []string{"/mcp", "config: /tmp/mcp.json", "/status", "session: test-session"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected transcript to retain %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestChatStartupHeaderRendersInsideViewportHeight(t *testing.T) {
+	m := newModel(nil, "deepseek-v4-flash", "high", "on")
+	m.width = 80
+	m.height = 10
+	view := m.View()
+	if !strings.Contains(view, "▸ Whale") {
+		t.Fatalf("expected startup header in chat view:\n%s", view)
+	}
+	if got := strings.Count(strings.TrimRight(view, "\n"), "\n") + 1; got != m.height {
+		t.Fatalf("expected view to keep terminal height %d, got %d:\n%s", m.height, got, view)
+	}
+}
+
+func TestChatViewportScrollsTranscript(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.transcript = nil
+	for i := 0; i < 20; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	atBottom := m.View()
+	if strings.Contains(atBottom, "entry-00") || !strings.Contains(atBottom, "entry-19") {
+		t.Fatalf("expected bottom view to show tail only:\n%s", atBottom)
+	}
+
+	m.handleViewportScrollKey("home")
+	atTop := m.View()
+	if !strings.Contains(atTop, "entry-00") {
+		t.Fatalf("expected home to scroll chat transcript to top:\n%s", atTop)
 	}
 }
 
@@ -833,11 +906,14 @@ func TestToolResultShowsDiffMetadata(t *testing.T) {
 	}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected completed tool cell to be committed to scrollback")
+		t.Fatal("expected wait-event command")
 	}
 	snap := m.assembler.Snapshot()
 	if len(snap) != 0 {
 		t.Fatalf("expected completed tool cell to leave live assembler empty, got %+v", snap)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n"); !strings.Contains(got, "Edited a.txt") {
+		t.Fatalf("expected completed tool cell in transcript:\n%s", got)
 	}
 	if got := strings.Join(m.renderDiffs(), "\n"); !strings.Contains(got, "+whale") {
 		t.Fatalf("expected /diff content from metadata:\n%s", got)
@@ -858,17 +934,17 @@ func testFileDiffMetadata() map[string]any {
 	}
 }
 
-func TestChatLiveViewTruncatesLongOutput(t *testing.T) {
+func TestChatLiveViewUsesViewportForLongOutput(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
 	m.height = 8
 	m.append("assistant", strings.Repeat("line\n", 80))
 	view := m.View()
-	if !strings.Contains(view, "live output truncated") {
-		t.Fatalf("expected truncation marker for long live output:\n%s", view)
-	}
 	if !strings.Contains(view, "Type message or command") {
-		t.Fatalf("expected composer to remain visible after truncating live output:\n%s", view)
+		t.Fatalf("expected composer to remain visible with long live output:\n%s", view)
+	}
+	if got := strings.Count(strings.TrimRight(view, "\n"), "\n") + 1; got != m.height {
+		t.Fatalf("expected view to keep terminal height %d, got %d:\n%s", m.height, got, view)
 	}
 }
 
@@ -1046,11 +1122,14 @@ func TestToolResultUpdatesToolCellWithoutRawJSON(t *testing.T) {
 	next, cmd := m.Update(svcMsg(service.Event{Kind: service.EventToolResult, ToolCallID: "tc-1", ToolName: "read_file", Text: raw}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected completed read cell to be committed to scrollback")
+		t.Fatal("expected wait-event command")
 	}
 	snap := m.assembler.Snapshot()
 	if len(snap) != 0 {
 		t.Fatalf("expected completed read cell to leave live assembler empty, got %+v", snap)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n"); !strings.Contains(got, "Read internal/tui/model.go") {
+		t.Fatalf("expected completed read cell in transcript:\n%s", got)
 	}
 }
 
@@ -1091,11 +1170,14 @@ func TestToolResultKeepsSearchDetailAndAddsSummary(t *testing.T) {
 	}))
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("expected completed search cell to be committed to scrollback")
+		t.Fatal("expected wait-event command")
 	}
 	snap := m.assembler.Snapshot()
 	if len(snap) != 0 {
 		t.Fatalf("expected completed search cell to leave live assembler empty, got %+v", snap)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n"); !strings.Contains(got, "Search assistant_delta in internal/tui") {
+		t.Fatalf("expected completed search cell in transcript:\n%s", got)
 	}
 }
 
@@ -1150,16 +1232,19 @@ func TestClearScreenResetsStateAndShowsHeader(t *testing.T) {
 	if len(m2.diffs) != 0 {
 		t.Fatalf("expected diffs cleared, got %d", len(m2.diffs))
 	}
-	// The assembler should have the header banner added (old content discarded, not committed)
+	// The transcript should keep only the header banner after clear.
 	snap := m2.assembler.Snapshot()
-	if len(snap) != 1 {
-		t.Fatalf("expected 1 info message (header), got %d: %+v", len(snap), snap)
+	if len(snap) != 0 {
+		t.Fatalf("expected empty live assembler, got %+v", snap)
 	}
-	if snap[0].Role != "info" {
-		t.Fatalf("expected info role, got %q", snap[0].Role)
+	if len(m2.transcript) != 1 {
+		t.Fatalf("expected 1 transcript header, got %d: %+v", len(m2.transcript), m2.transcript)
 	}
-	if !strings.Contains(snap[0].Text, "▸ Whale") {
-		t.Fatalf("expected header banner, got: %q", snap[0].Text)
+	if m2.transcript[0].Role != "info" {
+		t.Fatalf("expected info role, got %q", m2.transcript[0].Role)
+	}
+	if !strings.Contains(m2.transcript[0].Text, "▸ Whale") {
+		t.Fatalf("expected header banner, got: %q", m2.transcript[0].Text)
 	}
 }
 

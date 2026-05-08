@@ -1,48 +1,31 @@
-// Package skills implements the Agent Skills open standard.
-// See https://agentskills.io for the specification.
+// Package skills discovers and parses local Agent Skills.
 package skills
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
-	"sync"
-
-	"github.com/charlievieth/fastwalk"
-	"github.com/charmbracelet/crush/internal/pubsub"
-	"gopkg.in/yaml.v3"
 )
 
 const (
-	SkillFileName          = "SKILL.md"
-	MaxNameLength          = 64
-	MaxDescriptionLength   = 1024
-	MaxCompatibilityLength = 500
+	SkillFileName        = "SKILL.md"
+	MaxNameLength        = 64
+	MaxDescriptionLength = 1024
 )
 
-var (
-	namePattern    = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
-	promptReplacer = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;", "'", "&apos;")
-)
+var namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name          string            `yaml:"name" json:"name"`
-	Description   string            `yaml:"description" json:"description"`
-	License       string            `yaml:"license,omitempty" json:"license,omitempty"`
-	Compatibility string            `yaml:"compatibility,omitempty" json:"compatibility,omitempty"`
-	Metadata      map[string]string `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Instructions  string            `yaml:"-" json:"instructions"`
-	Path          string            `yaml:"-" json:"path"`
-	SkillFilePath string            `yaml:"-" json:"skill_file_path"`
-	Builtin       bool              `yaml:"-" json:"builtin"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Instructions  string `json:"instructions"`
+	Path          string `json:"path"`
+	SkillFilePath string `json:"skill_file_path"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -63,22 +46,33 @@ type SkillState struct {
 	Err   error
 }
 
-// Event is published when skill discovery completes.
-type Event struct {
-	States []*SkillState
+// DefaultRoots returns the skill discovery roots for a workspace.
+func DefaultRoots(workspaceRoot string) []string {
+	var roots []string
+	if root := strings.TrimSpace(workspaceRoot); root != "" {
+		roots = append(roots,
+			filepath.Join(root, ".whale", "skills"),
+			filepath.Join(root, ".agents", "skills"),
+		)
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		roots = append(roots,
+			filepath.Join(home, ".whale", "skills"),
+			filepath.Join(home, ".agents", "skills"),
+		)
+	}
+	return uniqueCleanPaths(roots)
 }
 
-var broker = pubsub.NewBroker[Event]()
-
-// SubscribeEvents returns a channel that receives events when skill discovery state changes.
-func SubscribeEvents(ctx context.Context) <-chan pubsub.Event[Event] {
-	return broker.Subscribe(ctx)
+// ValidName reports whether name is a valid skill name.
+func ValidName(name string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && len(name) <= MaxNameLength && namePattern.MatchString(name)
 }
 
-// Validate checks if the skill meets spec requirements.
+// Validate checks if the skill meets Whale's v1 skill requirements.
 func (s *Skill) Validate() error {
 	var errs []error
-
 	if s.Name == "" {
 		errs = append(errs, errors.New("name is required"))
 	} else {
@@ -92,17 +86,11 @@ func (s *Skill) Validate() error {
 			errs = append(errs, fmt.Errorf("name %q must match directory %q", s.Name, filepath.Base(s.Path)))
 		}
 	}
-
 	if s.Description == "" {
 		errs = append(errs, errors.New("description is required"))
 	} else if len(s.Description) > MaxDescriptionLength {
 		errs = append(errs, fmt.Errorf("description exceeds %d characters", MaxDescriptionLength))
 	}
-
-	if len(s.Compatibility) > MaxCompatibilityLength {
-		errs = append(errs, fmt.Errorf("compatibility exceeds %d characters", MaxCompatibilityLength))
-	}
-
 	return errors.Join(errs...)
 }
 
@@ -112,15 +100,12 @@ func Parse(path string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	skill, err := ParseContent(content)
 	if err != nil {
 		return nil, err
 	}
-
 	skill.Path = filepath.Dir(path)
 	skill.SkillFilePath = path
-
 	return skill, nil
 }
 
@@ -130,180 +115,143 @@ func ParseContent(content []byte) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var skill Skill
-	if err := yaml.Unmarshal([]byte(frontmatter), &skill); err != nil {
-		return nil, fmt.Errorf("parsing frontmatter: %w", err)
+	values := parseFlatFrontmatter(frontmatter)
+	skill := &Skill{
+		Name:         values["name"],
+		Description:  values["description"],
+		Instructions: strings.TrimSpace(body),
 	}
-
-	skill.Instructions = strings.TrimSpace(body)
-
-	return &skill, nil
+	return skill, nil
 }
 
-// splitFrontmatter extracts YAML frontmatter and body from markdown content.
-func splitFrontmatter(content string) (frontmatter, body string, err error) {
-	// Strip UTF-8 BOM for compatibility with editors that include it.
-	content = strings.TrimPrefix(content, "\uFEFF")
-	// Normalize line endings to \n for consistent parsing.
-	content = strings.ReplaceAll(content, "\r\n", "\n")
-	content = strings.ReplaceAll(content, "\r", "\n")
-
-	lines := strings.Split(content, "\n")
-	start := slices.IndexFunc(lines, func(line string) bool {
-		return strings.TrimSpace(line) != ""
-	})
-	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
-		return "", "", errors.New("no YAML frontmatter found")
-	}
-
-	endOffset := slices.IndexFunc(lines[start+1:], func(line string) bool {
-		return strings.TrimSpace(line) == "---"
-	})
-	if endOffset == -1 {
-		return "", "", errors.New("unclosed frontmatter")
-	}
-	end := start + 1 + endOffset
-
-	frontmatter = strings.Join(lines[start+1:end], "\n")
-	body = strings.Join(lines[end+1:], "\n")
-	return frontmatter, body, nil
-}
-
-// Discover finds all valid skills in the given paths.
-func Discover(paths []string) []*Skill {
-	skills, _ := DiscoverWithStates(paths)
+// Discover finds all valid skills in the given roots. Earlier roots take
+// precedence when multiple skills have the same name.
+func Discover(roots []string) []*Skill {
+	skills, _ := DiscoverWithStates(roots)
 	return skills
 }
 
-// DiscoverWithStates finds all valid skills in the given paths and also
-// returns a per-file state slice describing parse/validation outcomes. Useful
-// for diagnostics and UI reporting.
-func DiscoverWithStates(paths []string) ([]*Skill, []*SkillState) {
-	var skills []*Skill
+// DiscoverWithStates finds all valid skills and returns parse/validation
+// states for diagnostics.
+func DiscoverWithStates(roots []string) ([]*Skill, []*SkillState) {
+	var all []*Skill
 	var states []*SkillState
-	var mu sync.Mutex
-	seen := make(map[string]bool)
-	addState := func(name, path string, state DiscoveryState, err error) {
-		mu.Lock()
-		states = append(states, &SkillState{
-			Name:  name,
-			Path:  path,
-			State: state,
-			Err:   err,
-		})
-		mu.Unlock()
-	}
-
-	for _, base := range paths {
-		// We use fastwalk with Follow: true instead of filepath.WalkDir because
-		// WalkDir doesn't follow symlinked directories at any depth—only entry
-		// points. This ensures skills in symlinked subdirectories are discovered.
-		// fastwalk is concurrent, so we protect shared state (seen, skills) with mu.
-		conf := fastwalk.Config{
-			Follow:  true,
-			ToSlash: fastwalk.DefaultToSlash(),
+	seenFiles := map[string]bool{}
+	for _, root := range uniqueCleanPaths(roots) {
+		if strings.TrimSpace(root) == "" {
+			continue
 		}
-		err := fastwalk.Walk(&conf, base, func(path string, d os.DirEntry, err error) error {
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			states = append(states, &SkillState{Path: root, State: StateError, Err: err})
+			continue
+		}
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
-				slog.Warn("Failed to walk skills path entry", "base", base, "path", path, "error", err)
-				addState("", path, StateError, err)
+				states = append(states, &SkillState{Path: path, State: StateError, Err: err})
 				return nil
 			}
 			if d.IsDir() || d.Name() != SkillFileName {
 				return nil
 			}
-			mu.Lock()
-			if seen[path] {
-				mu.Unlock()
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				states = append(states, &SkillState{Path: path, State: StateError, Err: err})
 				return nil
 			}
-			seen[path] = true
-			mu.Unlock()
-			skill, err := Parse(path)
+			if seenFiles[abs] {
+				return nil
+			}
+			seenFiles[abs] = true
+			skill, err := Parse(abs)
 			if err != nil {
-				slog.Warn("Failed to parse skill file", "path", path, "error", err)
-				addState("", path, StateError, err)
+				states = append(states, &SkillState{Path: abs, State: StateError, Err: err})
 				return nil
 			}
 			if err := skill.Validate(); err != nil {
-				slog.Warn("Skill validation failed", "path", path, "error", err)
-				addState(skill.Name, path, StateError, err)
+				states = append(states, &SkillState{Name: skill.Name, Path: abs, State: StateError, Err: err})
 				return nil
 			}
-			slog.Debug("Successfully loaded skill", "name", skill.Name, "path", path)
-			mu.Lock()
-			skills = append(skills, skill)
-			mu.Unlock()
-			addState(skill.Name, path, StateNormal, nil)
+			all = append(all, skill)
+			states = append(states, &SkillState{Name: skill.Name, Path: abs, State: StateNormal})
 			return nil
 		})
 		if err != nil && !os.IsNotExist(err) {
-			slog.Warn("Failed to walk skills path", "path", base, "error", err)
+			states = append(states, &SkillState{Path: root, State: StateError, Err: err})
 		}
 	}
+	return Sort(Deduplicate(all)), states
+}
 
-	// fastwalk traversal order is non-deterministic, so sort for stable output.
-	sort.SliceStable(skills, func(i, j int) bool {
-		left := strings.ToLower(skills[i].SkillFilePath)
-		right := strings.ToLower(skills[j].SkillFilePath)
+// Find returns a skill by exact name.
+func Find(roots []string, name string) (*Skill, []*SkillState, bool) {
+	discovered, states := DiscoverWithStates(roots)
+	for _, skill := range discovered {
+		if skill.Name == name {
+			return skill, states, true
+		}
+	}
+	return nil, states, false
+}
+
+// Sort returns a copy sorted by lowercase skill name.
+func Sort(all []*Skill) []*Skill {
+	out := append([]*Skill(nil), all...)
+	sort.SliceStable(out, func(i, j int) bool {
+		left := strings.ToLower(out[i].Name)
+		right := strings.ToLower(out[j].Name)
 		if left == right {
-			return skills[i].SkillFilePath < skills[j].SkillFilePath
+			return out[i].Name < out[j].Name
 		}
 		return left < right
 	})
-
-	broker.Publish(pubsub.UpdatedEvent, Event{States: states})
-	return skills, states
+	return out
 }
 
-// ToPromptXML generates XML for injection into the system prompt.
-func ToPromptXML(skills []*Skill) string {
-	if len(skills) == 0 {
+// Deduplicate removes duplicate skills by name. The first occurrence wins,
+// so callers can pass roots in priority order.
+func Deduplicate(all []*Skill) []*Skill {
+	seen := map[string]bool{}
+	out := make([]*Skill, 0, len(all))
+	for _, skill := range all {
+		if skill == nil || seen[skill.Name] {
+			continue
+		}
+		seen[skill.Name] = true
+		out = append(out, skill)
+	}
+	return out
+}
+
+// RenderAvailableSkills renders a compact system-prompt index.
+func RenderAvailableSkills(all []*Skill) string {
+	all = Sort(all)
+	if len(all) == 0 {
 		return ""
 	}
-
-	var sb strings.Builder
-	sb.WriteString("<available_skills>\n")
-	for _, s := range skills {
-		sb.WriteString("  <skill>\n")
-		fmt.Fprintf(&sb, "    <name>%s</name>\n", escape(s.Name))
-		fmt.Fprintf(&sb, "    <description>%s</description>\n", escape(s.Description))
-		fmt.Fprintf(&sb, "    <location>%s</location>\n", escape(s.SkillFilePath))
-		if s.Builtin {
-			sb.WriteString("    <type>builtin</type>\n")
+	var b strings.Builder
+	b.WriteString("Available skills:\n")
+	for _, skill := range all {
+		b.WriteString("- ")
+		b.WriteString(skill.Name)
+		if strings.TrimSpace(skill.Description) != "" {
+			b.WriteString(": ")
+			b.WriteString(strings.TrimSpace(skill.Description))
 		}
-		sb.WriteString("  </skill>\n")
-	}
-	sb.WriteString("</available_skills>")
-	return sb.String()
-}
-
-func escape(s string) string {
-	return promptReplacer.Replace(s)
-}
-
-// Deduplicate removes duplicate skills by name. When duplicates exist, the
-// last occurrence wins. This means user skills (appended after builtins)
-// override builtin skills with the same name.
-func Deduplicate(all []*Skill) []*Skill {
-	seen := make(map[string]int, len(all))
-	for i, s := range all {
-		seen[s.Name] = i
-	}
-
-	result := make([]*Skill, 0, len(seen))
-	for i, s := range all {
-		if seen[s.Name] == i {
-			result = append(result, s)
+		if strings.TrimSpace(skill.SkillFilePath) != "" {
+			b.WriteString(" (file: ")
+			b.WriteString(skill.SkillFilePath)
+			b.WriteString(")")
 		}
+		b.WriteString("\n")
 	}
-	return result
+	b.WriteString("\nUsers can invoke a skill with a leading $skill-name mention. Use load_skill with the skill name when the user explicitly mentions a skill or the task clearly matches one. The index above is metadata only; load the skill before relying on its instructions.")
+	return strings.TrimSpace(b.String())
 }
 
-// ApproxTokenCount returns a rough estimate of how many tokens a string
-// occupies when sent to an LLM. Uses the common ~4-chars-per-token heuristic
-// that approximates GPT/Claude tokenizers well enough for diagnostic logging.
+// ApproxTokenCount returns a rough estimate using a common ~4 chars/token heuristic.
 func ApproxTokenCount(s string) int {
 	if s == "" {
 		return 0
@@ -316,17 +264,85 @@ func Filter(all []*Skill, disabled []string) []*Skill {
 	if len(disabled) == 0 {
 		return all
 	}
-
 	disabledSet := make(map[string]bool, len(disabled))
 	for _, name := range disabled {
 		disabledSet[name] = true
 	}
-
-	result := make([]*Skill, 0, len(all))
-	for _, s := range all {
-		if !disabledSet[s.Name] {
-			result = append(result, s)
+	out := make([]*Skill, 0, len(all))
+	for _, skill := range all {
+		if skill != nil && !disabledSet[skill.Name] {
+			out = append(out, skill)
 		}
 	}
-	return result
+	return out
+}
+
+func splitFrontmatter(content string) (frontmatter, body string, err error) {
+	content = strings.TrimPrefix(content, "\uFEFF")
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
+	lines := strings.Split(content, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			start = i
+			break
+		}
+	}
+	if start == -1 || strings.TrimSpace(lines[start]) != "---" {
+		return "", "", errors.New("no YAML frontmatter found")
+	}
+	end := -1
+	for i := start + 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			end = i
+			break
+		}
+	}
+	if end == -1 {
+		return "", "", errors.New("unclosed frontmatter")
+	}
+	return strings.Join(lines[start+1:end], "\n"), strings.Join(lines[end+1:], "\n"), nil
+}
+
+func parseFlatFrontmatter(frontmatter string) map[string]string {
+	values := map[string]string{}
+	for _, line := range strings.Split(frontmatter, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if key == "name" || key == "description" {
+			values[key] = value
+		}
+	}
+	return values
+}
+
+func uniqueCleanPaths(paths []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		clean, err := filepath.Abs(filepath.Clean(path))
+		if err != nil {
+			clean = filepath.Clean(path)
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		out = append(out, clean)
+	}
+	return out
 }

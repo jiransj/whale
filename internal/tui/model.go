@@ -39,30 +39,31 @@ const (
 )
 
 type model struct {
-	svc       *service.Service
-	dispatch  func(service.Intent)
-	input     composer.Composer
-	viewport  viewport.Model
-	assembler *tuirender.Assembler
-	logs      []logEntry
-	diffs     []diffEntry
-	width     int
-	height    int
-	mode      mode
-	page      page
-	status    string
-	busy      bool
-	busySince time.Time
-	stopping  bool
-	sidebar   bool
-	model     string
-	effort    string
-	thinking  string
-	chatMode  string
-	product   string
-	version   string
-	cwd       string
-	approval  struct {
+	svc        *service.Service
+	dispatch   func(service.Intent)
+	input      composer.Composer
+	viewport   viewport.Model
+	assembler  *tuirender.Assembler
+	transcript []tuirender.UIMessage
+	logs       []logEntry
+	diffs      []diffEntry
+	width      int
+	height     int
+	mode       mode
+	page       page
+	status     string
+	busy       bool
+	busySince  time.Time
+	stopping   bool
+	sidebar    bool
+	model      string
+	effort     string
+	thinking   string
+	chatMode   string
+	product    string
+	version    string
+	cwd        string
+	approval   struct {
 		toolCallID string
 		toolName   string
 		reason     string
@@ -180,6 +181,7 @@ func newModel(svc *service.Service, modelName, effort, thinking string) model {
 	}
 	m.slash.all = parseSlashCommands(app.CommandsHelp)
 	m.slash.autoRun = buildSlashAutoRunMap(app.CommandsHelp)
+	m.resetTranscriptWithHeader()
 	return m
 }
 
@@ -268,7 +270,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.assembler = tuirender.NewAssembler()
 				}
 				m.assembler.SetPlan(ev.Text)
-				eventCmd = m.commitLiveScrollbackCmd()
+				m.commitLiveTranscript(false)
 				m.sawPlanThisTurn = true
 			}
 			m.addLog(logEntry{Kind: "plan_completed", Source: "plan", Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
@@ -309,7 +311,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addLog(logEntry{Kind: "tool_result", Source: ev.ToolName, Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
 			m.captureDiffMetadata(ev.ToolName, ev.Metadata)
 			m.captureDiff(ev.ToolName, ev.Text)
-			eventCmd = m.commitLiveScrollbackCmd()
+			m.commitLiveTranscript(false)
 		case service.EventApprovalRequired:
 			m.mode = modeApproval
 			m.approval.toolCallID = ev.ToolCallID
@@ -340,7 +342,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stopBusy()
 			m.stopping = false
 			m.markNoFinalAnswerIfNeeded()
-			eventCmd = m.commitLiveScrollbackCmd()
+			m.commitLiveTranscript(false)
 			m.addLog(logEntry{Kind: "turn_done", Source: "assistant", Summary: truncateLine(ev.LastResponse, 120), Raw: ev.LastResponse})
 			m.status = "ready"
 			if wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {
@@ -370,17 +372,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.permissionsPicker.index = indexOf(ev.ApprovalChoices, ev.CurrentApproval)
 		case service.EventClearScreen:
 			m.assembler.Reset()
+			m.resetTranscriptWithHeader()
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
 			m.sawTerminalToolOutcomeThisTurn = false
 			m.logs = nil
 			m.diffs = nil
-			m.append("info", buildHeaderBanner(m.model, m.effort, m.cwd, m.version))
 			m.status = "terminal cleared"
 			return m, tea.Sequence(clearScreenCmd(), waitEventCmd(m.svc))
 		case service.EventSessionHydrated:
 			m.assembler.Reset()
+			m.resetTranscriptWithHeader()
 			m.sawPlanThisTurn = false
 			m.sawAssistantThisTurn = false
 			m.sawReasoningThisTurn = false
@@ -388,7 +391,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logs = nil
 			m.diffs = nil
 			m.hydrateSessionMessages(ev.Messages)
-			eventCmd = m.commitLiveScrollbackCmd()
+			m.commitLiveTranscript(true)
 			m.status = "ready"
 		case service.EventExitRequested:
 			m.dispatchIntent(service.Intent{Kind: service.IntentShutdown})
@@ -483,7 +486,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.stopping = true
 						m.appendNotice(m.turnInterruptedNoticeText())
 					}
-					return m, m.commitLiveScrollbackCmd()
+					m.commitLiveTranscript(false)
+					return m, nil
 				}
 				if m.hasSlashSuggestions() {
 					m.slash.matches = nil
@@ -692,13 +696,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter":
 				if m.planImplementation.index == 0 {
-					commitCmd := m.commitMessageScrollbackCmd("you", "Implement the plan.")
+					m.appendTranscript("you", tuirender.KindText, "Implement the plan.")
 					m.startBusy()
 					m.status = "running"
 					m.chatMode = "agent"
 					m.dispatchIntent(service.Intent{Kind: service.IntentImplementPlan})
 					m.mode = modeChat
-					return m, tea.Sequence(commitCmd, busyTickCmd())
+					m.refreshViewportContentFollow(true)
+					return m, busyTickCmd()
 				}
 				m.mode = modeChat
 			}
@@ -735,13 +740,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.SetValue(cmd)
 					m.updateSlashMatches()
 					if m.shouldAutoRunSlash(cmd) {
-						m.append("you", cmd)
+						m.appendTranscript("you", tuirender.KindText, cmd)
 						m.input.SetValue("")
 						m.slash.matches = nil
 						m.slash.selected = 0
 						m.startBusy()
 						m.status = "running"
 						m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: cmd})
+						m.refreshViewportContentFollow(true)
 						return m, busyTickCmd()
 					}
 				}
@@ -764,12 +770,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.recordPromptHistory(value)
 			m.resetHistoryNavigation()
-			commitCmd := m.commitMessageScrollbackCmd("you", visibleSubmittedText(value))
+			m.appendTranscript("you", tuirender.KindText, visibleSubmittedText(value))
 			m.input.SetValue("")
 			m.startBusy()
 			m.status = "running"
 			m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value})
-			return m, tea.Sequence(commitCmd, busyTickCmd())
+			m.refreshViewportContentFollow(true)
+			return m, busyTickCmd()
 		}
 	}
 	var cmd tea.Cmd

@@ -198,6 +198,26 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 	if err != nil || !res.Handled || !res.ShowMemory {
 		t.Fatalf("unexpected /memory result: %+v err=%v", res, err)
 	}
+	res, err = handleCommand("/skills", "cur", now)
+	if err != nil || !res.Handled || !res.ShowSkills {
+		t.Fatalf("unexpected /skills result: %+v err=%v", res, err)
+	}
+	res, err = handleCommand("/skill test-skill with args", "cur", now)
+	if err != nil || !res.Handled || res.SkillName != "test-skill" || res.SkillArgs != "with args" {
+		t.Fatalf("unexpected /skill result: %+v err=%v", res, err)
+	}
+	if _, err = handleCommand("/skill", "cur", now); err == nil {
+		t.Fatal("expected /skill usage error")
+	}
+}
+
+func TestCommandsHelpKeepsSkillCommandOutOfPrimaryList(t *testing.T) {
+	if !strings.Contains(CommandsHelp, "/skills") {
+		t.Fatalf("expected /skills in help: %s", CommandsHelp)
+	}
+	if strings.Contains(CommandsHelp, "/skill ") {
+		t.Fatalf("expected /skill debug command to stay out of primary help: %s", CommandsHelp)
+	}
 }
 
 func TestHandleSlashInitReturnsSyntheticPrompt(t *testing.T) {
@@ -262,6 +282,82 @@ func TestHandleSlashClearReturnsClearScreenFlag(t *testing.T) {
 	}
 }
 
+func TestHandleSlashSkillsCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.", "# Test Skill\n\nFollow workspace instructions.")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir}
+
+	handled, out, synthetic, shouldExit, clearScreen, err := app.HandleSlash("/skills")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !handled || shouldExit || clearScreen || synthetic != "" {
+		t.Fatalf("unexpected /skills flags handled=%v shouldExit=%v clearScreen=%v synthetic=%q", handled, shouldExit, clearScreen, synthetic)
+	}
+	if !strings.Contains(out, "test-skill") || strings.Contains(out, "Follow workspace instructions") {
+		t.Fatalf("unexpected /skills output: %q", out)
+	}
+
+	handled, out, synthetic, shouldExit, clearScreen, err = app.HandleSlash("/skill test-skill arg1 arg2")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !handled || shouldExit || clearScreen {
+		t.Fatalf("unexpected /skill flags handled=%v shouldExit=%v clearScreen=%v", handled, shouldExit, clearScreen)
+	}
+	if !strings.Contains(out, "loaded skill: test-skill") {
+		t.Fatalf("unexpected /skill output: %q", out)
+	}
+	if !strings.Contains(synthetic, "Follow workspace instructions") || !strings.Contains(synthetic, "arg1 arg2") {
+		t.Fatalf("unexpected synthetic prompt: %q", synthetic)
+	}
+}
+
+func TestHandleSlashSkillUnknownListsAvailable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "known-skill"), "known-skill", "Known skill.", "# Known")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir}
+
+	handled, _, _, _, _, err := app.HandleSlash("/skill missing-skill")
+	if !handled {
+		t.Fatal("expected /skill to be handled")
+	}
+	if err == nil || !strings.Contains(err.Error(), "known-skill") {
+		t.Fatalf("expected available skill in error, got %v", err)
+	}
+}
+
+func TestBuildSkillMentionSyntheticPrompt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.", "# Test Skill\n\nFollow workspace instructions.")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir}
+
+	ok, out, synthetic, err := app.BuildSkillMentionSyntheticPrompt("$test-skill arg1 arg2")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected skill mention match")
+	}
+	if !strings.Contains(out, "loaded skill: test-skill") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(synthetic, "Follow workspace instructions") || !strings.Contains(synthetic, "arg1 arg2") {
+		t.Fatalf("unexpected synthetic prompt: %q", synthetic)
+	}
+
+	ok, _, _, err = app.BuildSkillMentionSyntheticPrompt("please use $test-skill")
+	if err != nil || ok {
+		t.Fatalf("expected non-leading mention to be ignored, ok=%v err=%v", ok, err)
+	}
+}
+
 func TestHandleSlashNewIncludesResumeHint(t *testing.T) {
 	dir := t.TempDir()
 	sessionsDir := filepath.Join(dir, "sessions")
@@ -311,5 +407,16 @@ func TestHandleSlashNewIncludesResumeHint(t *testing.T) {
 	}
 	if !strings.Contains(out, "whale resume sess-1") {
 		t.Fatalf("expected output to include resume hint, got: %q", out)
+	}
+}
+
+func writeAppSkill(t *testing.T, dir, name, desc, body string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	content := "---\nname: " + name + "\ndescription: " + desc + "\n---\n\n" + body + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
 	}
 }

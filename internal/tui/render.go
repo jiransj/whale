@@ -22,32 +22,11 @@ func (m model) renderBody(mainWidth, bodyHeight int) string {
 			BorderForeground(tuitheme.Default.Border).
 			Render(m.viewport.View())
 	}
-	return m.renderLiveArea(mainWidth, bodyHeight)
-}
-
-func (m model) renderLiveArea(width, bodyHeight int) string {
 	if bodyHeight <= 0 {
 		return ""
 	}
-	lines := m.renderChatLines(max(20, width-2))
-	if len(lines) == 0 {
-		return ""
-	}
-	maxLines := bodyHeight
-	truncated := false
-	if len(lines) > maxLines {
-		truncated = true
-		lines = lines[len(lines)-maxLines:]
-	}
-	if truncated {
-		prefix := lipgloss.NewStyle().
-			Foreground(tuitheme.Default.Muted).
-			Render("... live output truncated; full turn will be added to scrollback when complete")
-		lines = append([]string{prefix}, lines...)
-	}
-	return lipgloss.NewStyle().
-		Width(width).
-		Render(strings.TrimRight(strings.Join(lines, "\n"), "\n"))
+	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+	return lipgloss.NewStyle().Width(mainWidth).Render(m.viewport.View())
 }
 
 func (m model) View() string {

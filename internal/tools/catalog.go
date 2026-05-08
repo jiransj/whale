@@ -26,6 +26,21 @@ func (b *Toolset) Tools() []core.Tool {
 			fn:       b.readFile,
 		},
 		toolFn{
+			name:        "load_skill",
+			description: "Load a local Agent Skill by name from workspace or user skill roots. Read-only; does not execute scripts and does not accept file paths.",
+			parameters: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"name":      map[string]any{"type": "string", "description": "Skill name, e.g. code-review or playwright"},
+					"arguments": map[string]any{"type": "string", "description": "Optional task-specific context or arguments to pass along with the loaded skill"},
+				},
+				"required": []string{"name"},
+			},
+			readOnly: true,
+			fn:       b.loadSkill,
+		},
+		toolFn{
 			name:        "list_dir",
 			description: "List directory entries under workspace root. Use for structure discovery before deeper reads. Not recursive; combine with grep/read_file for targeted exploration.",
 			parameters: map[string]any{

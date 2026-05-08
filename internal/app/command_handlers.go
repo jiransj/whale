@@ -41,6 +41,13 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 		line := a.showMemory()
 		return true, line, "", false, false, nil
 	}
+	if cmdResult.ShowSkills {
+		return true, a.buildSkillsList(), "", false, false, nil
+	}
+	if cmdResult.SkillName != "" {
+		out, synthetic, err := a.buildSkillSyntheticPrompt(cmdResult.SkillName, cmdResult.SkillArgs)
+		return true, out, synthetic, false, false, err
+	}
 	if cmdResult.Mode != "" {
 		mode, err := session.ParseMode(cmdResult.Mode)
 		if err != nil {

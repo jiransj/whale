@@ -36,6 +36,31 @@ func TestAgentLoopWithToolRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRunStreamWithInjectedInputStoresVisibleAndHiddenMessages(t *testing.T) {
+	store := NewInMemoryStore()
+	a := NewAgent(&mockProviderWithDeltas{}, store, nil)
+
+	events, err := a.RunStreamWithInjectedInput(context.Background(), "s-skill", "$demo do it", "<skill>demo</skill>")
+	if err != nil {
+		t.Fatalf("run stream failed: %v", err)
+	}
+	for range events {
+	}
+	all, err := store.List(context.Background(), "s-skill")
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(all) < 2 {
+		t.Fatalf("expected at least two user messages, got %d", len(all))
+	}
+	if all[0].Role != RoleUser || all[0].Hidden || all[0].Text != "$demo do it" {
+		t.Fatalf("unexpected visible message: %+v", all[0])
+	}
+	if all[1].Role != RoleUser || !all[1].Hidden || all[1].Text != "<skill>demo</skill>" {
+		t.Fatalf("unexpected hidden message: %+v", all[1])
+	}
+}
+
 type mockProviderWithDeltas struct{}
 
 func (m *mockProviderWithDeltas) StreamResponse(_ context.Context, _ []Message, _ []Tool) <-chan ProviderEvent {
