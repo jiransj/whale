@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	xansi "github.com/charmbracelet/x/ansi"
 	tuitheme "github.com/usewhale/whale/internal/tui/theme"
 )
 
@@ -40,6 +41,9 @@ func renderCard(m UIMessage, block string, width int) []string {
 	if m.Role == "you" {
 		return renderUserPrompt(block, width)
 	}
+	if m.Role == "assistant" && m.Kind == KindText {
+		return renderAssistantMarkdown(block, width)
+	}
 	if m.Kind == KindNotice || m.Role == "notice" {
 		return renderNotice(block, width)
 	}
@@ -53,7 +57,7 @@ func renderCard(m UIMessage, block string, width int) []string {
 		contentWidth = 16
 	}
 
-	rendered := renderEntryText(m.Role, block, contentWidth)
+	rendered := hardWrapRendered(renderEntryText(m.Role, block, contentWidth), contentWidth)
 
 	card := lipgloss.NewStyle().
 		BorderStyle(lipgloss.ThickBorder()).
@@ -67,6 +71,25 @@ func renderCard(m UIMessage, block string, width int) []string {
 		Render(strings.TrimRight(rendered, "\n"))
 
 	return strings.Split(strings.TrimRight(card, "\n"), "\n")
+}
+
+func renderAssistantMarkdown(block string, width int) []string {
+	contentWidth := width - 2
+	if contentWidth < 16 {
+		contentWidth = 16
+	}
+	rendered := strings.TrimRight(hardWrapRendered(renderEntryText("assistant", block, contentWidth), contentWidth), "\n")
+	if rendered == "" {
+		return nil
+	}
+	return strings.Split(rendered, "\n")
+}
+
+func hardWrapRendered(text string, width int) string {
+	if width < 1 || text == "" {
+		return text
+	}
+	return xansi.Hardwrap(text, width, true)
 }
 
 func renderNotice(block string, width int) []string {
@@ -88,7 +111,7 @@ func renderUserPrompt(block string, width int) []string {
 	if contentWidth < 16 {
 		contentWidth = 16
 	}
-	rendered := strings.TrimRight(renderEntryText("you", block, contentWidth), "\n")
+	rendered := strings.TrimRight(hardWrapRendered(renderEntryText("you", block, contentWidth), contentWidth), "\n")
 	lines := strings.Split(rendered, "\n")
 	glyph := lipgloss.NewStyle().
 		Foreground(roleBorderColor(UIMessage{Role: "you"})).
@@ -117,7 +140,7 @@ func renderThinkingCard(m UIMessage, block string, width int) []string {
 	body := lipgloss.NewStyle().
 		Foreground(tuitheme.Default.Muted).
 		Italic(true).
-		Render(renderEntryText("think", block, contentWidth))
+		Render(hardWrapRendered(renderEntryText("think", block, contentWidth), contentWidth))
 	rendered := strings.TrimRight(title+"\n"+body, "\n")
 	card := lipgloss.NewStyle().
 		BorderStyle(lipgloss.ThickBorder()).

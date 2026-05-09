@@ -43,5 +43,8 @@ __debug_bin*
 *.prof
 *.pprof
 
+# --- Promotional Materials (not part of the project) ---
+promo/
+
 # --- Logs ---
 *.log

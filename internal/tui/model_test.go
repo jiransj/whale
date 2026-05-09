@@ -135,6 +135,51 @@ func TestHydrateSessionMessages_SuppressesHiddenUserText(t *testing.T) {
 	}
 }
 
+func TestHydrateSessionMessages_LimitsVisibleResumeHistory(t *testing.T) {
+	m := &model{assembler: tuirender.NewAssembler()}
+	msgs := make([]core.Message, 0, 12)
+	for i := 0; i < 12; i++ {
+		msgs = append(msgs, core.Message{
+			Role: core.RoleUser,
+			Text: fmt.Sprintf("user-%02d", i),
+		})
+	}
+	m.hydrateSessionMessages(msgs)
+	snap := m.assembler.Snapshot()
+	if len(snap) != maxHydratedVisibleMessages {
+		t.Fatalf("expected %d visible messages, got %d", maxHydratedVisibleMessages, len(snap))
+	}
+	joined := strings.Join(tuirender.ChatLines(snap, 80), "\n")
+	if strings.Contains(joined, "user-03") || !strings.Contains(joined, "user-04") || !strings.Contains(joined, "user-11") {
+		t.Fatalf("expected only recent resume messages in UI hydrate:\n%s", joined)
+	}
+}
+
+func TestSessionHydrationTrimsRenderedResumeHistoryLines(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 24
+	msgs := make([]core.Message, 0, 8)
+	for i := 0; i < 8; i++ {
+		msgs = append(msgs, core.Message{
+			Role: core.RoleUser,
+			Text: fmt.Sprintf("msg-%02d\n%s", i, strings.Repeat("line\n", 70)),
+		})
+	}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:     service.EventSessionHydrated,
+		Messages: msgs,
+	}))
+	m = next.(model)
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	if strings.Contains(rendered, "msg-00") || !strings.Contains(rendered, "msg-07") {
+		t.Fatalf("expected rendered resume transcript to keep recent tail only:\n%s", rendered)
+	}
+	if got := len(tuirender.ChatLines(m.transcript[1:], m.chatRenderWidth())); got > maxHydratedTranscriptLines {
+		t.Fatalf("expected hydrated transcript to be bounded, got %d lines", got)
+	}
+}
+
 func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
 	cmds := parseSlashCommands(app.CommandsHelp)
 	if !containsString(cmds, "/permissions") {
@@ -790,6 +835,94 @@ func TestChatViewportScrollsTranscript(t *testing.T) {
 	}
 }
 
+func TestChatViewportScrollKeysUseTranscriptBeforeComposer(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.transcript = nil
+	for i := 0; i < 30; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	bottomOffset := m.viewport.YOffset
+	if bottomOffset == 0 {
+		t.Fatal("expected transcript to be scrollable")
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	if m.viewport.YOffset >= bottomOffset {
+		t.Fatalf("expected PageUp to scroll transcript up, offset=%d bottom=%d", m.viewport.YOffset, bottomOffset)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = next.(model)
+	if m.viewport.YOffset != bottomOffset {
+		t.Fatalf("expected PageDown to return to bottom, offset=%d bottom=%d", m.viewport.YOffset, bottomOffset)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m = next.(model)
+	if m.viewport.YOffset != 0 {
+		t.Fatalf("expected Home to jump to top, offset=%d", m.viewport.YOffset)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m = next.(model)
+	if m.viewport.YOffset != bottomOffset {
+		t.Fatalf("expected End to jump to bottom, offset=%d bottom=%d", m.viewport.YOffset, bottomOffset)
+	}
+}
+
+func TestChatViewportMouseWheelScrollsTranscript(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.transcript = nil
+	for i := 0; i < 30; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	bottomOffset := m.viewport.YOffset
+	if bottomOffset == 0 {
+		t.Fatal("expected transcript to be scrollable")
+	}
+
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	m = next.(model)
+	if m.viewport.YOffset >= bottomOffset {
+		t.Fatalf("expected wheel up to scroll transcript up, offset=%d bottom=%d", m.viewport.YOffset, bottomOffset)
+	}
+
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	m = next.(model)
+	if m.viewport.YOffset <= 0 {
+		t.Fatalf("expected wheel down to scroll transcript down, offset=%d", m.viewport.YOffset)
+	}
+}
+
+func TestCtrlUStillClearsComposerInsteadOfScrollingTranscript(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.transcript = nil
+	for i := 0; i < 30; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	m.handleViewportScrollKey("home")
+	m.input.SetValue("clear me")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected Ctrl+U to clear composer, got %q", got)
+	}
+	if m.viewport.YOffset != 0 {
+		t.Fatalf("expected Ctrl+U not to scroll transcript, offset=%d", m.viewport.YOffset)
+	}
+}
+
 func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
@@ -1156,6 +1289,68 @@ func TestToolResultUpdatesToolCellWithoutRawJSON(t *testing.T) {
 	}
 	if got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n"); !strings.Contains(got, "Read internal/tui/model.go") {
 		t.Fatalf("expected completed read cell in transcript:\n%s", got)
+	}
+}
+
+func TestTaskToolResultSummaries(t *testing.T) {
+	rawParallel := `{"ok":true,"success":true,"data":{"model":"deepseek-v4-flash","results":[{"index":0,"output":"a"},{"index":1,"output":"b"}]},"metadata":{"duration_ms":42}}`
+	role, got := summarizeToolResultForChat("parallel_reason", rawParallel)
+	if role != "result_ok" || got != "✓ · 42ms · 2 result(s)" {
+		t.Fatalf("unexpected parallel summary: role=%q got=%q", role, got)
+	}
+	rawSubagent := `{"ok":true,"success":true,"data":{"role":"review","summary":"no permission bypass found"},"metadata":{"duration_ms":1500}}`
+	role, got = summarizeToolResultForChat("spawn_subagent", rawSubagent)
+	if role != "result_ok" || got != "✓ · 1.5s · review\nno permission bypass found" {
+		t.Fatalf("unexpected subagent summary: role=%q got=%q", role, got)
+	}
+}
+
+func TestTaskActivityEventsUpdateStatusOnly(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat}
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTaskStarted, ToolName: "spawn_subagent", Text: "spawn_subagent started · review"}))
+	m = next.(model)
+	if m.status != "spawn_subagent started · review" {
+		t.Fatalf("unexpected status: %q", m.status)
+	}
+	if len(m.assembler.Snapshot()) != 0 {
+		t.Fatalf("task activity event should not add transcript rows: %+v", m.assembler.Snapshot())
+	}
+}
+
+func TestTaskProgressUpdatesTaskToolRow(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-task",
+		ToolName:   "spawn_subagent",
+		Text:       "spawn_subagent: review · inspect internal/tasks",
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventTaskProgress,
+		ToolCallID: "tc-task",
+		ToolName:   "spawn_subagent",
+		Text:       "spawn_subagent running · review · reading internal/tasks/runner.go",
+	}))
+	m = next.(model)
+	snap := m.assembler.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("expected one tool row, got %+v", snap)
+	}
+	if snap[0].Role != "result_running" || !strings.Contains(snap[0].Text, "reading internal/tasks/runner.go") {
+		t.Fatalf("unexpected progress row: %+v", snap[0])
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventTaskProgress,
+		ToolCallID: "tc-task",
+		ToolName:   "spawn_subagent",
+		Text:       `spawn_subagent running · review · Searched "TaskProgress" in internal/tui (*.go) · 7 matches in 3 files`,
+	}))
+	m = next.(model)
+	snap = m.assembler.Snapshot()
+	if !strings.Contains(snap[0].Text, `Searched "TaskProgress" in internal/tui (*.go) · 7 matches in 3 files`) {
+		t.Fatalf("expected progress target and metric to be preserved: %+v", snap[0])
 	}
 }
 

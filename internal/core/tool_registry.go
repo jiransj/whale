@@ -96,6 +96,10 @@ func (r *ToolRegistry) SetMaxResultChars(limit int) {
 }
 
 func (r *ToolRegistry) Dispatch(ctx context.Context, call ToolCall) (ToolResult, error) {
+	return r.DispatchWithProgress(ctx, call, nil)
+}
+
+func (r *ToolRegistry) DispatchWithProgress(ctx context.Context, call ToolCall, progress func(ToolProgress)) (ToolResult, error) {
 	start := time.Now()
 	spec, hasSpec := r.Spec(call.Name)
 	tool := r.Get(call.Name)
@@ -117,7 +121,13 @@ func (r *ToolRegistry) Dispatch(ctx context.Context, call ToolCall) (ToolResult,
 			}, time.Since(start).Milliseconds()), nil
 		}
 	}
-	res, err := tool.Run(ctx, call)
+	var res ToolResult
+	var err error
+	if runner, ok := tool.(ToolProgressRunner); ok {
+		res, err = runner.RunWithProgress(ctx, call, progress)
+	} else {
+		res, err = tool.Run(ctx, call)
+	}
 	if err != nil {
 		code := "exec_failed"
 		if errors.Is(err, context.Canceled) {

@@ -11,13 +11,22 @@ import (
 )
 
 type SessionMeta struct {
-	Branch       string    `json:"branch,omitempty"`
-	Title        string    `json:"title,omitempty"`
-	Summary      string    `json:"summary,omitempty"`
-	TotalCostUSD float64   `json:"total_cost_usd,omitempty"`
-	TurnCount    int       `json:"turn_count,omitempty"`
-	Workspace    string    `json:"workspace,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	Branch          string    `json:"branch,omitempty"`
+	Title           string    `json:"title,omitempty"`
+	Summary         string    `json:"summary,omitempty"`
+	TotalCostUSD    float64   `json:"total_cost_usd,omitempty"`
+	TurnCount       int       `json:"turn_count,omitempty"`
+	Workspace       string    `json:"workspace,omitempty"`
+	Kind            string    `json:"kind,omitempty"`
+	ParentSessionID string    `json:"parent_session_id,omitempty"`
+	Role            string    `json:"role,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Task            string    `json:"task,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 func metaStatePath(sessionsDir, sessionID string) string {
@@ -78,6 +87,33 @@ func PatchSessionMeta(sessionsDir, sessionID string, patch SessionMeta) (Session
 	}
 	if strings.TrimSpace(patch.Workspace) != "" {
 		cur.Workspace = strings.TrimSpace(patch.Workspace)
+	}
+	if strings.TrimSpace(patch.Kind) != "" {
+		cur.Kind = strings.TrimSpace(patch.Kind)
+	}
+	if strings.TrimSpace(patch.ParentSessionID) != "" {
+		cur.ParentSessionID = strings.TrimSpace(patch.ParentSessionID)
+	}
+	if strings.TrimSpace(patch.Role) != "" {
+		cur.Role = strings.TrimSpace(patch.Role)
+	}
+	if strings.TrimSpace(patch.Model) != "" {
+		cur.Model = strings.TrimSpace(patch.Model)
+	}
+	if strings.TrimSpace(patch.Task) != "" {
+		cur.Task = strings.TrimSpace(patch.Task)
+	}
+	if strings.TrimSpace(patch.Status) != "" {
+		cur.Status = strings.TrimSpace(patch.Status)
+	}
+	if strings.TrimSpace(patch.Error) != "" {
+		cur.Error = strings.TrimSpace(patch.Error)
+	}
+	if !patch.StartedAt.IsZero() {
+		cur.StartedAt = patch.StartedAt
+	}
+	if !patch.CompletedAt.IsZero() {
+		cur.CompletedAt = patch.CompletedAt
 	}
 	if err := SaveSessionMeta(sessionsDir, sessionID, cur); err != nil {
 		return SessionMeta{}, err

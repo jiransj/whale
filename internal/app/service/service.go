@@ -51,6 +51,9 @@ const (
 	EventPlanCompleted     EventKind = "plan_completed"
 	EventToolCall          EventKind = "tool_call"
 	EventToolResult        EventKind = "tool_result"
+	EventTaskStarted       EventKind = "task_started"
+	EventTaskProgress      EventKind = "task_progress"
+	EventTaskCompleted     EventKind = "task_completed"
 	EventApprovalRequired  EventKind = "approval_required"
 	EventUserInputRequired EventKind = "user_input_required"
 	EventUserInputDone     EventKind = "user_input_done"
@@ -69,6 +72,9 @@ type Event struct {
 	ToolCallID      string
 	ToolName        string
 	Metadata        map[string]any
+	Status          string
+	Count           int
+	DurationMS      int64
 	Questions       []core.UserInputQuestion
 	Choices         []string
 	Approval        *policy.ApprovalRequest

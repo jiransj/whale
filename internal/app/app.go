@@ -12,10 +12,13 @@ import (
 	"github.com/usewhale/whale/internal/agent"
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/defaults"
+	"github.com/usewhale/whale/internal/llm"
+	"github.com/usewhale/whale/internal/llm/deepseek"
 	whalemcp "github.com/usewhale/whale/internal/mcp"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
 	"github.com/usewhale/whale/internal/store"
+	"github.com/usewhale/whale/internal/tasks"
 	"github.com/usewhale/whale/internal/tools"
 )
 
@@ -137,11 +140,11 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	mcpManager := whalemcp.NewManager(mcpConfig)
 	mcpManager.SetWorkspaceRoot(workspaceRoot)
 	mcpManager.Initialize(ctx)
-	registeredTools := append([]core.Tool{}, toolset.Tools()...)
-	registeredTools = append(registeredTools, mcpManager.Tools()...)
-	toolRegistry, err := core.NewToolRegistryChecked(registeredTools)
+	baseTools := append([]core.Tool{}, toolset.Tools()...)
+	baseTools = append(baseTools, mcpManager.Tools()...)
+	baseToolRegistry, err := core.NewToolRegistryChecked(baseTools)
 	if err != nil {
-		return nil, fmt.Errorf("init tool registry failed: %w", err)
+		return nil, fmt.Errorf("init base tool registry failed: %w", err)
 	}
 	hooks, hookSources, hookLoadErr := agent.LoadHooks(workspaceRoot, "")
 	if hookLoadErr != nil {
@@ -187,8 +190,49 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load api key failed: %w", err)
 	}
+	providerFactory := func(model string, maxTokens int) (llm.Provider, error) {
+		opts := []deepseek.Option{deepseek.WithAPIKey(apiKey)}
+		if strings.TrimSpace(model) != "" {
+			opts = append(opts, deepseek.WithModel(model))
+		} else {
+			opts = append(opts, deepseek.WithModel(defaults.DefaultModel))
+		}
+		opts = append(opts, deepseek.WithReasoningEffort(effort), deepseek.WithThinking(thinking))
+		if maxTokens > 0 {
+			opts = append(opts, deepseek.WithMaxTokens(maxTokens))
+		}
+		return deepseek.New(opts...)
+	}
+	var appRef *App
+	taskRunner := tasks.NewRunner(tasks.RunnerConfig{
+		ProviderFactory: providerFactory,
+		ParentTools:     baseToolRegistry,
+		MessageStore:    msgStore,
+		SessionsDir:     sessionsDir,
+		ParentSessionID: sessionID,
+		ParentSessionIDFunc: func() string {
+			if appRef != nil {
+				return appRef.sessionID
+			}
+			return sessionID
+		},
+		WorkspaceRoot:       workspaceRoot,
+		MemoryEnabled:       cfg.MemoryEnabled,
+		MemoryMaxChars:      cfg.MemoryMaxChars,
+		MemoryFileOrder:     parseCSVList(cfg.MemoryFileOrder),
+		DefaultModel:        defaults.DefaultModel,
+		DefaultMaxTokens:    tasks.DefaultMaxTokens,
+		DefaultMaxToolIters: tasks.DefaultMaxToolIters,
+		SummaryMaxChars:     tasks.DefaultSummaryMaxChar,
+	})
+	registeredTools := append([]core.Tool{}, baseTools...)
+	registeredTools = append(registeredTools, tasks.NewTools(taskRunner)...)
+	toolRegistry, err := core.NewToolRegistryChecked(registeredTools)
+	if err != nil {
+		return nil, fmt.Errorf("init tool registry failed: %w", err)
+	}
 
-	return &App{
+	app := &App{
 		ctx:              ctx,
 		sessionsDir:      sessionsDir,
 		workspaceRoot:    workspaceRoot,
@@ -212,7 +256,9 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		apiKey:           apiKey,
 		approvalFn:       defaultApprovalFunc(start.ApprovalFunc),
 		userInput:        defaultUserInputFunc(start.UserInputFunc),
-	}, nil
+	}
+	appRef = app
+	return app, nil
 }
 
 func defaultApprovalFunc(fn policy.ApprovalFunc) policy.ApprovalFunc {

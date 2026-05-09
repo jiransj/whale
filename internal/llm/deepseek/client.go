@@ -27,6 +27,7 @@ type Client struct {
 	model           string
 	reasoningEffort string
 	thinkingEnabled bool
+	maxTokens       int
 }
 
 type Option func(*Client)
@@ -53,6 +54,10 @@ func WithReasoningEffort(v string) Option {
 
 func WithThinking(enabled bool) Option {
 	return func(c *Client) { c.thinkingEnabled = enabled }
+}
+
+func WithMaxTokens(v int) Option {
+	return func(c *Client) { c.maxTokens = v }
 }
 
 func New(opts ...Option) (*Client, error) {
@@ -115,6 +120,9 @@ func (c *Client) stream(ctx context.Context, history []core.Message, tools []cor
 	}
 	if len(tools) > 0 {
 		payload["tools"] = toDeepSeekTools(tools)
+	}
+	if c.maxTokens > 0 {
+		payload["max_tokens"] = c.maxTokens
 	}
 
 	body, err := json.Marshal(payload)

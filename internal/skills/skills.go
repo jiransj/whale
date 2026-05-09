@@ -247,7 +247,7 @@ func RenderAvailableSkills(all []*Skill) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\nUsers can invoke a skill with a leading $skill-name mention. Use load_skill with the skill name when the user explicitly mentions a skill or the task clearly matches one. The index above is metadata only; load the skill before relying on its instructions.")
+	b.WriteString("\nUsers can invoke a skill with a leading $skill-name mention. Use load_skill when the user explicitly mentions a skill, or when no direct tool/delegation path is clearly requested and the task strongly matches a skill. If the user explicitly asks for subagent, delegation, or parallel work, follow the delegation policy first and do not load a skill unless the user also names one. The index above is metadata only; load the skill before relying on its instructions. Do not browse skill file paths with ordinary file tools.")
 	return strings.TrimSpace(b.String())
 }
 

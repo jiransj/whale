@@ -81,6 +81,9 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 					for i := range ev.Response.ToolCalls {
 						tc := ev.Response.ToolCalls[i]
 						events <- AgentEvent{Type: AgentEventTypeToolCall, ToolCall: &tc}
+						if taskEvent, ok := taskStartedEvent(tc); ok {
+							events <- taskEvent
+						}
 					}
 				}
 				if ev.Response.Content != "" {
@@ -351,6 +354,9 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 			}
 			results = append(results, finalRes)
 			r := finalRes
+			if taskEvent, ok := taskCompletedEvent(finalRes); ok {
+				events <- taskEvent
+			}
 			events <- AgentEvent{Type: AgentEventTypeToolResult, Result: &r}
 		}
 	}

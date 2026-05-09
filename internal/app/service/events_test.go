@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/usewhale/whale/internal/agent"
 	"github.com/usewhale/whale/internal/core"
 )
 
@@ -166,5 +167,33 @@ func TestSummarizeToolCall_WebSearchUsesNestedSearchQuery(t *testing.T) {
 	})
 	if got != "web_search: F1 pit strategy tools" {
 		t.Fatalf("unexpected web_search summary: %q", got)
+	}
+}
+
+func TestSummarizeToolCall_TaskTools(t *testing.T) {
+	got := summarizeToolCall(core.ToolCall{
+		Name:  "parallel_reason",
+		Input: `{"prompts":["a","b","c"]}`,
+	})
+	if got != "parallel_reason: 3 prompt(s)" {
+		t.Fatalf("unexpected parallel_reason summary: %q", got)
+	}
+	got = summarizeToolCall(core.ToolCall{
+		Name:  "spawn_subagent",
+		Input: `{"role":"review","task":"review internal/tasks\nignore details"}`,
+	})
+	if got != "spawn_subagent: review · review internal/tasks" {
+		t.Fatalf("unexpected spawn_subagent summary: %q", got)
+	}
+}
+
+func TestSummarizeTaskActivity(t *testing.T) {
+	got := summarizeTaskActivity(EventTaskStarted, &agent.TaskActivityInfo{ToolName: "parallel_reason", Status: "started", Count: 4})
+	if got != "parallel_reason started · 4 prompt(s)" {
+		t.Fatalf("unexpected parallel activity: %q", got)
+	}
+	got = summarizeTaskActivity(EventTaskCompleted, &agent.TaskActivityInfo{ToolName: "spawn_subagent", Status: "completed", Role: "review", DurationMS: 1200})
+	if got != "spawn_subagent completed · review · 1200ms" {
+		t.Fatalf("unexpected subagent activity: %q", got)
 	}
 }

@@ -164,6 +164,11 @@ func TestRenderAvailableSkillsDoesNotIncludeInstructions(t *testing.T) {
 	if !strings.Contains(rendered, "test-skill") || !strings.Contains(rendered, "load_skill") {
 		t.Fatalf("unexpected rendered skills: %q", rendered)
 	}
+	for _, want := range []string{"follow the delegation policy first", "do not load a skill unless the user also names one", "Do not browse skill file paths with ordinary file tools"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered skill index missing %q: %q", want, rendered)
+		}
+	}
 	if strings.Contains(rendered, "secret instructions") {
 		t.Fatalf("rendered index should not include full instructions: %q", rendered)
 	}

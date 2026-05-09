@@ -10,6 +10,22 @@ type Tool interface {
 	Run(ctx context.Context, call ToolCall) (ToolResult, error)
 }
 
+type ToolProgress struct {
+	ToolCallID string
+	ToolName   string
+	Status     string
+	Summary    string
+	Role       string
+	Model      string
+	Count      int
+	DurationMS int64
+	Metadata   map[string]any
+}
+
+type ToolProgressRunner interface {
+	RunWithProgress(ctx context.Context, call ToolCall, progress func(ToolProgress)) (ToolResult, error)
+}
+
 type ToolPreviewer interface {
 	Preview(ctx context.Context, call ToolCall) (map[string]any, error)
 }

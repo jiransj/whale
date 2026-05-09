@@ -3,7 +3,18 @@ package render
 import (
 	"strings"
 	"testing"
+
+	xansi "github.com/charmbracelet/x/ansi"
 )
+
+func assertVisibleWidthAtMost(t *testing.T, lines []string, maxWidth int) {
+	t.Helper()
+	for _, line := range lines {
+		if got := xansi.StringWidth(line); got > maxWidth {
+			t.Fatalf("line width %d exceeds %d: %q", got, maxWidth, line)
+		}
+	}
+}
 
 func TestChatLines_MarkdownBoldAndList(t *testing.T) {
 	entries := []UIMessage{
@@ -53,6 +64,18 @@ func TestChatLines_UserPromptGlyphAndContinuationIndent(t *testing.T) {
 	}
 }
 
+func TestChatLines_UserPromptHardWrapsLongLines(t *testing.T) {
+	entries := []UIMessage{
+		{Role: "you", Kind: KindText, Text: "我想参考 https://github.com/deepseek-ai/awesome-deepseek-integration/pull/584 把 whale 也提一个 PR"},
+	}
+	lines := ChatLines(entries, 54)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "github.com") || !strings.Contains(joined, "pull/584") {
+		t.Fatalf("expected user prompt content, got: %q", joined)
+	}
+	assertVisibleWidthAtMost(t, lines, 54)
+}
+
 func TestChatLines_NoticeRendersAsPlainHint(t *testing.T) {
 	entries := []UIMessage{
 		{Role: "notice", Kind: KindNotice, Text: "✔ You approved whale to run uptime this time"},
@@ -79,6 +102,53 @@ func TestChatLines_ContinuationIndent(t *testing.T) {
 	if !strings.Contains(joined, "line1") || !strings.Contains(joined, "line2") {
 		t.Fatalf("expected multiline content preserved: %q", joined)
 	}
+}
+
+func TestChatLines_AssistantMarkdownDoesNotUseBorderCard(t *testing.T) {
+	entries := []UIMessage{
+		{Role: "assistant", Kind: KindText, Text: "```markdown\n<p align=\"center\">\n  <a href=\"https://github.com/usewhale/whale/stargazers\">\n    <img src=\"https://img.shields.io/github/stars/usewhale/whale?style=for-the-badge&logo=github\" alt=\"stars\">\n  </a>\n</p>\n```"},
+	}
+	lines := ChatLines(entries, 80)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "img src=") {
+		t.Fatalf("expected code block content, got: %q", joined)
+	}
+	if strings.Contains(joined, "┃") || strings.Contains(joined, "│") {
+		t.Fatalf("assistant markdown should not render as a bordered card: %q", joined)
+	}
+	assertVisibleWidthAtMost(t, lines, 78)
+}
+
+func TestChatLines_AssistantMarkdownHardWrapsLongLines(t *testing.T) {
+	entries := []UIMessage{
+		{
+			Role: "assistant",
+			Kind: KindText,
+			Text: "我会选：\n\n这个缓存特性对 Agent 场景很有价值：Agent 每轮对话的 system prompt、tool spec 都是重复的，如果 context 布局设计得好，缓存命中率能非常高。\n\n```markdown\n<img src=\"https://img.shields.io/github/stars/usewhale/whale?style=for-the-badge&logo=github\" alt=\"stars\">\n```",
+		},
+	}
+	lines := ChatLines(entries, 54)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "缓存特性") || !strings.Contains(joined, "img src=") {
+		t.Fatalf("expected rendered content, got: %q", joined)
+	}
+	assertVisibleWidthAtMost(t, lines, 52)
+}
+
+func TestChatLines_ToolCardHardWrapsLongLines(t *testing.T) {
+	entries := []UIMessage{
+		{
+			Role: "result",
+			Kind: KindToolResult,
+			Text: "git: " + strings.Repeat("very-long-output-segment-", 8),
+		},
+	}
+	lines := ChatLines(entries, 54)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "git:") {
+		t.Fatalf("expected tool result content, got: %q", joined)
+	}
+	assertVisibleWidthAtMost(t, lines, 54)
 }
 
 func TestMarkdown_NarrowWidthFallback(t *testing.T) {

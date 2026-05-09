@@ -92,6 +92,18 @@ func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, sum
 	return ok
 }
 
+func (m *model) updateTaskProgress(toolCallID, toolName, text string) bool {
+	if toolCallID == "" || m.assembler == nil {
+		return false
+	}
+	title := summarizeTaskProgressForChat(toolName, text)
+	ok := m.assembler.UpdateToolCall(toolCallID, title, "result_running")
+	if ok {
+		m.refreshViewportContentFollow(false)
+	}
+	return ok
+}
+
 func summarizeToolCallForChat(toolName, text string) string {
 	detail := toolCallDetail(text)
 	switch toolDisplayKind(toolName) {
@@ -106,12 +118,68 @@ func summarizeToolCallForChat(toolName, text string) string {
 	case "edit":
 		line := editLine(toolName, detail, toolResultEnvelope{})
 		return line
+	case "task":
+		if strings.TrimSpace(toolName) == "parallel_reason" {
+			return "Parallel reasoning\n" + firstNonEmpty(detail, "working")
+		}
+		role := taskRoleFromText(text)
+		return "Subagent " + role + "\n" + firstNonEmpty(detail, "starting")
 	default:
 		if detail == "" {
 			detail = toolName
 		}
 		return "Running " + detail
 	}
+}
+
+func summarizeTaskProgressForChat(toolName, text string) string {
+	detail := taskProgressDetail(text)
+	if strings.TrimSpace(toolName) == "parallel_reason" {
+		return "Parallel reasoning\n" + firstNonEmpty(detail, "running")
+	}
+	role := taskRoleFromText(text)
+	if taskProgressFailed(text) {
+		return "Subagent " + role + "\nFailed: " + firstNonEmpty(detail, "subagent failed")
+	}
+	return "Subagent " + role + "\n" + firstNonEmpty(detail, "running")
+}
+
+func taskProgressDetail(text string) string {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return ""
+	}
+	parts := strings.SplitN(t, "·", 3)
+	if len(parts) == 3 {
+		return strings.TrimSpace(parts[2])
+	}
+	parts = strings.Split(t, "·")
+	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+func taskRoleFromText(text string) string {
+	t := strings.TrimSpace(text)
+	if before, _, ok := strings.Cut(t, "·"); ok {
+		if _, role, hasColon := strings.Cut(before, ":"); hasColon {
+			role = strings.TrimSpace(role)
+			if role != "" {
+				return role
+			}
+		}
+	}
+	parts := strings.Split(t, "·")
+	if len(parts) >= 2 {
+		role := strings.TrimSpace(parts[1])
+		if role != "" && !strings.Contains(role, "prompt") {
+			return role
+		}
+	}
+	return "explore"
+}
+
+func taskProgressFailed(text string) bool {
+	first := strings.TrimSpace(strings.SplitN(text, "·", 2)[0])
+	return strings.Contains(first, "failed")
 }
 
 func completedToolTitle(toolName, raw, previous string) string {
@@ -127,6 +195,12 @@ func completedToolTitle(toolName, raw, previous string) string {
 		return "Explored\n" + explorationLine(toolName, previousToolActionLine(previous), env)
 	case "edit":
 		return editLine(toolName, "", env)
+	case "task":
+		if toolName == "parallel_reason" {
+			return "Parallel reasoning"
+		}
+		role := firstNonEmpty(asString(env.data["role"]), "explore")
+		return "Subagent " + role
 	default:
 		label := toolName
 		if label == "" {
@@ -144,6 +218,8 @@ func toolDisplayKind(toolName string) string {
 		return "explore"
 	case "write_file", "edit_file", "apply_patch", "write", "edit":
 		return "edit"
+	case "parallel_reason", "spawn_subagent":
+		return "task"
 	default:
 		return "unknown"
 	}
@@ -484,6 +560,32 @@ func (m *model) commitLiveTranscript(forceBottom bool) {
 	m.appendTranscriptMessages(m.assembler.Snapshot())
 	m.assembler.Reset()
 	m.refreshViewportContentFollow(forceBottom)
+}
+
+const maxHydratedTranscriptLines = 300
+
+func (m *model) trimHydratedTranscriptForDisplay(maxLines int) {
+	if maxLines <= 0 || len(m.transcript) <= 1 {
+		return
+	}
+	header := m.transcript[0]
+	messages := m.transcript[1:]
+	width := m.chatRenderWidth()
+	selected := make([]tuirender.UIMessage, 0, len(messages))
+	lineCount := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		msgLines := len(tuirender.ChatLines([]tuirender.UIMessage{messages[i]}, width))
+		if len(selected) > 0 && lineCount+msgLines > maxLines {
+			break
+		}
+		lineCount += msgLines
+		selected = append(selected, messages[i])
+	}
+	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
+		selected[i], selected[j] = selected[j], selected[i]
+	}
+	m.transcript = append([]tuirender.UIMessage{header}, selected...)
+	m.refreshViewportContentFollow(true)
 }
 
 func (m model) chatMessages() []tuirender.UIMessage {

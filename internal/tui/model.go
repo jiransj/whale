@@ -312,6 +312,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.captureDiffMetadata(ev.ToolName, ev.Metadata)
 			m.captureDiff(ev.ToolName, ev.Text)
 			m.commitLiveTranscript(false)
+		case service.EventTaskStarted:
+			m.status = ev.Text
+			m.addLog(logEntry{Kind: "task_started", Source: ev.ToolName, Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
+		case service.EventTaskProgress:
+			m.status = ev.Text
+			m.updateTaskProgress(ev.ToolCallID, ev.ToolName, ev.Text)
+			m.addLog(logEntry{Kind: "task_progress", Source: ev.ToolName, Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
+		case service.EventTaskCompleted:
+			m.status = ev.Text
+			m.addLog(logEntry{Kind: "task_completed", Source: ev.ToolName, Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
 		case service.EventApprovalRequired:
 			m.mode = modeApproval
 			m.approval.toolCallID = ev.ToolCallID
@@ -392,6 +402,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diffs = nil
 			m.hydrateSessionMessages(ev.Messages)
 			m.commitLiveTranscript(true)
+			m.trimHydratedTranscriptForDisplay(maxHydratedTranscriptLines)
 			m.status = "ready"
 		case service.EventExitRequested:
 			m.dispatchIntent(service.Intent{Kind: service.IntentShutdown})
@@ -494,14 +505,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.slash.selected = 0
 					return m, nil
 				}
-			case "pgup", "pgdown", "ctrl+u", "ctrl+d", "home", "end":
-				if m.page == pageChat && (msg.String() == "pgup" || msg.String() == "pgdown" || msg.String() == "ctrl+u") {
-					if m.input.HandleKey(msg) {
-						m.resetHistoryNavigation()
-						m.updateSlashMatches()
-						return m, nil
-					}
-				}
+			case "pgup", "pgdown", "ctrl+d", "home", "end":
 				m.handleViewportScrollKey(msg.String())
 				return m, nil
 			}

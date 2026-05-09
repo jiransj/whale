@@ -86,6 +86,21 @@ func (s *Service) runTurnWith(start func(context.Context) (<-chan agent.AgentEve
 				deltas.flushReliable()
 				s.emit(Event{Kind: EventToolResult, ToolCallID: ev.Result.ToolCallID, ToolName: ev.Result.Name, Text: ev.Result.Content, Metadata: ev.Result.Metadata})
 			}
+		case agent.AgentEventTypeParallelReasonStarted, agent.AgentEventTypeSubagentStarted:
+			if ev.Task != nil {
+				deltas.flushReliable()
+				s.emit(taskActivityEvent(EventTaskStarted, ev.Task))
+			}
+		case agent.AgentEventTypeTaskProgress:
+			if ev.Task != nil {
+				deltas.flushReliable()
+				s.emit(taskActivityEvent(EventTaskProgress, ev.Task))
+			}
+		case agent.AgentEventTypeParallelReasonDone, agent.AgentEventTypeSubagentDone:
+			if ev.Task != nil {
+				deltas.flushReliable()
+				s.emit(taskActivityEvent(EventTaskCompleted, ev.Task))
+			}
 		case agent.AgentEventTypeUserInputRequired:
 			if ev.ToolCall != nil && ev.UserInputReq != nil {
 				deltas.flushReliable()
@@ -116,11 +131,92 @@ func shouldSuppressCancelledTurnError(ctx context.Context, err error) bool {
 	return ctx != nil && ctx.Err() != nil && errors.Is(err, context.Canceled)
 }
 
+func taskActivityEvent(kind EventKind, info *agent.TaskActivityInfo) Event {
+	if info == nil {
+		return Event{Kind: kind}
+	}
+	meta := map[string]any{}
+	if info.Role != "" {
+		meta["role"] = info.Role
+	}
+	if info.Model != "" {
+		meta["model"] = info.Model
+	}
+	if info.Summary != "" {
+		meta["summary"] = info.Summary
+	}
+	for k, v := range info.Metadata {
+		meta[k] = v
+	}
+	return Event{
+		Kind:       kind,
+		ToolCallID: info.ToolCallID,
+		ToolName:   info.ToolName,
+		Text:       summarizeTaskActivity(kind, info),
+		Metadata:   meta,
+		Status:     info.Status,
+		Count:      info.Count,
+		DurationMS: info.DurationMS,
+	}
+}
+
+func summarizeTaskActivity(kind EventKind, info *agent.TaskActivityInfo) string {
+	if info == nil {
+		return ""
+	}
+	status := strings.TrimSpace(info.Status)
+	if status == "" {
+		if kind == EventTaskStarted {
+			status = "started"
+		} else if kind == EventTaskProgress {
+			status = "running"
+		} else {
+			status = "completed"
+		}
+	}
+	switch info.ToolName {
+	case "parallel_reason":
+		if info.Count > 0 {
+			return fmt.Sprintf("parallel_reason %s · %d prompt(s)", status, info.Count)
+		}
+		return "parallel_reason " + status
+	case "spawn_subagent":
+		role := strings.TrimSpace(info.Role)
+		if role == "" {
+			role = "explore"
+		}
+		if info.Summary != "" && (kind == EventTaskStarted || kind == EventTaskProgress) {
+			return fmt.Sprintf("spawn_subagent %s · %s · %s", status, role, info.Summary)
+		}
+		if info.DurationMS > 0 && kind == EventTaskCompleted {
+			return fmt.Sprintf("spawn_subagent %s · %s · %dms", status, role, info.DurationMS)
+		}
+		return fmt.Sprintf("spawn_subagent %s · %s", status, role)
+	default:
+		return strings.TrimSpace(info.ToolName + " " + status)
+	}
+}
+
 func summarizeToolCall(call core.ToolCall) string {
 	body := map[string]any{}
 	_ = json.Unmarshal([]byte(call.Input), &body)
 	name := strings.TrimSpace(call.Name)
 	switch name {
+	case "parallel_reason":
+		count := len(asAnySlice(body["prompts"]))
+		if count > 0 {
+			return fmt.Sprintf("parallel_reason: %d prompt(s)", count)
+		}
+	case "spawn_subagent":
+		role := strings.TrimSpace(asString(body["role"]))
+		if role == "" {
+			role = "explore"
+		}
+		task := firstLine(strings.TrimSpace(asString(body["task"])))
+		if task != "" {
+			return fmt.Sprintf("spawn_subagent: %s · %s", role, task)
+		}
+		return "spawn_subagent: " + role
 	case "exec_shell":
 		if cmd, _ := body["command"].(string); strings.TrimSpace(cmd) != "" {
 			return fmt.Sprintf("exec_shell: %s", strings.TrimSpace(cmd))
@@ -220,6 +316,14 @@ func appendSearchScope(subject, path, include string) string {
 		detail += " (" + strings.TrimSpace(include) + ")"
 	}
 	return detail
+}
+
+func firstLine(v string) string {
+	v = strings.TrimSpace(v)
+	if i := strings.IndexByte(v, '\n'); i >= 0 {
+		return strings.TrimSpace(v[:i])
+	}
+	return v
 }
 
 func asString(v any) string {

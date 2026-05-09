@@ -42,12 +42,48 @@ func summarizeToolResultForChat(toolName, raw string) (string, string) {
 		return summarizeExploreResult(toolName, env, successBySignal)
 	case "edit":
 		return summarizeEditResult(toolName, env, successBySignal)
+	case "task":
+		return summarizeTaskResult(toolName, env, successBySignal)
 	default:
 		if !successBySignal {
 			return summarizeFailedResult(env, "tool failed")
 		}
 		return "result_ok", "✓"
 	}
+}
+
+func summarizeTaskResult(toolName string, env toolResultEnvelope, successBySignal bool) (string, string) {
+	if !successBySignal {
+		return summarizeFailedResult(env, "task failed")
+	}
+	duration := formatDurationMS(asInt64(env.metadata["duration_ms"]))
+	parts := []string{"✓"}
+	if duration != "" {
+		parts = append(parts, duration)
+	}
+	switch toolName {
+	case "parallel_reason":
+		if count := len(anySlice(env.data["results"])); count > 0 {
+			parts = append(parts, fmt.Sprintf("%d result(s)", count))
+		}
+		return "result_ok", strings.Join(parts, " · ")
+	case "spawn_subagent":
+		role := firstNonEmpty(asString(env.data["role"]), "explore")
+		parts = append(parts, role)
+		if summary := firstLine(firstNonEmpty(asString(env.data["summary"]), env.summary)); summary != "" {
+			return "result_ok", strings.Join(parts, " · ") + "\n" + summary
+		}
+		return "result_ok", strings.Join(parts, " · ")
+	default:
+		return "result_ok", strings.Join(parts, " · ")
+	}
+}
+
+func anySlice(v any) []any {
+	if xs, ok := v.([]any); ok {
+		return xs
+	}
+	return nil
 }
 
 type toolResultEnvelope struct {

@@ -56,6 +56,11 @@ const (
 	AgentEventTypeHookWarned            AgentEventType = "hook_warned"
 	AgentEventTypeHookFailed            AgentEventType = "hook_failed"
 	AgentEventTypeHookCompleted         AgentEventType = "hook_completed"
+	AgentEventTypeParallelReasonStarted AgentEventType = "parallel_reason_started"
+	AgentEventTypeParallelReasonDone    AgentEventType = "parallel_reason_completed"
+	AgentEventTypeSubagentStarted       AgentEventType = "subagent_started"
+	AgentEventTypeTaskProgress          AgentEventType = "task_progress"
+	AgentEventTypeSubagentDone          AgentEventType = "subagent_completed"
 	AgentEventTypeDone                  AgentEventType = "done"
 	AgentEventTypeError                 AgentEventType = "error"
 )
@@ -120,12 +125,25 @@ type AgentEvent struct {
 	CacheMetrics   *PrefixCacheMetricsInfo
 	Budget         *BudgetWarningInfo
 	Hook           *HookEventInfo
+	Task           *TaskActivityInfo
 	ToolCall       *core.ToolCall
 	UserInputReq   *core.UserInputRequest
 	UserInputResp  *core.UserInputResponse
 	Result         *core.ToolResult
 	Message        *core.Message
 	Err            error
+}
+
+type TaskActivityInfo struct {
+	ToolCallID string
+	ToolName   string
+	Role       string
+	Model      string
+	Count      int
+	Summary    string
+	Status     string
+	DurationMS int64
+	Metadata   map[string]any
 }
 
 type BudgetWarningInfo struct {
@@ -207,6 +225,7 @@ type Agent struct {
 	projectMemoryMaxChars  int
 	projectMemoryFileOrder []string
 	workspaceRoot          string
+	extraSystemBlocks      []string
 	sessionRuntime         *memory.SessionRuntime
 	budgetWarningUSD       float64
 	usageLogPath           string
@@ -354,6 +373,20 @@ func WithProjectMemory(enabled bool, maxChars int, fileOrder []string, workspace
 			a.projectMemoryFileOrder = fileOrder
 		}
 		a.workspaceRoot = strings.TrimSpace(workspaceRoot)
+	}
+}
+
+func WithExtraSystemBlocks(blocks ...string) AgentOption {
+	return func(a *Agent) {
+		a.extraSystemBlocks = append([]string(nil), blocks...)
+	}
+}
+
+func WithMaxToolIters(maxIters int) AgentOption {
+	return func(a *Agent) {
+		if maxIters > 0 {
+			a.maxToolIters = maxIters
+		}
 	}
 }
 

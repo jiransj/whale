@@ -12,7 +12,20 @@ func (a *Agent) dispatchWithRecovery(ctx context.Context, sessionID string, call
 	attempt := 0
 	for {
 		attempt++
-		res, err := a.tools.Dispatch(ctx, call)
+		res, err := a.tools.DispatchWithProgress(ctx, call, func(progress core.ToolProgress) {
+			info := TaskActivityInfo{
+				ToolCallID: firstNonEmptyString(progress.ToolCallID, call.ID),
+				ToolName:   firstNonEmptyString(progress.ToolName, call.Name),
+				Role:       progress.Role,
+				Model:      progress.Model,
+				Count:      progress.Count,
+				Summary:    progress.Summary,
+				Status:     progress.Status,
+				DurationMS: progress.DurationMS,
+				Metadata:   progress.Metadata,
+			}
+			events <- AgentEvent{Type: AgentEventTypeTaskProgress, Task: &info}
+		})
 		if ctx.Err() != nil {
 			return res, true
 		}

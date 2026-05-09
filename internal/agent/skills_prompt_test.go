@@ -35,3 +35,28 @@ func TestImmutableSystemPromptIncludesSkillIndexOnly(t *testing.T) {
 		t.Fatalf("system prompt should not inline skill instructions:\n%s", joined)
 	}
 }
+
+func TestImmutableSystemPromptIncludesDelegationPolicyBeforeToolSpecs(t *testing.T) {
+	a := &Agent{
+		tools:                core.NewToolRegistry(nil),
+		projectMemoryEnabled: false,
+	}
+	blocks := a.buildImmutableSystemBlocks()
+	joined := strings.Join(blocks, "\n\n")
+	policyIx := strings.Index(joined, "Delegation policy.")
+	toolIx := strings.Index(joined, "No tools are available.")
+	if policyIx < 0 {
+		t.Fatalf("missing delegation policy:\n%s", joined)
+	}
+	if toolIx < 0 {
+		t.Fatalf("missing tool specs block:\n%s", joined)
+	}
+	if policyIx > toolIx {
+		t.Fatalf("delegation policy should appear before tool specs:\n%s", joined)
+	}
+	for _, want := range []string{"Use parallel_reason for 2-8 independent", "Use spawn_subagent for one bounded read-only", "Use a single agent for direct questions", "Do not load a skill first unless the user explicitly names one"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("delegation policy missing %q:\n%s", want, joined)
+		}
+	}
+}

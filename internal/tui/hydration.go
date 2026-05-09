@@ -6,8 +6,10 @@ import (
 	"github.com/usewhale/whale/internal/core"
 )
 
+const maxHydratedVisibleMessages = 8
+
 func (m *model) hydrateSessionMessages(msgs []core.Message) {
-	for _, msg := range msgs {
+	for _, msg := range recentHydrationMessages(msgs, maxHydratedVisibleMessages) {
 		switch msg.Role {
 		case core.RoleUser:
 			if strings.TrimSpace(msg.Text) != "" && !msg.Hidden {
@@ -52,5 +54,47 @@ func (m *model) hydrateSessionMessages(msgs []core.Message) {
 				m.captureDiffMetadata(tr.Name, tr.Metadata)
 			}
 		}
+	}
+}
+
+func recentHydrationMessages(msgs []core.Message, maxVisible int) []core.Message {
+	if maxVisible <= 0 || len(msgs) == 0 {
+		return nil
+	}
+	visible := 0
+	start := len(msgs)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if isVisibleHydrationMessage(msgs[i]) {
+			visible++
+		}
+		start = i
+		if visible >= maxVisible {
+			break
+		}
+	}
+	return msgs[start:]
+}
+
+func isVisibleHydrationMessage(msg core.Message) bool {
+	switch msg.Role {
+	case core.RoleUser:
+		return strings.TrimSpace(msg.Text) != "" && !msg.Hidden
+	case core.RoleAssistant:
+		if strings.TrimSpace(msg.Reasoning) != "" {
+			return true
+		}
+		if strings.TrimSpace(msg.Text) != "" && !isEnvironmentInventoryBlock(msg.Text) {
+			return true
+		}
+		return len(msg.ToolCalls) > 0
+	case core.RoleTool:
+		for _, tr := range msg.ToolResults {
+			if strings.TrimSpace(tr.Content) != "" {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }

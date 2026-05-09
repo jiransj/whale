@@ -64,6 +64,29 @@ func TestListSessionsIncludesMeta(t *testing.T) {
 	}
 }
 
+func TestListSessionsHidesSubagentSessions(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveSessionMeta(dir, "parent", SessionMeta{Title: "parent"}); err != nil {
+		t.Fatalf("save parent meta: %v", err)
+	}
+	if err := SaveSessionMeta(dir, "child", SessionMeta{Kind: "subagent", ParentSessionID: "parent", Status: "completed"}); err != nil {
+		t.Fatalf("save child meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "parent.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write parent session: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "child.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write child session: %v", err)
+	}
+	out, err := ListSessions(dir, 10)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(out) != 1 || out[0].ID != "parent" {
+		t.Fatalf("expected only parent session, got %+v", out)
+	}
+}
+
 func TestListSessionsConversationTitlePriorityAndFallback(t *testing.T) {
 	dir := t.TempDir()
 	if err := SaveSessionMeta(dir, "titled", SessionMeta{Title: "Saved title"}); err != nil {

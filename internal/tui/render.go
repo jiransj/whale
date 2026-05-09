@@ -36,6 +36,11 @@ func (m model) View() string {
 	if m.chatMode == "ask" || m.chatMode == "plan" {
 		footerText += "  mode: " + m.chatMode + " (Shift+Tab to switch)"
 	}
+	dirReserve := 0
+	if m.cwd != "" {
+		dirReserve = footerDirReserve(m.cwd)
+	}
+	footerText = appendFooterHint(footerText, mainWidth, dirReserve)
 	if m.cwd != "" {
 		footerText = appendFooterDir(footerText, m.cwd, mainWidth)
 	}
@@ -162,6 +167,31 @@ func appendFooterDir(base, cwd string, width int) string {
 		return base
 	}
 	return base + segment + fitTail(cwd, available)
+}
+
+func appendFooterHint(base string, width, reserve int) string {
+	for _, hint := range []string{"PgUp/PgDn scroll"} {
+		segment := "  " + hint
+		if lipgloss.Width(base)+lipgloss.Width(segment)+reserve <= width {
+			return base + segment
+		}
+	}
+	return base
+}
+
+func footerDirReserve(cwd string) int {
+	trimmed := strings.TrimRight(cwd, "/")
+	if trimmed == "" {
+		trimmed = cwd
+	}
+	tail := trimmed
+	if idx := strings.LastIndex(trimmed, "/"); idx >= 0 && idx < len(trimmed)-1 {
+		tail = trimmed[idx+1:]
+	}
+	if tail == "" {
+		return 0
+	}
+	return lipgloss.Width("  ") + lipgloss.Width(tail)
 }
 
 func fitTail(s string, width int) string {

@@ -17,7 +17,12 @@ func (a *Agent) buildTurnProviderHistory(sessionID string, rt *memory.RuntimeSta
 }
 
 func (a *Agent) buildImmutableSystemBlocks() []string {
-	systemBlocks := make([]string, 0, 2)
+	systemBlocks := make([]string, 0, len(a.extraSystemBlocks)+2)
+	for _, block := range a.extraSystemBlocks {
+		if trimmed := strings.TrimSpace(block); trimmed != "" {
+			systemBlocks = append(systemBlocks, trimmed)
+		}
+	}
 	if a.mode == session.ModePlan {
 		systemBlocks = append(systemBlocks, planning.ModeInstructions())
 	} else if a.mode == session.ModeAsk {
@@ -31,13 +36,14 @@ Ask mode is active.
 `))
 	} else {
 		systemBlocks = append(systemBlocks, strings.TrimSpace(`
-Agent mode is active.
+	Agent mode is active.
 
 - You have access to all tools, including read-only and write tools.
 - You may read, edit, and create files, run shell commands, and use all other available tools to accomplish the user's request.
 - When mode restrictions blocked a previous turn, you are no longer constrained by those restrictions — carry out the request fully.
-`))
+	`))
 	}
+	systemBlocks = append(systemBlocks, renderDelegationPolicyBlock())
 	if strings.TrimSpace(a.workspaceRoot) != "" {
 		systemBlocks = append(systemBlocks, "Current Whale workspace root: "+a.workspaceRoot+"\nShell commands run from this directory by default. Do not assume a synthetic path such as /workspace; use relative paths or the exec_shell cwd parameter for subdirectories.")
 	}
@@ -56,6 +62,21 @@ Agent mode is active.
 		}
 	}
 	return systemBlocks
+}
+
+func renderDelegationPolicyBlock() string {
+	return strings.TrimSpace(`
+Delegation policy.
+
+- Do not use parallel_reason or spawn_subagent just because they are available.
+- Use a single agent for direct questions, known-file reads, small localized edits, tightly coupled work, or tasks where the next step depends on the current result.
+- Use parallel_reason for 2-8 independent, cheap, model-only subqueries that need comparison, classification, critique, or brainstorming and do not need tools, files, shell, or web access.
+- Use spawn_subagent for one bounded read-only exploration, research, or review task that needs file reads/search or web lookup/fetch. Subagents do not have shell access.
+- Do not ask the user to name these tools. Infer the right path from natural language such as "parallelize this" or "send a reviewer/explorer".
+- If the user explicitly asks for a subagent, delegated reviewer, or explorer, spawn the appropriate subagent directly. Do not load a skill first unless the user explicitly names one.
+- The parent agent owns the final answer. Summarize and reconcile child results before responding to the user.
+- Do not delegate writable or high-risk work unless the runtime explicitly provides an isolated writable worker capability.
+`)
 }
 
 func renderToolSpecsBlock(specs []core.ToolSpec) string {

@@ -39,17 +39,16 @@ func ListSessions(sessionsDir string, limit int) ([]SessionSummary, error) {
 		if id == "" {
 			continue
 		}
+		meta, err := LoadSessionMeta(sessionsDir, id)
+		if err == nil && strings.TrimSpace(meta.Kind) == "subagent" {
+			continue
+		}
 		out = append(out, SessionSummary{
 			ID:      id,
 			ModTime: info.ModTime(),
 			Size:    info.Size(),
+			Meta:    meta,
 		})
-	}
-	for i := range out {
-		meta, err := LoadSessionMeta(sessionsDir, out[i].ID)
-		if err == nil {
-			out[i].Meta = meta
-		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ModTime.After(out[j].ModTime)
