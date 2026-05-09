@@ -64,6 +64,9 @@ type App struct {
 	branch           string
 	msgStore         *store.JSONLStore
 	toolRegistry     *core.ToolRegistry
+	baseToolRegistry *core.ToolRegistry
+	baseTools        []core.Tool
+	taskTools        []core.Tool
 	hooks            []agent.ResolvedHook
 	hookRunner       *agent.HookRunner
 	hookSources      []string
@@ -78,6 +81,8 @@ type App struct {
 	reasoningEffort  string
 	thinkingEnabled  bool
 	mcpManager       *whalemcp.Manager
+	mcpInitMu        sync.Mutex
+	mcpInitStarted   bool
 
 	a          *agent.Agent
 	apiKey     string
@@ -139,9 +144,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	}
 	mcpManager := whalemcp.NewManager(mcpConfig)
 	mcpManager.SetWorkspaceRoot(workspaceRoot)
-	mcpManager.Initialize(ctx)
 	baseTools := append([]core.Tool{}, toolset.Tools()...)
-	baseTools = append(baseTools, mcpManager.Tools()...)
 	baseToolRegistry, err := core.NewToolRegistryChecked(baseTools)
 	if err != nil {
 		return nil, fmt.Errorf("init base tool registry failed: %w", err)
@@ -225,8 +228,9 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		DefaultMaxToolIters: tasks.DefaultMaxToolIters,
 		SummaryMaxChars:     tasks.DefaultSummaryMaxChar,
 	})
+	taskTools := tasks.NewTools(taskRunner)
 	registeredTools := append([]core.Tool{}, baseTools...)
-	registeredTools = append(registeredTools, tasks.NewTools(taskRunner)...)
+	registeredTools = append(registeredTools, taskTools...)
 	toolRegistry, err := core.NewToolRegistryChecked(registeredTools)
 	if err != nil {
 		return nil, fmt.Errorf("init tool registry failed: %w", err)
@@ -239,6 +243,9 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		branch:           branch,
 		msgStore:         msgStore,
 		toolRegistry:     toolRegistry,
+		baseToolRegistry: baseToolRegistry,
+		baseTools:        append([]core.Tool{}, baseTools...),
+		taskTools:        append([]core.Tool{}, taskTools...),
 		hooks:            hooks,
 		hookRunner:       agent.NewHookRunner(hooks, workspaceRoot),
 		hookSources:      hookSources,

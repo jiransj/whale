@@ -322,6 +322,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case service.EventTaskCompleted:
 			m.status = ev.Text
 			m.addLog(logEntry{Kind: "task_completed", Source: ev.ToolName, Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
+		case service.EventMCPStatus:
+			m.status = ev.Text
+			if ev.Status == "failed" || ev.Status == "cancelled" {
+				m.append("error", ev.Text)
+			}
+			m.addLog(logEntry{Kind: "mcp_status", Source: "mcp", Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
+		case service.EventMCPComplete:
+			m.status = ev.Text
+			m.addLog(logEntry{Kind: "mcp_complete", Source: "mcp", Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
 		case service.EventApprovalRequired:
 			m.mode = modeApproval
 			m.approval.toolCallID = ev.ToolCallID

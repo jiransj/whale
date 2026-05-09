@@ -24,6 +24,14 @@ import (
 
 const httpErrorBodyPreviewBytes = 200
 
+const (
+	StatusDisabled  = "disabled"
+	StatusStarting  = "starting"
+	StatusConnected = "connected"
+	StatusFailed    = "failed"
+	StatusCancelled = "cancelled"
+)
+
 type Manager struct {
 	mu            sync.RWMutex
 	cfg           Config
@@ -35,10 +43,16 @@ type Manager struct {
 
 type ServerState struct {
 	Name      string
+	Status    string
 	Disabled  bool
 	Connected bool
 	Error     string
 	Tools     int
+}
+
+type StartupEvent struct {
+	State    ServerState
+	Complete bool
 }
 
 func (m *Manager) SetWorkspaceRoot(root string) {
@@ -65,28 +79,47 @@ func NewManager(cfg Config) *Manager {
 }
 
 func (m *Manager) Initialize(ctx context.Context) {
+	m.InitializeWithEvents(ctx, nil)
+}
+
+func (m *Manager) InitializeWithEvents(ctx context.Context, emit func(StartupEvent)) {
 	if m == nil {
 		return
 	}
+	m.mu.Lock()
+	m.tools = nil
+	m.mu.Unlock()
 	seen := map[string]bool{}
 	registered := []core.Tool{}
 	for _, name := range sortedServerNames(m.cfg.Servers) {
 		srv := m.cfg.Servers[name]
 		srv.Name = name
 		if srv.Disabled {
-			m.setState(ServerState{Name: name, Disabled: true})
+			m.setStateAndEmit(ServerState{Name: name, Status: StatusDisabled, Disabled: true}, emit)
+			continue
+		}
+		m.setStateAndEmit(ServerState{Name: name, Status: StatusStarting}, emit)
+		if err := ctx.Err(); err != nil {
+			m.setStateAndEmit(ServerState{Name: name, Status: StatusCancelled, Error: err.Error()}, emit)
 			continue
 		}
 		tools, err := m.startServer(ctx, srv, seen)
 		if err != nil {
-			m.setState(ServerState{Name: name, Error: err.Error()})
+			status := StatusFailed
+			if errors.Is(ctx.Err(), context.Canceled) {
+				status = StatusCancelled
+			}
+			m.setStateAndEmit(ServerState{Name: name, Status: status, Error: err.Error()}, emit)
 			continue
 		}
 		registered = append(registered, tools...)
+		m.mu.Lock()
+		m.tools = append([]core.Tool(nil), registered...)
+		st := m.states[name]
+		m.mu.Unlock()
+		emitStartupEvent(emit, StartupEvent{State: st})
 	}
-	m.mu.Lock()
-	m.tools = registered
-	m.mu.Unlock()
+	emitStartupEvent(emit, StartupEvent{Complete: true})
 }
 
 func (m *Manager) Tools() []core.Tool {
@@ -207,7 +240,7 @@ func (m *Manager) startServer(ctx context.Context, srv ServerConfig, seen map[st
 	}
 	m.mu.Lock()
 	m.sessions[srv.Name] = &clientSession{cfg: srv, session: session, cancel: cancel}
-	m.states[srv.Name] = ServerState{Name: srv.Name, Connected: true, Tools: len(tools)}
+	m.states[srv.Name] = ServerState{Name: srv.Name, Status: StatusConnected, Connected: true, Tools: len(tools)}
 	m.mu.Unlock()
 	return tools, nil
 }
@@ -279,7 +312,28 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 func (m *Manager) setState(st ServerState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if st.Status == "" {
+		switch {
+		case st.Disabled:
+			st.Status = StatusDisabled
+		case st.Connected:
+			st.Status = StatusConnected
+		case st.Error != "":
+			st.Status = StatusFailed
+		}
+	}
 	m.states[st.Name] = st
+}
+
+func (m *Manager) setStateAndEmit(st ServerState, emit func(StartupEvent)) {
+	m.setState(st)
+	emitStartupEvent(emit, StartupEvent{State: st})
+}
+
+func emitStartupEvent(emit func(StartupEvent), ev StartupEvent) {
+	if emit != nil {
+		emit(ev)
+	}
 }
 
 func sortedServerNames(servers map[string]ServerConfig) []string {

@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
 type ToolRegistry struct {
+	mu             sync.RWMutex
 	byName         map[string]Tool
 	specs          map[string]ToolSpec
 	ordered        []Tool
@@ -26,11 +28,18 @@ func NewToolRegistry(tools []Tool) *ToolRegistry {
 
 func NewToolRegistryChecked(tools []Tool) (*ToolRegistry, error) {
 	r := &ToolRegistry{
-		byName:         make(map[string]Tool, len(tools)),
-		specs:          make(map[string]ToolSpec, len(tools)),
-		ordered:        make([]Tool, 0, len(tools)),
 		maxResultChars: 24 * 1024,
 	}
+	if err := r.replaceToolsLocked(tools); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *ToolRegistry) replaceToolsLocked(tools []Tool) error {
+	byName := make(map[string]Tool, len(tools))
+	specs := make(map[string]ToolSpec, len(tools))
+	ordered := make([]Tool, 0, len(tools))
 	for _, t := range tools {
 		if t == nil {
 			continue
@@ -39,24 +48,38 @@ func NewToolRegistryChecked(tools []Tool) (*ToolRegistry, error) {
 		if name == "" {
 			continue
 		}
-		if _, ok := r.byName[name]; !ok {
-			r.ordered = append(r.ordered, t)
+		if _, ok := byName[name]; !ok {
+			ordered = append(ordered, t)
 		}
-		r.byName[name] = t
+		byName[name] = t
 		spec := DescribeTool(t)
 		spec.Parameters = normalizeToolSchema(spec.Parameters)
 		if !isValidToolSpec(spec) {
-			return nil, fmt.Errorf("invalid tool spec for %q", name)
+			return fmt.Errorf("invalid tool spec for %q", name)
 		}
-		r.specs[name] = spec
+		specs[name] = spec
 	}
-	return r, nil
+	r.byName = byName
+	r.specs = specs
+	r.ordered = ordered
+	return nil
+}
+
+func (r *ToolRegistry) ReplaceTools(tools []Tool) error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.replaceToolsLocked(tools)
 }
 
 func (r *ToolRegistry) Get(name string) Tool {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.byName[name]
 }
 
@@ -64,6 +87,8 @@ func (r *ToolRegistry) Tools() []Tool {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]Tool, 0, len(r.ordered))
 	out = append(out, r.ordered...)
 	return out
@@ -73,6 +98,8 @@ func (r *ToolRegistry) Specs() []ToolSpec {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make([]ToolSpec, 0, len(r.ordered))
 	for _, t := range r.ordered {
 		out = append(out, r.specs[t.Name()])
@@ -84,6 +111,8 @@ func (r *ToolRegistry) Spec(name string) (ToolSpec, bool) {
 	if r == nil {
 		return ToolSpec{}, false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	spec, ok := r.specs[name]
 	return spec, ok
 }
@@ -92,6 +121,8 @@ func (r *ToolRegistry) SetMaxResultChars(limit int) {
 	if r == nil {
 		return
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.maxResultChars = limit
 }
 
@@ -101,24 +132,35 @@ func (r *ToolRegistry) Dispatch(ctx context.Context, call ToolCall) (ToolResult,
 
 func (r *ToolRegistry) DispatchWithProgress(ctx context.Context, call ToolCall, progress func(ToolProgress)) (ToolResult, error) {
 	start := time.Now()
-	spec, hasSpec := r.Spec(call.Name)
-	tool := r.Get(call.Name)
+	var (
+		spec           ToolSpec
+		hasSpec        bool
+		tool           Tool
+		maxResultChars int
+	)
+	if r != nil {
+		r.mu.RLock()
+		spec, hasSpec = r.specs[call.Name]
+		tool = r.byName[call.Name]
+		maxResultChars = r.maxResultChars
+		r.mu.RUnlock()
+	}
 	if tool == nil {
-		return r.normalizeResult(call, ToolResult{
+		return normalizeRegistryResult(call, ToolResult{
 			ToolCallID: call.ID,
 			Name:       call.Name,
 			Content:    `{"ok":false,"error":"tool not found","code":"not_found"}`,
 			IsError:    true,
-		}, time.Since(start).Milliseconds()), nil
+		}, maxResultChars, time.Since(start).Milliseconds()), nil
 	}
 	if hasSpec {
 		if err := validateToolInput(spec.Parameters, call.Input); err != nil {
-			return r.normalizeResult(call, ToolResult{
+			return normalizeRegistryResult(call, ToolResult{
 				ToolCallID: call.ID,
 				Name:       call.Name,
 				Content:    fmt.Sprintf(`{"ok":false,"error":%q,"code":"invalid_input"}`, err.Error()),
 				IsError:    true,
-			}, time.Since(start).Milliseconds()), nil
+			}, maxResultChars, time.Since(start).Milliseconds()), nil
 		}
 	}
 	var res ToolResult
@@ -133,18 +175,21 @@ func (r *ToolRegistry) DispatchWithProgress(ctx context.Context, call ToolCall, 
 		if errors.Is(err, context.Canceled) {
 			code = "cancelled"
 		}
-		return r.normalizeResult(call, ToolResult{
+		return normalizeRegistryResult(call, ToolResult{
 			ToolCallID: call.ID,
 			Name:       call.Name,
 			Content:    fmt.Sprintf(`{"ok":false,"error":%q,"code":%q}`, err.Error(), code),
 			IsError:    true,
-		}, time.Since(start).Milliseconds()), nil
+		}, maxResultChars, time.Since(start).Milliseconds()), nil
 	}
-	return r.normalizeResult(call, res, time.Since(start).Milliseconds()), nil
+	return normalizeRegistryResult(call, res, maxResultChars, time.Since(start).Milliseconds()), nil
 }
 
-func (r *ToolRegistry) normalizeResult(call ToolCall, res ToolResult, durationMS int64) ToolResult {
-	content, isErr := normalizeToolContent(call.Name, res.Content, res.IsError, r.maxResultChars, durationMS)
+func normalizeRegistryResult(call ToolCall, res ToolResult, maxResultChars int, durationMS int64) ToolResult {
+	if maxResultChars <= 0 {
+		maxResultChars = 24 * 1024
+	}
+	content, isErr := normalizeToolContent(call.Name, res.Content, res.IsError, maxResultChars, durationMS)
 	res.ToolCallID = call.ID
 	res.Name = call.Name
 	res.Content = content

@@ -10,6 +10,7 @@ import (
 	appcommands "github.com/usewhale/whale/internal/app/commands"
 	"github.com/usewhale/whale/internal/compact"
 	"github.com/usewhale/whale/internal/core"
+	whalemcp "github.com/usewhale/whale/internal/mcp"
 	"github.com/usewhale/whale/internal/memory"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
@@ -78,14 +79,21 @@ func (a *App) formatMCPStatusLine() string {
 	}
 	connected := 0
 	failed := 0
+	starting := 0
 	tools := 0
 	for _, st := range states {
-		if st.Connected {
+		switch {
+		case st.Connected || st.Status == whalemcp.StatusConnected:
 			connected++
 			tools += st.Tools
-		} else if st.Error != "" {
+		case st.Status == whalemcp.StatusStarting:
+			starting++
+		case st.Error != "" || st.Status == whalemcp.StatusFailed || st.Status == whalemcp.StatusCancelled:
 			failed++
 		}
+	}
+	if starting > 0 {
+		return fmt.Sprintf("- mcp: %d server(s), %d connected, %d starting, %d failed, %d tool(s)", len(states), connected, starting, failed, tools)
 	}
 	return fmt.Sprintf("- mcp: %d server(s), %d connected, %d failed, %d tool(s)", len(states), connected, failed, tools)
 }
@@ -102,11 +110,14 @@ func (a *App) buildMCPStatus() string {
 	}
 	lines = append(lines, fmt.Sprintf("servers: %d", len(states)))
 	for _, st := range states {
-		status := "disabled"
-		if st.Connected {
-			status = "connected"
-		} else if st.Error != "" {
-			status = "failed"
+		status := st.Status
+		if status == "" {
+			status = "disabled"
+			if st.Connected {
+				status = "connected"
+			} else if st.Error != "" {
+				status = "failed"
+			}
 		}
 		line := fmt.Sprintf("- %s: %s", st.Name, status)
 		if st.Tools > 0 {

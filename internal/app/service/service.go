@@ -54,6 +54,8 @@ const (
 	EventTaskStarted       EventKind = "task_started"
 	EventTaskProgress      EventKind = "task_progress"
 	EventTaskCompleted     EventKind = "task_completed"
+	EventMCPStatus         EventKind = "mcp_status"
+	EventMCPComplete       EventKind = "mcp_complete"
 	EventApprovalRequired  EventKind = "approval_required"
 	EventUserInputRequired EventKind = "user_input_required"
 	EventUserInputDone     EventKind = "user_input_done"
@@ -92,12 +94,13 @@ type Event struct {
 }
 
 type Service struct {
-	ctx      context.Context
-	app      *app.App
-	events   chan Event
-	cancelMu sync.Mutex
-	cancel   context.CancelFunc
-	active   bool
+	ctx              context.Context
+	serviceCtxCancel context.CancelFunc
+	app              *app.App
+	events           chan Event
+	cancelMu         sync.Mutex
+	cancel           context.CancelFunc
+	active           bool
 
 	approveMu     sync.Mutex
 	approvals     map[string]chan approvalDecision
@@ -121,17 +124,20 @@ const (
 )
 
 func New(ctx context.Context, cfg app.Config, start app.StartOptions) (*Service, error) {
+	ctx, cancel := context.WithCancel(ctx)
 	a, err := app.New(ctx, cfg, start)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	s := &Service{
-		ctx:           ctx,
-		app:           a,
-		events:        make(chan Event, 512),
-		approvals:     map[string]chan approvalDecision{},
-		sessionGrants: map[string]map[string]bool{},
-		inputs:        map[string]chan userInputDecision{},
+		ctx:              ctx,
+		serviceCtxCancel: cancel,
+		app:              a,
+		events:           make(chan Event, 512),
+		approvals:        map[string]chan approvalDecision{},
+		sessionGrants:    map[string]map[string]bool{},
+		inputs:           map[string]chan userInputDecision{},
 	}
 	a.SetApprovalFunc(s.awaitApproval)
 	a.SetUserInputFunc(s.awaitUserInput)
@@ -139,6 +145,7 @@ func New(ctx context.Context, cfg app.Config, start app.StartOptions) (*Service,
 		s.emit(Event{Kind: EventInfo, Text: line})
 	}
 	s.emitSessionHydrated()
+	s.startMCPStartup()
 	return s, nil
 }
 
@@ -154,6 +161,9 @@ func (s *Service) ThinkingEnabled() bool   { return s.app.ThinkingEnabled() }
 func (s *Service) Close() error {
 	if s == nil || s.app == nil {
 		return nil
+	}
+	if s.serviceCtxCancel != nil {
+		s.serviceCtxCancel()
 	}
 	return s.app.Close()
 }

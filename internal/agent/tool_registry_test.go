@@ -65,6 +65,19 @@ func TestToolRegistryCheckedInvalidSpecReturnsError(t *testing.T) {
 	}
 }
 
+func TestToolRegistryReplaceToolsKeepsPreviousToolsOnInvalidSpec(t *testing.T) {
+	r := NewToolRegistry([]Tool{regTestTool{name: "read_file"}})
+	if err := r.ReplaceTools([]Tool{badSpecTool{}}); err == nil {
+		t.Fatal("expected invalid tool spec error")
+	}
+	if got := r.Get("read_file"); got == nil {
+		t.Fatal("expected previous tool to remain registered")
+	}
+	if got := r.Get("bad_spec"); got != nil {
+		t.Fatal("invalid replacement should not be registered")
+	}
+}
+
 type longOutputTool struct{}
 
 func (l longOutputTool) Name() string { return "long_out" }

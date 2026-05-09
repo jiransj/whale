@@ -23,6 +23,7 @@ func Run(cfg app.Config, start app.StartOptions) error {
 		return err
 	}
 	defer coreApp.Close()
+	coreApp.InitializeMCP(ctx, nil)
 	for _, line := range coreApp.StartupLines() {
 		fmt.Println(line)
 	}
