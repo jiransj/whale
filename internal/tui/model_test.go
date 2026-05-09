@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -898,6 +899,32 @@ func TestChatViewportMouseWheelScrollsTranscript(t *testing.T) {
 	m = next.(model)
 	if m.viewport.YOffset <= 0 {
 		t.Fatalf("expected wheel down to scroll transcript down, offset=%d", m.viewport.YOffset)
+	}
+}
+
+func TestNativeScrollbackSkipsHeaderAndPrintsNewTranscriptOnce(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+
+	if cmd := m.flushNativeScrollbackCmd(); cmd != nil {
+		t.Fatal("expected startup header to be marked as already printed")
+	}
+
+	m.appendTranscript("you", tuirender.KindText, "hello native scrollback")
+	cmd := m.flushNativeScrollbackCmd()
+	if cmd == nil {
+		t.Fatal("expected new transcript entry to produce a native scrollback print command")
+	}
+	msg := cmd()
+	if got := reflect.TypeOf(msg).String(); got != "tea.printLineMessage" {
+		t.Fatalf("expected Bubble Tea print message, got %s", got)
+	}
+	if got := fmt.Sprintf("%#v", msg); !strings.Contains(got, "hello native scrollback") {
+		t.Fatalf("expected printed message to include transcript text, got %s", got)
+	}
+	if cmd := m.flushNativeScrollbackCmd(); cmd != nil {
+		t.Fatal("expected transcript entry not to be printed twice")
 	}
 }
 

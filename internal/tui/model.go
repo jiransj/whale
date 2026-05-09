@@ -118,6 +118,7 @@ type model struct {
 	historyDraft                   string
 	lastHistoryText                string
 	inHistoryNav                   bool
+	nativeScrollbackPrinted        int
 }
 
 type paletteAction struct {
@@ -417,7 +418,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dispatchIntent(service.Intent{Kind: service.IntentShutdown})
 			return m, tea.Quit
 		}
-		return m, tea.Sequence(eventCmd, waitEventCmd(m.svc))
+		return m, tea.Sequence(eventCmd, m.flushNativeScrollbackCmd(), waitEventCmd(m.svc))
 	case quitTimeoutMsg:
 		if !m.quitArmedUntil.IsZero() && time.Now().After(m.quitArmedUntil) {
 			m.quitArmedUntil = time.Time{}
@@ -507,7 +508,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.appendNotice(m.turnInterruptedNoticeText())
 					}
 					m.commitLiveTranscript(false)
-					return m, nil
+					return m, m.flushNativeScrollbackCmd()
 				}
 				if m.hasSlashSuggestions() {
 					m.slash.matches = nil
@@ -536,21 +537,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.status = "approved"
 					m.appendNotice(m.approvalNoticeText("allow"))
 					m.mode = modeChat
-					return m, nil
+					return m, m.flushNativeScrollbackCmd()
 				case 1:
 					m.dispatchIntent(service.Intent{Kind: service.IntentAllowToolForSession, ToolCallID: m.approval.toolCallID})
 					m.addLog(logEntry{Kind: "approval_allow_session", Source: m.approval.toolName, Summary: "allow for session", Raw: "allow_session"})
 					m.status = "approved for session"
 					m.appendNotice(m.approvalNoticeText("allow_session"))
 					m.mode = modeChat
-					return m, nil
+					return m, m.flushNativeScrollbackCmd()
 				default:
 					m.dispatchIntent(service.Intent{Kind: service.IntentDenyTool, ToolCallID: m.approval.toolCallID})
 					m.addLog(logEntry{Kind: "approval_deny", Source: m.approval.toolName, Summary: "deny", Raw: "deny"})
 					m.status = "rejected"
 					m.appendNotice(m.approvalNoticeText("deny"))
 					m.mode = modeChat
-					return m, nil
+					return m, m.flushNativeScrollbackCmd()
 				}
 			case "a":
 				m.dispatchIntent(service.Intent{Kind: service.IntentAllowTool, ToolCallID: m.approval.toolCallID})
@@ -558,21 +559,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeChat
 				m.status = "approved"
 				m.appendNotice(m.approvalNoticeText("allow"))
-				return m, nil
+				return m, m.flushNativeScrollbackCmd()
 			case "s":
 				m.dispatchIntent(service.Intent{Kind: service.IntentAllowToolForSession, ToolCallID: m.approval.toolCallID})
 				m.addLog(logEntry{Kind: "approval_allow_session", Source: m.approval.toolName, Summary: "allow for session", Raw: "allow_session"})
 				m.mode = modeChat
 				m.status = "approved for session"
 				m.appendNotice(m.approvalNoticeText("allow_session"))
-				return m, nil
+				return m, m.flushNativeScrollbackCmd()
 			case "d", "esc", "ctrl+c":
 				m.dispatchIntent(service.Intent{Kind: service.IntentDenyTool, ToolCallID: m.approval.toolCallID})
 				m.addLog(logEntry{Kind: "approval_deny", Source: m.approval.toolName, Summary: "deny", Raw: "deny"})
 				m.mode = modeChat
 				m.status = "rejected"
 				m.appendNotice(m.approvalNoticeText("deny"))
-				return m, nil
+				return m, m.flushNativeScrollbackCmd()
 			}
 			return m, nil
 		case modeSessionPicker:
@@ -716,7 +717,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.dispatchIntent(service.Intent{Kind: service.IntentImplementPlan})
 					m.mode = modeChat
 					m.refreshViewportContentFollow(true)
-					return m, busyTickCmd()
+					return m, tea.Sequence(m.flushNativeScrollbackCmd(), busyTickCmd())
 				}
 				m.mode = modeChat
 			}
@@ -746,7 +747,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.appendNotice(m.busySubmitNoticeText())
 				m.input.Reset()
-				return m, nil
+				return m, m.flushNativeScrollbackCmd()
 			}
 			if m.hasSlashSuggestions() {
 				if cmd := safeChoice(m.slash.matches, m.slash.selected); cmd != "" {
@@ -761,7 +762,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.status = "running"
 						m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: cmd})
 						m.refreshViewportContentFollow(true)
-						return m, busyTickCmd()
+						return m, tea.Sequence(m.flushNativeScrollbackCmd(), busyTickCmd())
 					}
 				}
 				return m, nil
@@ -789,7 +790,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "running"
 			m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value})
 			m.refreshViewportContentFollow(true)
-			return m, busyTickCmd()
+			return m, tea.Sequence(m.flushNativeScrollbackCmd(), busyTickCmd())
 		}
 	}
 	var cmd tea.Cmd

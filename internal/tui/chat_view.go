@@ -525,7 +525,9 @@ func (m model) busySubmitNoticeText() string {
 
 func (m *model) resetTranscriptWithHeader() {
 	m.transcript = nil
+	m.nativeScrollbackPrinted = 0
 	m.appendTranscript("info", tuirender.KindText, buildHeaderBanner(m.model, m.effort, m.cwd, m.version))
+	m.nativeScrollbackPrinted = len(m.transcript)
 }
 
 func (m *model) appendTranscript(role string, kind tuirender.MessageKind, text string) {
