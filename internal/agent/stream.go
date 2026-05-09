@@ -279,8 +279,9 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 						Metadata:   metadata,
 					},
 				}
+				approvalDecision := policy.ApprovalDeny
 				if a.approve != nil {
-					approved = a.approve(policy.ApprovalRequest{
+					approvalDecision = a.approve(policy.ApprovalRequest{
 						SessionID: sessionID,
 						ToolCall:  call,
 						Spec:      spec,
@@ -290,7 +291,8 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 						Metadata:  metadata,
 					})
 				}
-				if approved {
+				approved = approvalDecision.Approved()
+				if approvalDecision.ForSession() {
 					a.approvalCache.Grant(sessionID, key)
 					a.persistApproval(ctx, sessionID, key)
 				}

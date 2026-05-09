@@ -97,9 +97,9 @@ func TestApprovalRequiredAndDenied(t *testing.T) {
 		prov,
 		store,
 		NewToolRegistry([]Tool{writeLikeTool{}}),
-		WithApprovalFunc(func(req ApprovalRequest) bool {
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
 			asked++
-			return false
+			return ApprovalDeny
 		}),
 	)
 
@@ -148,8 +148,8 @@ func TestApprovalDeniedMarkerIsVisibleToNextTurn(t *testing.T) {
 		prov,
 		store,
 		NewToolRegistry([]Tool{writeLikeTool{}}),
-		WithApprovalFunc(func(req ApprovalRequest) bool {
-			return false
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
+			return ApprovalDeny
 		}),
 	)
 
@@ -203,8 +203,8 @@ func TestApprovalDeniedSkipsRemainingToolCalls(t *testing.T) {
 		&multiToolApprovalProvider{},
 		store,
 		NewToolRegistry([]Tool{writeLikeTool{}, counting}),
-		WithApprovalFunc(func(req ApprovalRequest) bool {
-			return false
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
+			return ApprovalDeny
 		}),
 	)
 
@@ -259,7 +259,7 @@ func (p *approvalCacheProvider) StreamResponse(_ context.Context, _ []Message, _
 	return eventStream(endTurnEvent("done"))
 }
 
-func TestApprovalCacheBySessionKey(t *testing.T) {
+func TestApprovalAllowOnceDoesNotCacheBySessionKey(t *testing.T) {
 	store := NewInMemoryStore()
 	prov := &approvalCacheProvider{}
 	asked := 0
@@ -267,9 +267,31 @@ func TestApprovalCacheBySessionKey(t *testing.T) {
 		prov,
 		store,
 		NewToolRegistry([]Tool{writeLikeTool{}}),
-		WithApprovalFunc(func(req ApprovalRequest) bool {
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
 			asked++
-			return true
+			return ApprovalAllow
+		}),
+	)
+
+	if _, err := a.Run(context.Background(), "s-approval-cache-once", "t1"); err != nil {
+		t.Fatalf("run failed: %v", err)
+	}
+	if asked != 2 {
+		t.Fatalf("expected allow-once approval to ask twice for repeated key, got %d", asked)
+	}
+}
+
+func TestApprovalAllowForSessionCachesBySessionKey(t *testing.T) {
+	store := NewInMemoryStore()
+	prov := &approvalCacheProvider{}
+	asked := 0
+	a := NewAgentWithRegistry(
+		prov,
+		store,
+		NewToolRegistry([]Tool{writeLikeTool{}}),
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
+			asked++
+			return ApprovalAllowForSession
 		}),
 	)
 

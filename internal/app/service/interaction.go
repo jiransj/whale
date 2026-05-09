@@ -6,28 +6,28 @@ import (
 	"github.com/usewhale/whale/internal/policy"
 )
 
-func (s *Service) awaitApproval(req policy.ApprovalRequest) bool {
+func (s *Service) awaitApproval(req policy.ApprovalRequest) policy.ApprovalDecision {
 	toolCallID := req.ToolCall.ID
 	s.approveMu.Lock()
 	if s.sessionGrantLocked(req.SessionID, req.Key) {
 		s.approveMu.Unlock()
-		return true
+		return policy.ApprovalAllowForSession
 	}
-	ch := make(chan approvalDecision, 1)
+	ch := make(chan policy.ApprovalDecision, 1)
 	s.approvals[toolCallID] = ch
 	s.approveMu.Unlock()
 	s.emit(Event{Kind: EventApprovalRequired, ToolCallID: toolCallID, ToolName: req.ToolCall.Name, Text: policy.ApprovalSummary(req.ToolCall), Metadata: req.Metadata})
 	decision := <-ch
 	s.approveMu.Lock()
 	delete(s.approvals, toolCallID)
-	if decision == approvalAllowSession {
+	if decision == policy.ApprovalAllowForSession {
 		s.grantSessionLocked(req.SessionID, req.Key)
 	}
 	s.approveMu.Unlock()
-	return decision != approvalDeny
+	return decision
 }
 
-func (s *Service) resolveApproval(toolCallID string, decision approvalDecision) {
+func (s *Service) resolveApproval(toolCallID string, decision policy.ApprovalDecision) {
 	s.approveMu.Lock()
 	ch, ok := s.approvals[toolCallID]
 	s.approveMu.Unlock()

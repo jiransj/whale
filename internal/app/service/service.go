@@ -103,7 +103,7 @@ type Service struct {
 	active           bool
 
 	approveMu     sync.Mutex
-	approvals     map[string]chan approvalDecision
+	approvals     map[string]chan policy.ApprovalDecision
 	sessionGrants map[string]map[string]bool
 
 	inputMu sync.Mutex
@@ -114,14 +114,6 @@ type userInputDecision struct {
 	response core.UserInputResponse
 	ok       bool
 }
-
-type approvalDecision int
-
-const (
-	approvalDeny approvalDecision = iota
-	approvalAllow
-	approvalAllowSession
-)
 
 func New(ctx context.Context, cfg app.Config, start app.StartOptions) (*Service, error) {
 	ctx, cancel := context.WithCancel(ctx)
@@ -135,7 +127,7 @@ func New(ctx context.Context, cfg app.Config, start app.StartOptions) (*Service,
 		serviceCtxCancel: cancel,
 		app:              a,
 		events:           make(chan Event, 512),
-		approvals:        map[string]chan approvalDecision{},
+		approvals:        map[string]chan policy.ApprovalDecision{},
 		sessionGrants:    map[string]map[string]bool{},
 		inputs:           map[string]chan userInputDecision{},
 	}

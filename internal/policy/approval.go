@@ -19,7 +19,23 @@ type ApprovalRequest struct {
 	Metadata  map[string]any
 }
 
-type ApprovalFunc func(req ApprovalRequest) bool
+type ApprovalDecision int
+
+const (
+	ApprovalDeny ApprovalDecision = iota
+	ApprovalAllow
+	ApprovalAllowForSession
+)
+
+func (d ApprovalDecision) Approved() bool {
+	return d == ApprovalAllow || d == ApprovalAllowForSession
+}
+
+func (d ApprovalDecision) ForSession() bool {
+	return d == ApprovalAllowForSession
+}
+
+type ApprovalFunc func(req ApprovalRequest) ApprovalDecision
 
 type SessionApprovalCache struct {
 	mu     sync.RWMutex

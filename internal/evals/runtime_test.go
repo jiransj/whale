@@ -240,9 +240,9 @@ func TestRuntimeApprovalDeniedStopsToolExecution(t *testing.T) {
 		store.NewInMemoryStore(),
 		core.NewToolRegistry(toolset.Tools()),
 		agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: policy.ApprovalModeOnRequest}),
-		agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
+		agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
 			asked++
-			return false
+			return policy.ApprovalDeny
 		}),
 	)
 
@@ -308,8 +308,8 @@ func TestRuntimeApprovalDeniedSkipsRemainingToolCalls(t *testing.T) {
 		&multiToolApprovalProvider{},
 		store.NewInMemoryStore(),
 		core.NewToolRegistry([]core.Tool{writeLikeTool{}, counting}),
-		agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
-			return false
+		agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
+			return policy.ApprovalDeny
 		}),
 	)
 
@@ -770,9 +770,9 @@ func TestRuntimeApprovalCacheBySessionKey(t *testing.T) {
 		store.NewInMemoryStore(),
 		core.NewToolRegistry(toolset.Tools()),
 		agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: policy.ApprovalModeOnRequest}),
-		agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
+		agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
 			asked++
-			return true
+			return policy.ApprovalAllowForSession
 		}),
 	)
 
@@ -830,9 +830,9 @@ func TestRuntimeApprovalCacheDoesNotCrossSessions(t *testing.T) {
 		store.NewInMemoryStore(),
 		core.NewToolRegistry(toolset.Tools()),
 		agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: policy.ApprovalModeOnRequest}),
-		agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
+		agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
 			asked++
-			return true
+			return policy.ApprovalAllowForSession
 		}),
 	)
 
@@ -890,9 +890,9 @@ func TestRuntimeApprovalPersistsAcrossAgentInstances(t *testing.T) {
 		provider,
 		msgStore,
 		reg,
-		agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
+		agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
 			asked1++
-			return true
+			return policy.ApprovalAllowForSession
 		}),
 	)
 	if _, err := a1.Run(context.Background(), "eval-persisted-approval", "run1"); err != nil {
@@ -907,9 +907,9 @@ func TestRuntimeApprovalPersistsAcrossAgentInstances(t *testing.T) {
 		provider,
 		msgStore,
 		reg,
-		agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool {
+		agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
 			asked2++
-			return true
+			return policy.ApprovalAllowForSession
 		}),
 	)
 	if _, err := a2.Run(context.Background(), "eval-persisted-approval", "run2"); err != nil {

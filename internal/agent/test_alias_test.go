@@ -56,11 +56,15 @@ type PolicyDecision = policy.PolicyDecision
 type ToolPolicy = policy.ToolPolicy
 type DefaultToolPolicy = policy.DefaultToolPolicy
 type ApprovalRequest = policy.ApprovalRequest
+type ApprovalDecision = policy.ApprovalDecision
 type ApprovalFunc = policy.ApprovalFunc
 
 const (
-	ApprovalModeOnRequest = policy.ApprovalModeOnRequest
-	ApprovalModeNever     = policy.ApprovalModeNever
+	ApprovalModeOnRequest   = policy.ApprovalModeOnRequest
+	ApprovalModeNever       = policy.ApprovalModeNever
+	ApprovalDeny            = policy.ApprovalDeny
+	ApprovalAllow           = policy.ApprovalAllow
+	ApprovalAllowForSession = policy.ApprovalAllowForSession
 )
 
 var (

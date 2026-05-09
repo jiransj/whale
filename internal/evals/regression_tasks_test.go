@@ -50,7 +50,7 @@ func TestTaskApprovalRequiredWriteDenied(t *testing.T) {
 		Scenario: ScenarioSpec{
 			AgentOptions: []agent.AgentOption{
 				agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: policy.ApprovalModeOnRequest}),
-				agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool { return false }),
+				agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision { return policy.ApprovalDeny }),
 			},
 			Turns: []TurnSpec{
 				{

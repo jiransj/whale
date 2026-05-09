@@ -131,7 +131,7 @@ func TestTaskApprovalRequiredWriteApproved(t *testing.T) {
 		Scenario: ScenarioSpec{
 			AgentOptions: []agent.AgentOption{
 				agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: policy.ApprovalModeOnRequest}),
-				agent.WithApprovalFunc(func(req policy.ApprovalRequest) bool { return true }),
+				agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision { return policy.ApprovalAllow }),
 			},
 			Turns: []TurnSpec{
 				{

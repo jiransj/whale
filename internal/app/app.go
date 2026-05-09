@@ -272,7 +272,7 @@ func defaultApprovalFunc(fn policy.ApprovalFunc) policy.ApprovalFunc {
 	if fn != nil {
 		return fn
 	}
-	return func(policy.ApprovalRequest) bool { return false }
+	return func(policy.ApprovalRequest) policy.ApprovalDecision { return policy.ApprovalDeny }
 }
 
 func defaultUserInputFunc(fn agent.UserInputFunc) agent.UserInputFunc {

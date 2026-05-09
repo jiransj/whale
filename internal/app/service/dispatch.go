@@ -16,11 +16,11 @@ func (s *Service) Dispatch(in Intent) {
 	case IntentSubmit:
 		go s.handleSubmit(in.Input, in.HiddenInput)
 	case IntentAllowTool:
-		s.resolveApproval(in.ToolCallID, approvalAllow)
+		s.resolveApproval(in.ToolCallID, policy.ApprovalAllow)
 	case IntentAllowToolForSession:
-		s.resolveApproval(in.ToolCallID, approvalAllowSession)
+		s.resolveApproval(in.ToolCallID, policy.ApprovalAllowForSession)
 	case IntentDenyTool:
-		s.resolveApproval(in.ToolCallID, approvalDeny)
+		s.resolveApproval(in.ToolCallID, policy.ApprovalDeny)
 	case IntentSubmitUserInput:
 		if in.UserInput != nil {
 			s.resolveUserInput(in.ToolCallID, *in.UserInput, true)

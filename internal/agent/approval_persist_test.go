@@ -49,9 +49,9 @@ func TestApprovalPersistsAcrossAgentInstances(t *testing.T) {
 		prov,
 		store,
 		reg,
-		WithApprovalFunc(func(req ApprovalRequest) bool {
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
 			asked1++
-			return true
+			return ApprovalAllowForSession
 		}),
 	)
 	if _, err := a1.Run(context.Background(), "s-persist", "run1"); err != nil {
@@ -66,9 +66,9 @@ func TestApprovalPersistsAcrossAgentInstances(t *testing.T) {
 		prov,
 		store,
 		reg,
-		WithApprovalFunc(func(req ApprovalRequest) bool {
+		WithApprovalFunc(func(req ApprovalRequest) ApprovalDecision {
 			asked2++
-			return true
+			return ApprovalAllowForSession
 		}),
 	)
 	if _, err := a2.Run(context.Background(), "s-persist", "run2"); err != nil {
