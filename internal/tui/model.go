@@ -118,7 +118,12 @@ type model struct {
 	historyDraft                   string
 	lastHistoryText                string
 	inHistoryNav                   bool
+	queuedPrompts                  []queuedPrompt
 	nativeScrollbackPrinted        int
+}
+
+type queuedPrompt struct {
+	Text string
 }
 
 type paletteAction struct {
@@ -217,6 +222,70 @@ func (m *model) startBusy() {
 func (m *model) stopBusy() {
 	m.busy = false
 	m.busySince = time.Time{}
+}
+
+func (m *model) submitPrompt(value string) tea.Cmd {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	m.recordPromptHistory(value)
+	m.resetHistoryNavigation()
+	m.appendTranscript("you", tuirender.KindText, visibleSubmittedText(value))
+	m.input.SetValue("")
+	m.slash.matches = nil
+	m.slash.selected = 0
+	m.startBusy()
+	m.status = "running"
+	m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value})
+	m.refreshViewportContentFollow(true)
+	return busyTickCmd()
+}
+
+func (m *model) enqueuePrompt(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	m.queuedPrompts = append(m.queuedPrompts, queuedPrompt{Text: value})
+	m.input.SetValue("")
+	m.resetHistoryNavigation()
+	m.slash.matches = nil
+	m.slash.selected = 0
+	m.status = fmt.Sprintf("queued (%d)", len(m.queuedPrompts))
+	m.refreshViewportContent()
+	return true
+}
+
+func (m *model) popQueuedPrompt() (queuedPrompt, bool) {
+	if len(m.queuedPrompts) == 0 {
+		return queuedPrompt{}, false
+	}
+	next := m.queuedPrompts[0]
+	copy(m.queuedPrompts, m.queuedPrompts[1:])
+	m.queuedPrompts = m.queuedPrompts[:len(m.queuedPrompts)-1]
+	return next, true
+}
+
+func (m *model) restoreQueuedPromptsToComposer() bool {
+	if len(m.queuedPrompts) == 0 {
+		return false
+	}
+	parts := make([]string, 0, len(m.queuedPrompts)+1)
+	for _, prompt := range m.queuedPrompts {
+		if text := strings.TrimSpace(prompt.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if current := strings.TrimSpace(m.input.Value()); current != "" {
+		parts = append(parts, current)
+	}
+	m.queuedPrompts = nil
+	m.input.SetValue(strings.Join(parts, "\n"))
+	m.resetHistoryNavigation()
+	m.updateSlashMatches()
+	m.refreshViewportContent()
+	return true
 }
 
 // clearScreenCmd clears the visible terminal and scrollback buffer,
@@ -359,13 +428,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "session picker"
 		case service.EventTurnDone:
 			wasBusy := m.busy
+			wasStopping := m.stopping
 			m.stopBusy()
 			m.stopping = false
 			m.markNoFinalAnswerIfNeeded()
 			m.commitLiveTranscript(false)
 			m.addLog(logEntry{Kind: "turn_done", Source: "assistant", Summary: truncateLine(ev.LastResponse, 120), Raw: ev.LastResponse})
 			m.status = "ready"
-			if wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {
+			queuedTurnStarted := false
+			queuedRestored := false
+			if wasStopping {
+				queuedRestored = m.restoreQueuedPromptsToComposer()
+			} else if next, ok := m.popQueuedPrompt(); ok {
+				eventCmd = m.submitPrompt(next.Text)
+				queuedTurnStarted = true
+			}
+			if !queuedTurnStarted && !queuedRestored && wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {
 				m.mode = modePlanImplementation
 				m.planImplementation.index = 0
 			}
@@ -745,7 +823,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.stopping {
 					m.status = "stopping"
 				}
-				m.appendNotice(m.busySubmitNoticeText())
+				if !m.enqueuePrompt(m.input.Value()) {
+					m.appendNotice(m.busySubmitNoticeText())
+				}
 				return m, m.flushNativeScrollbackCmd()
 			}
 			if m.hasSlashSuggestions() {
@@ -781,15 +861,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if value == "" {
 				return m, nil
 			}
-			m.recordPromptHistory(value)
-			m.resetHistoryNavigation()
-			m.appendTranscript("you", tuirender.KindText, visibleSubmittedText(value))
-			m.input.SetValue("")
-			m.startBusy()
-			m.status = "running"
-			m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value})
-			m.refreshViewportContentFollow(true)
-			return m, tea.Sequence(m.flushNativeScrollbackCmd(), busyTickCmd())
+			return m, tea.Sequence(m.flushNativeScrollbackCmd(), m.submitPrompt(value))
 		}
 	}
 	var cmd tea.Cmd

@@ -114,6 +114,9 @@ func (m model) View() string {
 	if m.mode == modePermissionsPicker {
 		bottomParts = append(bottomParts, m.renderPermissionsPicker())
 	}
+	if queued := m.renderQueuedPrompts(mainWidth); queued != "" {
+		bottomParts = append(bottomParts, queued)
+	}
 	bottomParts = append(bottomParts, m.input.View(), footer)
 	bottom := strings.Join(bottomParts, "\n")
 
@@ -229,6 +232,58 @@ func (m model) renderBusyStatusLine(width int) string {
 		Width(width).
 		Foreground(tuitheme.Default.Warn).
 		Render(line)
+}
+
+func (m model) renderQueuedPrompts(width int) string {
+	if len(m.queuedPrompts) == 0 || width <= 0 {
+		return ""
+	}
+	limit := 3
+	if len(m.queuedPrompts) < limit {
+		limit = len(m.queuedPrompts)
+	}
+	rows := make([]string, 0, limit+2)
+	rows = append(rows, lipgloss.NewStyle().
+		Foreground(tuitheme.Default.Warn).
+		Render(fmt.Sprintf("queued (%d)", len(m.queuedPrompts))))
+	for i := 0; i < limit; i++ {
+		preview := queuedPromptPreview(m.queuedPrompts[i].Text, max(1, width-4))
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(tuitheme.Default.Muted).
+			Render("  "+preview))
+	}
+	if hidden := len(m.queuedPrompts) - limit; hidden > 0 {
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(tuitheme.Default.Muted).
+			Render(fmt.Sprintf("  ... %d more", hidden)))
+	}
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(strings.Join(rows, "\n"))
+}
+
+func queuedPromptPreview(text string, width int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if width <= 0 || text == "" {
+		return ""
+	}
+	if lipgloss.Width(text) <= width {
+		return text
+	}
+	if width <= 3 {
+		return strings.Repeat(".", width)
+	}
+	runes := []rune(text)
+	out := ""
+	for i := range runes {
+		next := string(runes[:i+1])
+		if lipgloss.Width(next+"...") > width {
+			break
+		}
+		out = next
+	}
+	if out == "" {
+		return "..."
+	}
+	return out + "..."
 }
 
 func (m model) busyElapsed() time.Duration {

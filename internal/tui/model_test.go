@@ -505,7 +505,7 @@ func TestCtrlCClearsNonEmptyInputWithoutArmingQuit(t *testing.T) {
 	}
 }
 
-func TestEnterWhileBusyPreservesInputWithoutSubmitting(t *testing.T) {
+func TestEnterWhileBusyQueuesInputWithoutSubmitting(t *testing.T) {
 	m, intents := newModelWithDispatchSpy()
 	m.busy = true
 	m.input.SetValue("follow up while working")
@@ -513,8 +513,11 @@ func TestEnterWhileBusyPreservesInputWithoutSubmitting(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
 
-	if got := m.input.Value(); got != "follow up while working" {
-		t.Fatalf("expected input preserved while busy, got %q", got)
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected input cleared after queueing, got %q", got)
+	}
+	if len(m.queuedPrompts) != 1 || m.queuedPrompts[0].Text != "follow up while working" {
+		t.Fatalf("expected queued prompt, got %+v", m.queuedPrompts)
 	}
 	if len(*intents) != 0 {
 		t.Fatalf("expected no submitted intent while busy, got %+v", *intents)
@@ -522,8 +525,120 @@ func TestEnterWhileBusyPreservesInputWithoutSubmitting(t *testing.T) {
 	if !m.busy {
 		t.Fatal("expected turn to remain busy")
 	}
-	if got := strings.Join(tuirender.ChatLines(m.assembler.Snapshot(), 80), "\n"); !strings.Contains(got, "Agent is working") {
-		t.Fatalf("expected busy notice in live view:\n%s", got)
+	if m.status != "queued (1)" {
+		t.Fatalf("unexpected status: %q", m.status)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.assembler.Snapshot(), 80), "\n"); strings.Contains(got, "follow up while working") {
+		t.Fatalf("queued prompt should not be written to live transcript:\n%s", got)
+	}
+}
+
+func TestTurnDoneSubmitsOneQueuedPrompt(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.queuedPrompts = []queuedPrompt{{Text: "first queued"}, {Text: "second queued"}}
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != "first queued" {
+		t.Fatalf("expected first queued prompt submitted, got %+v", *intents)
+	}
+	if len(m.queuedPrompts) != 1 || m.queuedPrompts[0].Text != "second queued" {
+		t.Fatalf("expected one queued prompt left, got %+v", m.queuedPrompts)
+	}
+	if !m.busy || m.status != "running" {
+		t.Fatalf("expected queued turn running, busy=%v status=%q", m.busy, m.status)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n"); !strings.Contains(got, "first queued") {
+		t.Fatalf("expected submitted queued prompt in transcript:\n%s", got)
+	}
+}
+
+func TestQueuedPromptsSubmitFIFOAcrossTurns(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.queuedPrompts = []queuedPrompt{{Text: "first queued"}, {Text: "second queued"}}
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+
+	if len(*intents) != 2 {
+		t.Fatalf("expected two submitted intents, got %+v", *intents)
+	}
+	if (*intents)[0].Input != "first queued" || (*intents)[1].Input != "second queued" {
+		t.Fatalf("expected FIFO submit order, got %+v", *intents)
+	}
+	if len(m.queuedPrompts) != 0 {
+		t.Fatalf("expected queue drained, got %+v", m.queuedPrompts)
+	}
+	if !m.busy {
+		t.Fatal("expected second queued turn to be running")
+	}
+}
+
+func TestStoppingTurnDoneRestoresQueuedPromptsToComposer(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.stopping = true
+	m.queuedPrompts = []queuedPrompt{{Text: "first queued"}, {Text: "second queued"}}
+	m.input.SetValue("current draft")
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+
+	if len(*intents) != 0 {
+		t.Fatalf("expected no submitted intents after stopping, got %+v", *intents)
+	}
+	if len(m.queuedPrompts) != 0 {
+		t.Fatalf("expected queue restored and cleared, got %+v", m.queuedPrompts)
+	}
+	if got := m.input.Value(); got != "first queued\nsecond queued\ncurrent draft" {
+		t.Fatalf("expected queued prompts restored to composer, got %q", got)
+	}
+	if m.busy || m.stopping {
+		t.Fatalf("expected stopped turn idle, busy=%v stopping=%v", m.busy, m.stopping)
+	}
+}
+
+func TestQueuedPromptSuppressesPlanImplementationPicker(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.chatMode = "plan"
+	m.mode = modeChat
+	m.sawPlanThisTurn = true
+	m.queuedPrompts = []queuedPrompt{{Text: "queued follow up"}}
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+
+	if m.mode == modePlanImplementation {
+		t.Fatal("queued prompt should suppress plan implementation picker")
+	}
+	if len(*intents) != 1 || (*intents)[0].Input != "queued follow up" {
+		t.Fatalf("expected queued follow-up submitted, got %+v", *intents)
+	}
+}
+
+func TestRenderQueuedPromptsShowsPreviewLimit(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.queuedPrompts = []queuedPrompt{
+		{Text: "first queued"},
+		{Text: "second queued"},
+		{Text: "third queued"},
+		{Text: "fourth queued"},
+	}
+
+	view := m.renderQueuedPrompts(80)
+	for _, want := range []string{"queued (4)", "first queued", "second queued", "third queued", "... 1 more"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected queued preview to contain %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "fourth queued") {
+		t.Fatalf("expected queued preview to hide fourth prompt:\n%s", view)
 	}
 }
 
