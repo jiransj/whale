@@ -746,7 +746,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.status = "stopping"
 				}
 				m.appendNotice(m.busySubmitNoticeText())
-				m.input.Reset()
 				return m, m.flushNativeScrollbackCmd()
 			}
 			if m.hasSlashSuggestions() {

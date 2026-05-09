@@ -505,6 +505,28 @@ func TestCtrlCClearsNonEmptyInputWithoutArmingQuit(t *testing.T) {
 	}
 }
 
+func TestEnterWhileBusyPreservesInputWithoutSubmitting(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.input.SetValue("follow up while working")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if got := m.input.Value(); got != "follow up while working" {
+		t.Fatalf("expected input preserved while busy, got %q", got)
+	}
+	if len(*intents) != 0 {
+		t.Fatalf("expected no submitted intent while busy, got %+v", *intents)
+	}
+	if !m.busy {
+		t.Fatal("expected turn to remain busy")
+	}
+	if got := strings.Join(tuirender.ChatLines(m.assembler.Snapshot(), 80), "\n"); !strings.Contains(got, "Agent is working") {
+		t.Fatalf("expected busy notice in live view:\n%s", got)
+	}
+}
+
 func TestApprovalNoticeTextUsesDecisionAndSummary(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.approval.reason = "exec_shell: go test ./..."
