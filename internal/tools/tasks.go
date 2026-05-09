@@ -83,7 +83,8 @@ func (r *shellTaskRegistry) get(id string) (*shellTask, bool) {
 }
 
 func runShellBackground(ctx context.Context, dir, command string, task *shellTask) {
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	bin, args := shellCommand(command)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	configureShellCommand(cmd)
 	cmd.Dir = dir
 	var stdoutBuf bytes.Buffer
