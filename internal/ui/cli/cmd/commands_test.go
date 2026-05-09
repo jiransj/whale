@@ -191,6 +191,36 @@ func TestPrepareCLIConfigMarksExplicitDefaultModel(t *testing.T) {
 	}
 }
 
+func TestResumeStartOptions(t *testing.T) {
+	got, err := resumeStartOptions(nil, false)
+	if err != nil {
+		t.Fatalf("resumeStartOptions picker: %v", err)
+	}
+	if !got.ResumeMenu || got.SessionID != "" || got.NewSession {
+		t.Fatalf("picker start options = %+v", got)
+	}
+
+	got, err = resumeStartOptions(nil, true)
+	if err != nil {
+		t.Fatalf("resumeStartOptions last: %v", err)
+	}
+	if got.ResumeMenu || got.SessionID != "" || got.NewSession {
+		t.Fatalf("last start options = %+v", got)
+	}
+
+	got, err = resumeStartOptions([]string{"sess-1"}, false)
+	if err != nil {
+		t.Fatalf("resumeStartOptions id: %v", err)
+	}
+	if got.ResumeMenu || got.SessionID != "sess-1" || got.NewSession {
+		t.Fatalf("id start options = %+v", got)
+	}
+
+	if _, err = resumeStartOptions([]string{"sess-1"}, true); err == nil {
+		t.Fatal("expected --last with id to fail")
+	}
+}
+
 func newExecTestServer(t *testing.T, content string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

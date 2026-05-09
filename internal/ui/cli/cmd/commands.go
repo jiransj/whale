@@ -36,22 +36,41 @@ func newExecCmd(opts *cliOptions) *cobra.Command {
 }
 
 func newResumeCmd(opts *cliOptions) *cobra.Command {
-	return &cobra.Command{
+	var last bool
+	c := &cobra.Command{
 		Use:   "resume [id]",
-		Short: "Resume a session by id (or open picker when id is omitted)",
+		Short: "Resume a session (open picker, use --last, or pass an id)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := prepareCLIConfig(cmd, opts); err != nil {
 				return err
 			}
-			start := app.StartOptions{ResumeMenu: true}
-			if len(args) == 1 {
-				start.SessionID = args[0]
-				start.ResumeMenu = false
+			start, err := resumeStartOptions(args, last)
+			if err != nil {
+				return err
 			}
 			return runLoop(opts, start)
 		},
 	}
+	c.Flags().BoolVar(&last, "last", false, "Resume the most recent session without opening the picker")
+	return c
+}
+
+func resumeStartOptions(args []string, last bool) (app.StartOptions, error) {
+	if last && len(args) > 0 {
+		return app.StartOptions{}, fmt.Errorf("usage: whale resume [--last] [id]")
+	}
+	if last {
+		return app.StartOptions{}, nil
+	}
+	if len(args) == 1 {
+		id := strings.TrimSpace(args[0])
+		if id == "" {
+			return app.StartOptions{}, fmt.Errorf("usage: whale resume [--last] [id]")
+		}
+		return app.StartOptions{SessionID: id}, nil
+	}
+	return app.StartOptions{ResumeMenu: true}, nil
 }
 
 func newDoctorCmd(opts *cliOptions) *cobra.Command {

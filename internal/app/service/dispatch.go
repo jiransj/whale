@@ -28,12 +28,7 @@ func (s *Service) Dispatch(in Intent) {
 	case IntentCancelUserInput:
 		s.resolveUserInput(in.ToolCallID, core.UserInputResponse{}, false)
 	case IntentRequestSessions:
-		choices, err := s.app.ListResumeChoices(20)
-		if err != nil {
-			s.emit(Event{Kind: EventError, Text: err.Error()})
-			return
-		}
-		s.emit(Event{Kind: EventSessionsListed, Choices: choices})
+		s.emitSessionChoices()
 	case IntentSelectSession:
 		msg, err := s.app.ApplyResumeChoice(in.SessionInput)
 		if err != nil {
@@ -140,12 +135,7 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 		hiddenInput = false
 	}
 	if s.app.IsResumeMenu(line) {
-		choices, err := s.app.ListResumeChoices(20)
-		if err != nil {
-			s.emit(Event{Kind: EventError, Text: err.Error()})
-			return
-		}
-		s.emit(Event{Kind: EventSessionsListed, Choices: choices})
+		s.emitSessionChoices()
 		s.emit(Event{Kind: EventTurnDone})
 		return
 	}
@@ -230,4 +220,18 @@ func (s *Service) emitSessionHydrated() {
 		return
 	}
 	s.emit(Event{Kind: EventSessionHydrated, SessionID: s.app.SessionID(), Messages: msgs})
+}
+
+func (s *Service) emitSessionChoices() bool {
+	choices, err := s.app.ListResumeChoices(20)
+	if err != nil {
+		s.emit(Event{Kind: EventError, Text: err.Error()})
+		return false
+	}
+	if len(choices) == 0 {
+		s.emit(Event{Kind: EventInfo, Text: "no saved sessions"})
+		return false
+	}
+	s.emit(Event{Kind: EventSessionsListed, Choices: choices})
+	return true
 }

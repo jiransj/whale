@@ -136,7 +136,13 @@ func New(ctx context.Context, cfg app.Config, start app.StartOptions) (*Service,
 	for _, line := range a.StartupLines() {
 		s.emit(Event{Kind: EventInfo, Text: line})
 	}
-	s.emitSessionHydrated()
+	if start.ResumeMenu {
+		if !s.emitSessionChoices() {
+			s.emitSessionHydrated()
+		}
+	} else {
+		s.emitSessionHydrated()
+	}
 	s.startMCPStartup()
 	return s, nil
 }

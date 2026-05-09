@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/usewhale/whale/internal/agent"
+	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/core"
 )
 
@@ -125,6 +128,63 @@ func TestEmitReliableUnblocksOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestResumeMenuStartupOpensSessionPickerBeforeHydration(t *testing.T) {
+	dir := t.TempDir()
+	writeSessionFile(t, dir, "sess-1", "hello resume")
+	cfg := app.DefaultConfig()
+	cfg.DataDir = dir
+
+	svc, err := New(t.Context(), cfg, app.StartOptions{ResumeMenu: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+
+	for {
+		ev := nextServiceEvent(t, svc)
+		switch ev.Kind {
+		case EventSessionHydrated:
+			t.Fatal("session hydrated before resume picker was shown")
+		case EventSessionsListed:
+			if joined := strings.Join(ev.Choices, "\n"); !strings.Contains(joined, "hello resume") {
+				t.Fatalf("expected session choice to include conversation, got:\n%s", joined)
+			}
+			svc.Dispatch(Intent{Kind: IntentSelectSession, SessionInput: "1"})
+			assertSessionSelectedAndHydrated(t, svc)
+			return
+		}
+	}
+}
+
+func TestResumeMenuStartupWithNoSessionsHydratesFallbackSession(t *testing.T) {
+	cfg := app.DefaultConfig()
+	cfg.DataDir = t.TempDir()
+
+	svc, err := New(t.Context(), cfg, app.StartOptions{ResumeMenu: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+
+	sawNoSaved := false
+	for {
+		ev := nextServiceEvent(t, svc)
+		switch ev.Kind {
+		case EventSessionsListed:
+			t.Fatal("did not expect an empty session picker")
+		case EventInfo:
+			if ev.Text == "no saved sessions" {
+				sawNoSaved = true
+			}
+		case EventSessionHydrated:
+			if !sawNoSaved {
+				t.Fatal("expected no saved sessions notice before hydration")
+			}
+			return
+		}
+	}
+}
+
 func TestShouldSuppressCancelledTurnErrorOnlyForCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wrapped := fmt.Errorf("request failed: %w", context.Canceled)
@@ -137,6 +197,51 @@ func TestShouldSuppressCancelledTurnErrorOnlyForCancelledContext(t *testing.T) {
 	}
 	if shouldSuppressCancelledTurnError(ctx, fmt.Errorf("request failed: boom")) {
 		t.Fatal("did not expect unrelated errors to be suppressed")
+	}
+}
+
+func nextServiceEvent(t *testing.T, s *Service) Event {
+	t.Helper()
+	select {
+	case ev := <-s.Events():
+		return ev
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for service event")
+		return Event{}
+	}
+}
+
+func assertSessionSelectedAndHydrated(t *testing.T, s *Service) {
+	t.Helper()
+	sawInfo := false
+	for {
+		ev := nextServiceEvent(t, s)
+		switch ev.Kind {
+		case EventInfo:
+			if strings.Contains(ev.Text, "resumed session: sess-1") {
+				sawInfo = true
+			}
+		case EventSessionHydrated:
+			if !sawInfo {
+				t.Fatal("expected resumed session info before hydration")
+			}
+			if ev.SessionID != "sess-1" {
+				t.Fatalf("hydrated session = %s, want sess-1", ev.SessionID)
+			}
+			return
+		}
+	}
+}
+
+func writeSessionFile(t *testing.T, dataDir, id, text string) {
+	t.Helper()
+	sessionsDir := filepath.Join(dataDir, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	line := fmt.Sprintf("{\"role\":\"user\",\"text\":%q}\n", text)
+	if err := os.WriteFile(filepath.Join(sessionsDir, id+".jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatalf("write session: %v", err)
 	}
 }
 
