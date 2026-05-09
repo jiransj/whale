@@ -143,7 +143,7 @@ func (c *Composer) HandleKey(msg tea.KeyMsg) bool {
 
 func (c Composer) View() string {
 	var view string
-	if c.rawValue() == "" && c.textarea.Height() != 1 {
+	if c.rawValue() == "" {
 		copy := c.textarea
 		copy.SetHeight(1)
 		view = copy.View()
@@ -151,7 +151,7 @@ func (c Composer) View() string {
 		value := c.rawValue()
 		lines := splitComposerLines(value)
 		if len(lines) <= composerCollapseThreshold {
-			view = c.textarea.View()
+			view = c.plainView(lines)
 		} else {
 			view = c.foldedView(lines)
 		}
@@ -231,14 +231,92 @@ func (c Composer) foldedView(lines []string) string {
 	return strings.Join(out, "\n")
 }
 
+func (c Composer) plainView(lines []string) string {
+	cursorLine := c.textarea.Line()
+	cursorCol := -1
+	if cursorLine >= 0 && cursorLine < len(lines) {
+		info := c.textarea.LineInfo()
+		cursorCol = info.StartColumn + info.ColumnOffset
+	}
+
+	out := make([]string, 0, c.visualLineCount())
+	displayLine := 0
+	wrapWidth := c.textarea.Width()
+	for i, line := range lines {
+		lineRunes := []rune(line)
+		for _, segment := range wrapComposerLine(line, wrapWidth) {
+			hasCursor := false
+			relativeCursor := 0
+			if i == cursorLine {
+				switch {
+				case cursorCol >= segment.start && cursorCol < segment.end:
+					hasCursor = true
+					relativeCursor = cursorCol - segment.start
+				case cursorCol == len(lineRunes) && segment.end == len(lineRunes):
+					hasCursor = true
+					relativeCursor = len([]rune(segment.text))
+				case len(lineRunes) == 0 && segment.start == 0 && segment.end == 0:
+					hasCursor = true
+				}
+			}
+			out = append(out, c.promptLineAt(segment.text, displayLine == 0, hasCursor, relativeCursor))
+			displayLine++
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+type composerLineSegment struct {
+	text       string
+	start, end int
+}
+
+func wrapComposerLine(line string, width int) []composerLineSegment {
+	runes := []rune(line)
+	if len(runes) == 0 {
+		return []composerLineSegment{{text: "", start: 0, end: 0}}
+	}
+	if width <= 0 {
+		return []composerLineSegment{{text: line, start: 0, end: len(runes)}}
+	}
+	segments := []composerLineSegment{}
+	start := 0
+	cells := 0
+	for i, r := range runes {
+		w := rw.RuneWidth(r)
+		if w < 0 {
+			w = 0
+		}
+		if cells > 0 && cells+w > width {
+			segments = append(segments, composerLineSegment{
+				text:  string(runes[start:i]),
+				start: start,
+				end:   i,
+			})
+			start = i
+			cells = 0
+		}
+		cells += w
+	}
+	segments = append(segments, composerLineSegment{
+		text:  string(runes[start:]),
+		start: start,
+		end:   len(runes),
+	})
+	return segments
+}
+
 func (c Composer) promptLine(line string, first bool, cursor bool) string {
+	info := c.textarea.LineInfo()
+	return c.promptLineAt(line, first, cursor, info.StartColumn+info.ColumnOffset)
+}
+
+func (c Composer) promptLineAt(line string, first bool, cursor bool, col int) string {
 	prefix := "  "
 	if first {
 		prefix = lipgloss.NewStyle().Foreground(tuitheme.Default.Accent).Bold(true).Render("›") + " "
 	}
 	if cursor {
-		info := c.textarea.LineInfo()
-		col := info.StartColumn + info.ColumnOffset
 		runes := []rune(line)
 		if col < 0 {
 			col = 0
