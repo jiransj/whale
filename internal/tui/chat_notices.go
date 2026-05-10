@@ -36,7 +36,7 @@ func approvalNoticeAction(summary string) string {
 	if summary == "" {
 		return "use the requested tool"
 	}
-	if cmd, ok := strings.CutPrefix(summary, "exec_shell:"); ok {
+	if cmd, ok := strings.CutPrefix(summary, "shell_run:"); ok {
 		cmd = strings.TrimSpace(cmd)
 		if cmd != "" {
 			return "run " + cmd

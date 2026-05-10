@@ -255,7 +255,7 @@ func TestChatLines_ToolJSON_PreservesMultilineBlock(t *testing.T) {
 		{
 			Role: "result",
 			Kind: KindToolResult,
-			Text: "exec_shell: ```json\n{\"ok\":true,\"data\":{\"payload\":{\"command\":\"date\"}}}\n```",
+			Text: "shell_run: ```json\n{\"ok\":true,\"data\":{\"payload\":{\"command\":\"date\"}}}\n```",
 		},
 	}
 	lines := ChatLines(entries, 100)
@@ -263,7 +263,7 @@ func TestChatLines_ToolJSON_PreservesMultilineBlock(t *testing.T) {
 		t.Fatalf("expected multiline render for tool json, got: %v", lines)
 	}
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "exec_shell:") {
+	if !strings.Contains(joined, "shell_run:") {
 		t.Fatalf("expected tool label: %q", joined)
 	}
 	if !strings.Contains(joined, "command") {

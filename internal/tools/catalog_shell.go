@@ -9,7 +9,7 @@ import (
 func (b *Toolset) shellTools() []core.Tool {
 	return []core.Tool{
 		toolFn{
-			name:        "exec_shell",
+			name:        "shell_run",
 			description: "Run a shell command from the current Whale workspace. Commands default to the workspace root; do not assume synthetic paths like /workspace. Use relative paths, or set cwd to a subdirectory inside the workspace, instead of prefixing commands with cd.",
 			parameters: map[string]any{
 				"type":                 "object",
@@ -23,10 +23,10 @@ func (b *Toolset) shellTools() []core.Tool {
 				"required": []string{"command"},
 			},
 			readOnlyCheck: shellReadOnlyCheck,
-			fn:            b.execShell,
+			fn:            b.shellRun,
 		},
 		toolFn{
-			name:        "exec_shell_wait",
+			name:        "shell_wait",
 			description: "Wait for a background shell task by task_id and return status plus captured output when complete.",
 			parameters: map[string]any{
 				"type":                 "object",
@@ -38,7 +38,7 @@ func (b *Toolset) shellTools() []core.Tool {
 				"required": []string{"task_id"},
 			},
 			readOnly: true,
-			fn:       b.execShellWait,
+			fn:       b.shellWait,
 		},
 	}
 }

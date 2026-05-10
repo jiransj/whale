@@ -25,7 +25,7 @@ func shellCommand(command string) (string, []string) {
 	return "/bin/sh", []string{"-lc", command}
 }
 
-func (b *Toolset) execShell(ctx context.Context, call core.ToolCall) (core.ToolResult, error) {
+func (b *Toolset) shellRun(ctx context.Context, call core.ToolCall) (core.ToolResult, error) {
 	var in struct {
 		Command    string `json:"command"`
 		TimeoutMS  int    `json:"timeout_ms"`
@@ -170,7 +170,7 @@ func (b *Toolset) execShell(ctx context.Context, call core.ToolCall) (core.ToolR
 	return marshalToolResult(call, result)
 }
 
-func (b *Toolset) execShellWait(ctx context.Context, call core.ToolCall) (core.ToolResult, error) {
+func (b *Toolset) shellWait(ctx context.Context, call core.ToolCall) (core.ToolResult, error) {
 	var in struct {
 		TaskID    string `json:"task_id"`
 		TimeoutMS int    `json:"timeout_ms"`

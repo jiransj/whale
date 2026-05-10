@@ -62,10 +62,10 @@ func TestDiffRecordsDetectsToolAndInputChange(t *testing.T) {
 
 func TestDiffRecordsDetectsEnvelopeChange(t *testing.T) {
 	left := []RecordEntry{
-		{StepID: "wait", Tool: "exec_shell_wait", EnvelopeCode: "running", ResultDigest: "still running"},
+		{StepID: "wait", Tool: "shell_wait", EnvelopeCode: "running", ResultDigest: "still running"},
 	}
 	right := []RecordEntry{
-		{StepID: "wait", Tool: "exec_shell_wait", EnvelopeCode: "not_found", ResultDigest: "task not found"},
+		{StepID: "wait", Tool: "shell_wait", EnvelopeCode: "not_found", ResultDigest: "task not found"},
 	}
 	diff := DiffRecords(left, right)
 	if diff.Equal {
@@ -160,10 +160,10 @@ func TestDiffRecordsDetectsStepCountDrift(t *testing.T) {
 
 func TestDiffRecordsDetectsResultDigestOnlyDrift(t *testing.T) {
 	left := []RecordEntry{
-		{StepID: "wait", Tool: "exec_shell_wait", EnvelopeCode: "exited", ResultDigest: "stdout alpha"},
+		{StepID: "wait", Tool: "shell_wait", EnvelopeCode: "exited", ResultDigest: "stdout alpha"},
 	}
 	right := []RecordEntry{
-		{StepID: "wait", Tool: "exec_shell_wait", EnvelopeCode: "exited", ResultDigest: "stdout beta"},
+		{StepID: "wait", Tool: "shell_wait", EnvelopeCode: "exited", ResultDigest: "stdout beta"},
 	}
 	diff := DiffRecords(left, right)
 	if diff.Equal {
