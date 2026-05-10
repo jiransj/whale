@@ -28,17 +28,18 @@
 
 ## 快速开始
 
+使用脚本安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | sh
+```
+
 使用 Homebrew 安装：
 
 ```bash
 brew install usewhale/tap/whale
 ```
 
-没有 Homebrew 时，也可以使用安装脚本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | sh
-```
 
 首次运行：
 
@@ -53,12 +54,6 @@ whale
 ```bash
 brew upgrade whale
 # 或重新运行安装脚本
-```
-
-指定版本安装：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | VERSION=v0.1.8 sh
 ```
 
 Whale 当前使用 DeepSeek API。运行前请先在 [DeepSeek Platform](https://platform.deepseek.com/) 创建 API key。API 细节见 [DeepSeek API docs](https://api-docs.deepseek.com/)。
