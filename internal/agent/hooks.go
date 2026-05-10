@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -373,6 +374,13 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func hookShell(command string) (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", []string{"/c", command}
+	}
+	return "sh", []string{"-lc", command}
+}
+
 func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResult {
 	ctx := parent
 	cancel := func() {}
@@ -381,7 +389,8 @@ func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResu
 	}
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-lc", in.Command)
+	bin, args := hookShell(in.Command)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	if in.CWD != "" {
 		cmd.Dir = in.CWD
 	}
