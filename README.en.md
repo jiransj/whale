@@ -63,6 +63,8 @@ curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install
 
 Whale currently uses the DeepSeek API. Before running Whale, create an API key in the [DeepSeek Platform](https://platform.deepseek.com/). See the [DeepSeek API docs](https://api-docs.deepseek.com/) for API details.
 
+> **Platform support:** Whale currently supports **macOS** and **Linux**. Windows support is a work in progress.
+
 <p align="center">
   <img src="docs/screenshot-01.png" alt="Whale TUI screenshot" width="860">
 </p>

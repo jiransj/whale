@@ -58,6 +58,8 @@ brew upgrade whale
 
 Whale 当前使用 DeepSeek API。运行前请先在 [DeepSeek Platform](https://platform.deepseek.com/) 创建 API key。API 细节见 [DeepSeek API docs](https://api-docs.deepseek.com/)。
 
+> **平台支持：** Whale 当前支持 **macOS** 和 **Linux**。Windows 支持正在开发中，敬请期待。
+
 <p align="center">
   <img src="docs/screenshot-02.png" alt="Whale TUI 截图" width="860">
 </p>
