@@ -372,14 +372,29 @@ func startupErr(srv ServerConfig, phase string, err error, httpDiag *httpDiagnos
 	if err == nil {
 		return nil
 	}
+	hint := startupHint(srv)
 	if diag := httpDiag.summary(); diag != "" {
-		return fmt.Errorf("mcp server %q failed during %s: %w (%s)", srv.Name, phase, err, diag)
+		return fmt.Errorf("mcp server %q failed during %s: %w (%s%s)", srv.Name, phase, err, diag, hint)
+	}
+	if hint != "" {
+		return fmt.Errorf("mcp server %q failed during %s: %w (%s)", srv.Name, phase, err, strings.TrimPrefix(hint, "; "))
 	}
 	return fmt.Errorf("mcp server %q failed during %s: %w", srv.Name, phase, err)
 }
 
 func startupTimeoutErr(srv ServerConfig, phase string) error {
+	if hint := startupHint(srv); hint != "" {
+		return fmt.Errorf("mcp server %q timed out after %s during %s (%s)", srv.Name, srv.TimeoutDuration(), phase, strings.TrimPrefix(hint, "; "))
+	}
 	return fmt.Errorf("mcp server %q timed out after %s during %s", srv.Name, srv.TimeoutDuration(), phase)
+}
+
+func startupHint(srv ServerConfig) string {
+	command := strings.ToLower(filepath.Base(strings.TrimSpace(srv.Command)))
+	if command != "npx" && command != "npm" {
+		return ""
+	}
+	return "; command uses npx/npm, which can download packages or consume stdio before the MCP server starts; install the MCP server and point command at its binary, or increase the server timeout"
 }
 
 func isContextTimeout(ctx context.Context, err error) bool {
