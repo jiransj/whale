@@ -134,7 +134,7 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 | `whale setup` | Save a DeepSeek API key |
 | `whale doctor` | Run health checks |
 | `whale exec "prompt"` | Run one prompt non-interactively |
-| `whale migrate-config` | Migrate legacy config files to `config.toml` |
+| `whale migrate-config` | Migrate Whale v0.1.8-or-earlier config files to `config.toml` |
 | `whale resume` | Open the session picker |
 | `whale resume --last` | Resume the most recent session |
 | `whale resume <id>` | Resume a specific session |
@@ -185,11 +185,14 @@ See [docs/skills.md](docs/skills.md) for details.
 
 Whale stores local state under `~/.whale/`, including API keys, global `config.toml`, session records, usage logs, and MCP configuration. Project config can live at `./.whale/config.toml` in the current repository.
 
-If you upgraded from an older version and used `preferences.json` or `settings.json`, run once:
+Run this only if you used Whale v0.1.8 or earlier and have local
+`preferences.json` or `settings.json` files:
 
 ```bash
 whale migrate-config
 ```
+
+If you started with Whale v0.1.9 or newer, you do not need this command.
 
 See [docs/configuration.md](docs/configuration.md) for details.
 

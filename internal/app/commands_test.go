@@ -286,7 +286,7 @@ func TestBuildStatusIncludesContextAndBudget(t *testing.T) {
 	out := app.buildStatus()
 	for _, want := range []string{
 		"- context window:",
-		"- budget warning: disabled",
+		"- budget limit: disabled",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected status to contain %q, got:\n%s", want, out)

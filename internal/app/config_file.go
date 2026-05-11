@@ -16,29 +16,42 @@ import (
 const ConfigFileName = "config.toml"
 
 type FileConfig struct {
-	Model            string   `toml:"model,omitempty"`
-	ReasoningEffort  string   `toml:"reasoning_effort,omitempty"`
-	ThinkingEnabled  *bool    `toml:"thinking_enabled,omitempty"`
-	ApprovalMode     string   `toml:"approval_mode,omitempty"`
-	AllowPrefixes    []string `toml:"allow_prefixes,omitempty"`
-	DenyPrefixes     []string `toml:"deny_prefixes,omitempty"`
-	BudgetWarningUSD *float64 `toml:"budget_warning_usd,omitempty"`
-	MCPConfig        string   `toml:"mcp_config,omitempty"`
+	Model           string `toml:"model,omitempty"`
+	ReasoningEffort string `toml:"reasoning_effort,omitempty"`
+	ThinkingEnabled *bool  `toml:"thinking_enabled,omitempty"`
 
-	Compact FileCompactConfig             `toml:"compact,omitempty"`
-	Memory  FileMemoryConfig              `toml:"memory,omitempty"`
-	Hooks   map[string][]agent.HookConfig `toml:"hooks,omitempty"`
+	Permissions FilePermissionsConfig         `toml:"permissions,omitempty"`
+	Budget      FileBudgetConfig              `toml:"budget,omitempty"`
+	MCP         FileMCPConfig                 `toml:"mcp,omitempty"`
+	Context     FileContextConfig             `toml:"context,omitempty"`
+	ProjectDoc  FileProjectDocConfig          `toml:"project_doc,omitempty"`
+	Hooks       map[string][]agent.HookConfig `toml:"hooks,omitempty"`
 }
 
-type FileCompactConfig struct {
-	Auto      *bool    `toml:"auto,omitempty"`
-	Threshold *float64 `toml:"threshold,omitempty"`
+type FilePermissionsConfig struct {
+	Mode               string   `toml:"mode,omitempty"`
+	AllowShellPrefixes []string `toml:"allow_shell_prefixes,omitempty"`
+	DenyShellPrefixes  []string `toml:"deny_shell_prefixes,omitempty"`
 }
 
-type FileMemoryConfig struct {
-	Enabled   *bool    `toml:"enabled,omitempty"`
-	MaxChars  *int     `toml:"max_chars,omitempty"`
-	FileOrder []string `toml:"file_order,omitempty"`
+type FileBudgetConfig struct {
+	SessionLimitUSD *float64 `toml:"session_limit_usd,omitempty"`
+}
+
+type FileMCPConfig struct {
+	ConfigPath string `toml:"config_path,omitempty"`
+}
+
+type FileContextConfig struct {
+	AutoCompact        *bool    `toml:"auto_compact,omitempty"`
+	CompactThreshold   *float64 `toml:"compact_threshold,omitempty"`
+	ModelContextWindow *int     `toml:"model_context_window,omitempty"`
+}
+
+type FileProjectDocConfig struct {
+	Enabled           *bool    `toml:"enabled,omitempty"`
+	MaxBytes          *int     `toml:"max_bytes,omitempty"`
+	FallbackFilenames []string `toml:"fallback_filenames,omitempty"`
 }
 
 type LoadedConfig struct {
@@ -126,35 +139,38 @@ func ApplyFileConfig(cfg *Config, file FileConfig) {
 	if file.ThinkingEnabled != nil {
 		cfg.ThinkingEnabled = *file.ThinkingEnabled
 	}
-	if strings.TrimSpace(file.ApprovalMode) != "" {
-		cfg.ApprovalMode = strings.TrimSpace(file.ApprovalMode)
+	if strings.TrimSpace(file.Permissions.Mode) != "" {
+		cfg.ApprovalMode = strings.TrimSpace(file.Permissions.Mode)
 	}
-	if len(file.AllowPrefixes) > 0 {
-		cfg.AllowPrefixes = strings.Join(trimList(file.AllowPrefixes), ",")
+	if len(file.Permissions.AllowShellPrefixes) > 0 {
+		cfg.AllowPrefixes = strings.Join(trimList(file.Permissions.AllowShellPrefixes), ",")
 	}
-	if len(file.DenyPrefixes) > 0 {
-		cfg.DenyPrefixes = strings.Join(trimList(file.DenyPrefixes), ",")
+	if len(file.Permissions.DenyShellPrefixes) > 0 {
+		cfg.DenyPrefixes = strings.Join(trimList(file.Permissions.DenyShellPrefixes), ",")
 	}
-	if file.BudgetWarningUSD != nil {
-		cfg.BudgetWarningUSD = *file.BudgetWarningUSD
+	if file.Budget.SessionLimitUSD != nil {
+		cfg.BudgetWarningUSD = *file.Budget.SessionLimitUSD
 	}
-	if strings.TrimSpace(file.MCPConfig) != "" {
-		cfg.MCPConfigPath = expandUserPath(file.MCPConfig)
+	if strings.TrimSpace(file.MCP.ConfigPath) != "" {
+		cfg.MCPConfigPath = expandUserPath(file.MCP.ConfigPath)
 	}
-	if file.Compact.Auto != nil {
-		cfg.AutoCompact = *file.Compact.Auto
+	if file.Context.AutoCompact != nil {
+		cfg.AutoCompact = *file.Context.AutoCompact
 	}
-	if file.Compact.Threshold != nil {
-		cfg.AutoCompactThreshold = *file.Compact.Threshold
+	if file.Context.CompactThreshold != nil {
+		cfg.AutoCompactThreshold = *file.Context.CompactThreshold
 	}
-	if file.Memory.Enabled != nil {
-		cfg.MemoryEnabled = *file.Memory.Enabled
+	if file.Context.ModelContextWindow != nil {
+		cfg.ContextWindow = *file.Context.ModelContextWindow
 	}
-	if file.Memory.MaxChars != nil {
-		cfg.MemoryMaxChars = *file.Memory.MaxChars
+	if file.ProjectDoc.Enabled != nil {
+		cfg.MemoryEnabled = *file.ProjectDoc.Enabled
 	}
-	if len(file.Memory.FileOrder) > 0 {
-		cfg.MemoryFileOrder = strings.Join(trimList(file.Memory.FileOrder), ",")
+	if file.ProjectDoc.MaxBytes != nil {
+		cfg.MemoryMaxChars = *file.ProjectDoc.MaxBytes
+	}
+	if len(file.ProjectDoc.FallbackFilenames) > 0 {
+		cfg.MemoryFileOrder = strings.Join(trimList(file.ProjectDoc.FallbackFilenames), ",")
 	}
 }
 

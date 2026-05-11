@@ -2,7 +2,7 @@
 
 Whale can load tools from MCP servers at startup.
 
-MCP tools are registered as normal Whale tools with names like `mcp__server__tool`. Normal approval and hook behavior still applies.
+MCP tools are registered as normal Whale tools with names like `mcp__server__tool`. Normal approval behavior still applies.
 
 ## Config file
 
@@ -12,10 +12,11 @@ By default, Whale reads:
 ~/.whale/mcp.json
 ```
 
-You can use another file per run:
+You can use another file by setting `[mcp].config_path` in `config.toml`:
 
-```bash
-whale --mcp-config /path/to/mcp.json
+```toml
+[mcp]
+config_path = "/path/to/mcp.json"
 ```
 
 Whale reads MCP config when the process starts. Restart Whale after editing the file.

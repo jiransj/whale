@@ -15,7 +15,10 @@ func TestConfigFileRoundTrip(t *testing.T) {
 		Model:           "deepseek-v4-pro",
 		ReasoningEffort: "max",
 		ThinkingEnabled: &enabled,
-		AllowPrefixes:   []string{"git status", "go test"},
+		Permissions: FilePermissionsConfig{
+			Mode:               "never",
+			AllowShellPrefixes: []string{"git status", "go test"},
+		},
 	}
 	if err := SaveConfigFile(path, cfg); err != nil {
 		t.Fatalf("SaveConfigFile: %v", err)
@@ -27,6 +30,9 @@ func TestConfigFileRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `model = "deepseek-v4-pro"`) {
 		t.Fatalf("unexpected config TOML:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "[permissions]") || strings.Contains(string(raw), "allow_prefixes") {
+		t.Fatalf("expected grouped config TOML, got:\n%s", raw)
 	}
 
 	loaded, ok, err := LoadConfigFile(path)
@@ -41,6 +47,9 @@ func TestConfigFileRoundTrip(t *testing.T) {
 	}
 	if loaded.ThinkingEnabled == nil || !*loaded.ThinkingEnabled {
 		t.Fatal("thinking_enabled: want true")
+	}
+	if loaded.Permissions.Mode != "never" || len(loaded.Permissions.AllowShellPrefixes) != 2 {
+		t.Fatalf("permissions config: %+v", loaded.Permissions)
 	}
 }
 
@@ -94,6 +103,51 @@ func TestConfigProjectOverridesGlobal(t *testing.T) {
 	}
 	if loaded.Model != "deepseek-v4-pro" {
 		t.Fatalf("model: want project override, got %s", loaded.Model)
+	}
+}
+
+func TestApplyFileConfigUsesGroupedConfig(t *testing.T) {
+	autoCompact := false
+	compactThreshold := 0.7
+	contextWindow := 256000
+	projectDocEnabled := false
+	projectDocMaxBytes := 12000
+	budgetLimit := 1.25
+	cfg := DefaultConfig()
+	ApplyFileConfig(&cfg, FileConfig{
+		Permissions: FilePermissionsConfig{
+			Mode:               "never",
+			AllowShellPrefixes: []string{"git status"},
+			DenyShellPrefixes:  []string{"rm -rf"},
+		},
+		Budget: FileBudgetConfig{SessionLimitUSD: &budgetLimit},
+		MCP:    FileMCPConfig{ConfigPath: "~/custom-mcp.json"},
+		Context: FileContextConfig{
+			AutoCompact:        &autoCompact,
+			CompactThreshold:   &compactThreshold,
+			ModelContextWindow: &contextWindow,
+		},
+		ProjectDoc: FileProjectDocConfig{
+			Enabled:           &projectDocEnabled,
+			MaxBytes:          &projectDocMaxBytes,
+			FallbackFilenames: []string{"AGENTS.md", "TEAM.md"},
+		},
+	})
+
+	if cfg.ApprovalMode != "never" || cfg.AllowPrefixes != "git status" || cfg.DenyPrefixes != "rm -rf" {
+		t.Fatalf("permissions not applied: %+v", cfg)
+	}
+	if cfg.BudgetWarningUSD != budgetLimit {
+		t.Fatalf("budget not applied: %+v", cfg)
+	}
+	if !strings.HasSuffix(cfg.MCPConfigPath, "custom-mcp.json") {
+		t.Fatalf("mcp path not applied: %s", cfg.MCPConfigPath)
+	}
+	if cfg.AutoCompact || cfg.AutoCompactThreshold != compactThreshold || cfg.ContextWindow != contextWindow {
+		t.Fatalf("context not applied: %+v", cfg)
+	}
+	if cfg.MemoryEnabled || cfg.MemoryMaxChars != projectDocMaxBytes || cfg.MemoryFileOrder != "AGENTS.md,TEAM.md" {
+		t.Fatalf("project doc not applied: %+v", cfg)
 	}
 }
 

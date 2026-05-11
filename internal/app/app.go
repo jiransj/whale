@@ -136,7 +136,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	}
 	approvalMode, err := policy.ParseApprovalMode(cfg.ApprovalMode)
 	if err != nil {
-		return nil, fmt.Errorf("invalid --approval-mode: %w", err)
+		return nil, fmt.Errorf("invalid permissions.mode: %w", err)
 	}
 	toolset, err := tools.NewToolset(workspaceRoot)
 	if err != nil {
@@ -296,12 +296,12 @@ func (a *App) SetUserInputFunc(fn agent.UserInputFunc) {
 }
 
 func (a *App) StartupLines() []string {
-	lines := []string{"whale repl", fmt.Sprintf("session: %s", a.sessionID), fmt.Sprintf("mode: %s", a.currentMode), fmt.Sprintf("approval_mode: %s", a.approvalMode)}
+	lines := []string{"whale repl", fmt.Sprintf("session: %s", a.sessionID), fmt.Sprintf("mode: %s", a.currentMode), fmt.Sprintf("permissions.mode: %s", a.approvalMode)}
 	lines = append(lines, fmt.Sprintf("model: %s", a.model), fmt.Sprintf("effort: %s", a.reasoningEffort), fmt.Sprintf("thinking: %s", onOff(a.thinkingEnabled)))
 	if a.budgetWarningUSD > 0 {
-		lines = append(lines, fmt.Sprintf("budget_warning_usd: %.4f", a.budgetWarningUSD))
+		lines = append(lines, fmt.Sprintf("budget.session_limit_usd: %.4f", a.budgetWarningUSD))
 	} else {
-		lines = append(lines, "budget_warning_usd: disabled")
+		lines = append(lines, "budget.session_limit_usd: disabled")
 	}
 	if len(a.hookSources) > 0 {
 		lines = append(lines, fmt.Sprintf("hooks: %s", strings.Join(a.hookSources, ", ")))

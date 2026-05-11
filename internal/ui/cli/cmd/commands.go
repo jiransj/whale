@@ -98,8 +98,13 @@ func newSetupCmd(opts *cliOptions) *cobra.Command {
 func newMigrateConfigCmd(opts *cliOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "migrate-config",
-		Short: "Migrate legacy Whale config files to config.toml",
-		Args:  cobra.NoArgs,
+		Short: "Migrate Whale v0.1.8-or-earlier config files to config.toml",
+		Long: strings.TrimSpace(`Migrate legacy Whale config files to config.toml.
+
+This is only needed if you used Whale v0.1.8 or earlier and have legacy
+preferences.json or settings.json files. If you started with Whale v0.1.9 or
+newer, you do not need to run this command.`),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			workspaceRoot, err := os.Getwd()
 			if err != nil {
@@ -110,8 +115,13 @@ func newMigrateConfigCmd(opts *cliOptions) *cobra.Command {
 				return err
 			}
 			out := cmd.OutOrStdout()
+			fmt.Fprintln(out, "migrate-config is only needed for Whale v0.1.8 or earlier legacy config files.")
 			if len(report.Written) == 0 {
-				fmt.Fprintln(out, "no legacy config to migrate")
+				if len(report.Skipped) == 0 {
+					fmt.Fprintln(out, "no legacy config to migrate")
+				} else {
+					fmt.Fprintln(out, "no config.toml changes needed")
+				}
 			} else {
 				fmt.Fprintln(out, "migrated config:")
 				for _, path := range report.Written {
@@ -119,7 +129,7 @@ func newMigrateConfigCmd(opts *cliOptions) *cobra.Command {
 				}
 			}
 			if len(report.Skipped) > 0 {
-				fmt.Fprintln(out, "obsolete files are no longer read:")
+				fmt.Fprintln(out, "obsolete Whale v0.1.8-or-earlier files are no longer read:")
 				for _, path := range report.Skipped {
 					fmt.Fprintf(out, "  %s\n", path)
 				}
@@ -201,12 +211,6 @@ func runExec(out io.Writer, errOut io.Writer, in io.Reader, opts *cliOptions, ar
 		return err
 	}
 	start := app.StartOptions{NewSession: true}
-	if strings.TrimSpace(opts.session) != "" {
-		start.SessionID = opts.session
-	}
-	if strings.TrimSpace(opts.mode) != "" {
-		start.ModeOverride = opts.mode
-	}
 
 	ctx := context.Background()
 	if timeoutSec > 0 {

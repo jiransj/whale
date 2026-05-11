@@ -46,11 +46,31 @@ func TestRunDoctorReportsHealthyWorkspace(t *testing.T) {
 	if got := findDoctorCheck(report.Checks, "api reach"); got.Level != DoctorOK {
 		t.Fatalf("api reach level: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "memory"); got.Level != DoctorOK {
-		t.Fatalf("memory level: %+v", got)
+	if got := findDoctorCheck(report.Checks, "project doc"); got.Level != DoctorOK {
+		t.Fatalf("project doc level: %+v", got)
 	}
 	if got := findDoctorCheck(report.Checks, "hooks"); got.Level != DoctorOK {
 		t.Fatalf("hooks level: %+v", got)
+	}
+}
+
+func TestRunDoctorOmitsHooksWhenNoneConfigured(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := SaveCredentials(dataDir, Credentials{DeepSeekAPIKey: "sk-1234567890abcdef1234"}); err != nil {
+		t.Fatalf("SaveCredentials: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	t.Setenv("DEEPSEEK_BASE_URL", newDoctorServer(t, http.StatusOK).URL)
+	report, err := RunDoctor(context.Background(), Config{DataDir: dataDir, MemoryFileOrder: "AGENTS.md"}, workspace)
+	if err != nil {
+		t.Fatalf("RunDoctor: %v", err)
+	}
+	if got := findDoctorCheck(report.Checks, "hooks"); got.Level != "" {
+		t.Fatalf("hooks check should be omitted when none configured: %+v", got)
 	}
 }
 
@@ -83,11 +103,11 @@ func TestRunDoctorFlagsBrokenFiles(t *testing.T) {
 	if got := findDoctorCheck(report.Checks, "legacy config"); got.Level != DoctorWarn {
 		t.Fatalf("legacy config level: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "legacy config"); !strings.Contains(got.Detail, "run `whale migrate-config`") {
+	if got := findDoctorCheck(report.Checks, "legacy config"); !strings.Contains(got.Detail, "v0.1.8-or-earlier") || !strings.Contains(got.Detail, "run `whale migrate-config`") {
 		t.Fatalf("legacy config detail: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "memory"); got.Level != DoctorWarn {
-		t.Fatalf("memory level: %+v", got)
+	if got := findDoctorCheck(report.Checks, "project doc"); got.Level != DoctorWarn {
+		t.Fatalf("project doc level: %+v", got)
 	}
 }
 
@@ -109,7 +129,7 @@ func TestRunDoctorLegacyConfigIgnoredWhenConfigExists(t *testing.T) {
 	if got.Level != DoctorWarn {
 		t.Fatalf("legacy config level: %+v", got)
 	}
-	if !strings.Contains(got.Detail, "ignored") || !strings.Contains(got.Detail, "config.toml is active") {
+	if !strings.Contains(got.Detail, "v0.1.8-or-earlier") || !strings.Contains(got.Detail, "ignored") || !strings.Contains(got.Detail, "config.toml is active") || !strings.Contains(got.Detail, "no migration needed") {
 		t.Fatalf("legacy config detail: %+v", got)
 	}
 	if strings.Contains(got.Detail, "run `whale migrate-config`") {

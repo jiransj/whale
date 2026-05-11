@@ -81,19 +81,23 @@ func RunDoctor(ctx context.Context, cfg Config, workspaceRoot string) (DoctorRep
 
 	_ = source
 
+	checks := []DoctorCheck{
+		apiKeyCheck,
+		credsCheck,
+		configCheck,
+		legacyCheck,
+		dataDirCheck,
+		apiReachCheck,
+		memoryCheck,
+	}
+	if hooksCheck.Level != "" {
+		checks = append(checks, hooksCheck)
+	}
+
 	return DoctorReport{
 		Workspace: workspaceRoot,
 		DataDir:   dataDir,
-		Checks: []DoctorCheck{
-			apiKeyCheck,
-			credsCheck,
-			configCheck,
-			legacyCheck,
-			dataDirCheck,
-			apiReachCheck,
-			memoryCheck,
-			hooksCheck,
-		},
+		Checks:    checks,
 	}, nil
 }
 
@@ -243,9 +247,9 @@ func doctorCheckMemory(workspaceRoot string, fileOrder []string, maxChars int) D
 	pm, ok := memory.ReadProjectMemory(workspaceRoot, fileOrder, maxChars)
 	if !ok {
 		return DoctorCheck{
-			Label:  "memory",
+			Label:  "project doc",
 			Level:  DoctorWarn,
-			Detail: fmt.Sprintf("no project memory file found (%s)", strings.Join(fileOrder, ", ")),
+			Detail: fmt.Sprintf("no project doc file found (%s)", strings.Join(fileOrder, ", ")),
 		}
 	}
 	detail := pm.Path
@@ -253,7 +257,7 @@ func doctorCheckMemory(workspaceRoot string, fileOrder []string, maxChars int) D
 		detail += " (truncated)"
 	}
 	return DoctorCheck{
-		Label:  "memory",
+		Label:  "project doc",
 		Level:  DoctorOK,
 		Detail: detail,
 	}
@@ -311,13 +315,13 @@ func doctorCheckLegacyConfig(dataDir, workspaceRoot string, hasActiveConfig bool
 		return DoctorCheck{
 			Label:  "legacy config",
 			Level:  DoctorWarn,
-			Detail: fmt.Sprintf("%d obsolete file(s) ignored — config.toml is active", len(found)),
+			Detail: fmt.Sprintf("%d obsolete Whale v0.1.8-or-earlier file(s) ignored — config.toml is active; no migration needed", len(found)),
 		}
 	}
 	return DoctorCheck{
 		Label:  "legacy config",
 		Level:  DoctorWarn,
-		Detail: fmt.Sprintf("%d obsolete file(s) found — run `whale migrate-config`", len(found)),
+		Detail: fmt.Sprintf("%d obsolete Whale v0.1.8-or-earlier file(s) found — run `whale migrate-config` if you used those versions", len(found)),
 	}
 }
 
@@ -341,11 +345,7 @@ func doctorCheckHooks(dataDir, workspaceRoot string) DoctorCheck {
 		loadedFiles++
 	}
 	if totalHooks == 0 {
-		return DoctorCheck{
-			Label:  "hooks",
-			Level:  DoctorOK,
-			Detail: "no hooks configured",
-		}
+		return DoctorCheck{}
 	}
 	return DoctorCheck{
 		Label:  "hooks",

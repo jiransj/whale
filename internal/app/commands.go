@@ -66,9 +66,9 @@ func (a *App) buildStatus() string {
 
 func (a *App) formatBudgetStatusLine() string {
 	if a == nil || a.budgetWarningUSD <= 0 {
-		return "- budget warning: disabled"
+		return "- budget limit: disabled"
 	}
-	return fmt.Sprintf("- budget warning: $%.4f", a.budgetWarningUSD)
+	return fmt.Sprintf("- budget limit: $%.4f", a.budgetWarningUSD)
 }
 
 func (a *App) buildMCPStatus() string {
