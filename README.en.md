@@ -51,7 +51,7 @@ whale
 Upgrade:
 
 ```bash
-brew upgrade whale
+brew upgrade usewhale/tap/whale
 # or rerun the install script
 ```
 
@@ -150,40 +150,19 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 
 ## MCP
 
-Whale can load tools from MCP servers. MCP tools are registered as normal Whale tools and still go through approval handling.
+Whale can load external tools from MCP servers.
 
-Currently supported:
-
-- stdio MCP servers
-- Streamable HTTP MCP servers
-- `disabled_tools`
-- HTTP headers and environment variable expansion
-- filesystem server allowed-directory checks
-
-See [docs/mcp.md](docs/mcp.md) for setup.
+See [docs/mcp.md](docs/mcp.md) for setup and supported features.
 
 ## Skills
 
-Whale supports local Agent Skills. A skill is an instruction folder containing `SKILL.md`, useful for reusable workflows, team conventions, or tool-specific guidance.
-
-Default discovery paths:
-
-- `.whale/skills`
-- `.agents/skills`
-- `~/.whale/skills`
-- `~/.agents/skills`
-
-Invoke a skill in the TUI with:
-
-```text
-$my-skill apply this workflow to the current task
-```
+Whale supports local Agent Skills for reusable workflows, team conventions, or tool-specific guidance.
 
 See [docs/skills.md](docs/skills.md) for details.
 
 ## Configuration
 
-Whale stores local state under `~/.whale/`, including API keys, global `config.toml`, session records, usage logs, and MCP configuration. Project config can live at `./.whale/config.toml` in the current repository.
+Whale uses `~/.whale/config.toml` for global settings and `./.whale/config.toml` for project settings.
 
 Run this only if you used Whale v0.1.8 or earlier and have local
 `preferences.json` or `settings.json` files:
