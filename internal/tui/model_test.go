@@ -533,6 +533,31 @@ func TestEnterWhileBusyQueuesInputWithoutSubmitting(t *testing.T) {
 	}
 }
 
+func TestEnterWhileBusyWithEmptyInputDoesNotAppendPersistentNotice(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.status = "running"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if len(m.queuedPrompts) != 0 {
+		t.Fatalf("expected no queued prompt, got %+v", m.queuedPrompts)
+	}
+	if len(*intents) != 0 {
+		t.Fatalf("expected no submitted intent while busy, got %+v", *intents)
+	}
+	if !m.busy {
+		t.Fatal("expected turn to remain busy")
+	}
+	if m.status != "running" {
+		t.Fatalf("unexpected status: %q", m.status)
+	}
+	if got := strings.Join(tuirender.ChatLines(m.assembler.Snapshot(), 80), "\n"); strings.Contains(got, "Agent is working") {
+		t.Fatalf("empty enter while busy should not write a persistent notice:\n%s", got)
+	}
+}
+
 func TestTurnDoneSubmitsOneQueuedPrompt(t *testing.T) {
 	m, intents := newModelWithDispatchSpy()
 	m.busy = true
@@ -1130,7 +1155,7 @@ func TestChatBusyViewShowsWorkingAboveComposer(t *testing.T) {
 	m.startBusy()
 	m.busySince = time.Now().Add(-12 * time.Second)
 	view := m.View()
-	if !strings.Contains(view, "Working (12s)") {
+	if !strings.Contains(view, "Working (12s) · Esc to interrupt") {
 		t.Fatalf("expected working status line with elapsed time:\n%s", view)
 	}
 	if strings.Contains(view, "status: working") {
@@ -1151,6 +1176,9 @@ func TestChatStoppingViewShowsStoppingAboveComposer(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, "Stopping (1m 05s)") {
 		t.Fatalf("expected stopping status line with continued elapsed time:\n%s", view)
+	}
+	if strings.Contains(view, "Esc to interrupt") {
+		t.Fatalf("stopping view should not show interrupt hint:\n%s", view)
 	}
 }
 
@@ -1199,8 +1227,92 @@ func TestApprovalViewShowsDiffMetadata(t *testing.T) {
 	m.approval.reason = "edit: a.txt"
 	m.approval.metadata = testFileDiffMetadata()
 	view := m.View()
-	if !strings.Contains(view, "--- a/a.txt") || !strings.Contains(view, "+whale") {
-		t.Fatalf("expected approval diff metadata in view:\n%s", view)
+	for _, want := range []string{"a.txt (+1 -1)", "-world", "+whale"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected approval diff metadata to contain %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"--- a/a.txt", "+++ b/a.txt", "@@ -1 +1 @@"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("approval diff should hide raw diff header %q:\n%s", unwanted, view)
+		}
+	}
+}
+
+func TestApprovalDiffMetadataRendersMultipleFiles(t *testing.T) {
+	metadata := map[string]any{
+		"kind": "file_diff",
+		"files": []any{
+			map[string]any{
+				"path":         "a.txt",
+				"unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new",
+				"additions":    1,
+				"deletions":    1,
+			},
+			map[string]any{
+				"path":         "b.txt",
+				"unified_diff": "--- a/b.txt\n+++ b/b.txt\n@@ -0,0 +1 @@\n+created",
+				"additions":    1,
+				"deletions":    0,
+			},
+		},
+	}
+	got := renderApprovalDiffMetadata(metadata, 80)
+	for _, want := range []string{"a.txt (+1 -1)", "-old", "+new", "b.txt (+1 -0)", "+created"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected rendered approval diff to contain %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestApprovalDiffMetadataPreviewErrorFallback(t *testing.T) {
+	metadata := map[string]any{
+		"kind":          "file_diff",
+		"preview_error": "could not read file",
+	}
+	got := renderApprovalDiffMetadata(metadata, 80)
+	if !strings.Contains(got, "diff preview unavailable: could not read file") {
+		t.Fatalf("expected preview error fallback, got:\n%s", got)
+	}
+}
+
+func TestApprovalDiffMetadataTruncatesLongPreview(t *testing.T) {
+	metadata := map[string]any{
+		"kind": "file_diff",
+		"files": []any{
+			map[string]any{
+				"path":         "a.txt",
+				"unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1,4 +1,4 @@\n one\n-two\n+TWO\n three\n-four\n+FOUR",
+				"additions":    2,
+				"deletions":    2,
+			},
+		},
+	}
+	got := renderApprovalDiffMetadata(metadata, 4)
+	if !strings.Contains(got, "... diff truncated (") {
+		t.Fatalf("expected hidden-line truncation marker, got:\n%s", got)
+	}
+	if strings.Contains(got, "@@") {
+		t.Fatalf("truncated approval diff should still hide hunk headers:\n%s", got)
+	}
+}
+
+func TestApprovalDiffMetadataShowsFileTruncatedMarker(t *testing.T) {
+	metadata := map[string]any{
+		"kind": "file_diff",
+		"files": []any{
+			map[string]any{
+				"path":         "a.txt",
+				"unified_diff": "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new",
+				"additions":    1,
+				"deletions":    1,
+				"truncated":    true,
+			},
+		},
+	}
+	got := renderApprovalDiffMetadata(metadata, 80)
+	if !strings.Contains(got, "... diff truncated ...") {
+		t.Fatalf("expected per-file truncation marker, got:\n%s", got)
 	}
 }
 
