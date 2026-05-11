@@ -105,3 +105,101 @@ jobs:
           files: |
             dist/**/whale-*
             dist/checksums.txt
+
+  homebrew:
+    needs: release
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p dist
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt --dir dist --clobber
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: usewhale/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+
+          checksum() {
+            awk -v name="$1" '$2 == name { print $1 }' dist/checksums.txt
+          }
+
+          darwin_arm64_sha="$(checksum "whale-darwin-arm64/whale-darwin-arm64.tar.gz")"
+          darwin_amd64_sha="$(checksum "whale-darwin-amd64/whale-darwin-amd64.tar.gz")"
+          linux_arm64_sha="$(checksum "whale-linux-arm64/whale-linux-arm64.tar.gz")"
+          linux_amd64_sha="$(checksum "whale-linux-amd64/whale-linux-amd64.tar.gz")"
+
+          if [ -z "${darwin_arm64_sha}" ] || [ -z "${darwin_amd64_sha}" ] || [ -z "${linux_arm64_sha}" ] || [ -z "${linux_amd64_sha}" ]; then
+            echo "missing one or more tarball checksums" >&2
+            cat dist/checksums.txt >&2
+            exit 1
+          fi
+
+          cat > homebrew-tap/Formula/whale.rb <<EOF
+          class Whale < Formula
+            desc "DeepSeek-native coding agent for the terminal"
+            homepage "https://github.com/usewhale/whale"
+            version "${version}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/usewhale/whale/releases/download/${TAG}/whale-darwin-arm64.tar.gz"
+                sha256 "${darwin_arm64_sha}"
+              else
+                url "https://github.com/usewhale/whale/releases/download/${TAG}/whale-darwin-amd64.tar.gz"
+                sha256 "${darwin_amd64_sha}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/usewhale/whale/releases/download/${TAG}/whale-linux-arm64.tar.gz"
+                sha256 "${linux_arm64_sha}"
+              else
+                url "https://github.com/usewhale/whale/releases/download/${TAG}/whale-linux-amd64.tar.gz"
+                sha256 "${linux_amd64_sha}"
+              end
+            end
+
+            def install
+              bin.install Dir["whale-*"].first => "whale"
+            end
+
+            test do
+              assert_match "${TAG}", shell_output("#{bin}/whale --version")
+            end
+          end
+          EOF
+
+          ruby -c homebrew-tap/Formula/whale.rb
+
+      - name: Commit formula update
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          if git diff --quiet -- Formula/whale.rb; then
+            echo "Formula/whale.rb already up to date for ${TAG}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/whale.rb
+          git commit -m "Update whale to ${TAG}"
+          git push

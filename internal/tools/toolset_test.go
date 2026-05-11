@@ -258,7 +258,7 @@ func TestLoadSkillUnknownListsAvailableAndRegistryReadOnly(t *testing.T) {
 	}
 }
 
-func TestListDirAndExecShell(t *testing.T) {
+func TestListDirAndShellRun(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -274,14 +274,14 @@ func TestListDirAndExecShell(t *testing.T) {
 	if !strings.Contains(lsRes.Content, "x.txt") {
 		t.Fatalf("ls missing file: %s", lsRes.Content)
 	}
-	bashRes, err := ts.execShell(context.Background(), tc("exec_shell", map[string]any{
+	shellRes, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
 		"command": "echo hi",
 	}))
-	if err != nil || bashRes.IsError {
-		t.Fatalf("bash failed: err=%v res=%+v", err, bashRes)
+	if err != nil || shellRes.IsError {
+		t.Fatalf("shell_run failed: err=%v res=%+v", err, shellRes)
 	}
-	if !strings.Contains(bashRes.Content, "hi") {
-		t.Fatalf("unexpected bash output: %s", bashRes.Content)
+	if !strings.Contains(shellRes.Content, "hi") {
+		t.Fatalf("unexpected shell output: %s", shellRes.Content)
 	}
 }
 
@@ -363,18 +363,18 @@ func TestSearchFiles(t *testing.T) {
 	}
 }
 
-func TestExecShellBackgroundAndWait(t *testing.T) {
+func TestShellRunBackgroundAndWait(t *testing.T) {
 	dir := t.TempDir()
 	ts, err := NewToolset(dir)
 	if err != nil {
 		t.Fatalf("new toolset: %v", err)
 	}
-	startRes, err := ts.execShell(context.Background(), tc("exec_shell", map[string]any{
+	startRes, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
 		"command":    "echo hello",
 		"background": true,
 	}))
 	if err != nil || startRes.IsError {
-		t.Fatalf("exec_shell background failed: err=%v res=%+v", err, startRes)
+		t.Fatalf("shell_run background failed: err=%v res=%+v", err, startRes)
 	}
 	var envelope struct {
 		Success bool `json:"success"`
@@ -390,19 +390,19 @@ func TestExecShellBackgroundAndWait(t *testing.T) {
 	if envelope.Data.Payload.TaskID == "" {
 		t.Fatalf("expected task_id, got: %s", startRes.Content)
 	}
-	waitRes, err := ts.execShellWait(context.Background(), tc("exec_shell_wait", map[string]any{
+	waitRes, err := ts.shellWait(context.Background(), tc("shell_wait", map[string]any{
 		"task_id":    envelope.Data.Payload.TaskID,
 		"timeout_ms": 5000,
 	}))
 	if err != nil || waitRes.IsError {
-		t.Fatalf("exec_shell_wait failed: err=%v res=%+v", err, waitRes)
+		t.Fatalf("shell_wait failed: err=%v res=%+v", err, waitRes)
 	}
 	if !strings.Contains(waitRes.Content, "hello") {
 		t.Fatalf("expected output in wait result: %s", waitRes.Content)
 	}
 }
 
-func TestExecShellCWDStaysInsideWorkspace(t *testing.T) {
+func TestShellRunCWDStaysInsideWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatalf("mkdir sub: %v", err)
@@ -411,22 +411,22 @@ func TestExecShellCWDStaysInsideWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new toolset: %v", err)
 	}
-	res, err := ts.execShell(context.Background(), tc("exec_shell", map[string]any{
+	res, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
 		"command": "pwd",
 		"cwd":     "sub",
 	}))
 	if err != nil || res.IsError {
-		t.Fatalf("exec_shell cwd failed: err=%v res=%+v", err, res)
+		t.Fatalf("shell_run cwd failed: err=%v res=%+v", err, res)
 	}
 	if !strings.Contains(res.Content, filepath.Join(dir, "sub")) || !strings.Contains(res.Content, `"cwd":"sub"`) {
 		t.Fatalf("expected command to run in subdir with cwd metadata: %s", res.Content)
 	}
-	escaped, err := ts.execShell(context.Background(), tc("exec_shell", map[string]any{
+	escaped, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
 		"command": "pwd",
 		"cwd":     "../outside",
 	}))
 	if err != nil {
-		t.Fatalf("exec_shell escaped cwd returned dispatch error: %v", err)
+		t.Fatalf("shell_run escaped cwd returned dispatch error: %v", err)
 	}
 	if !escaped.IsError || !strings.Contains(escaped.Content, "path escapes workspace") {
 		t.Fatalf("expected escaped cwd to be rejected: %+v", escaped)

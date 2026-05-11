@@ -8,7 +8,7 @@ import (
 	"github.com/usewhale/whale/internal/app"
 )
 
-func TestPreferencesServiceDispatchPersists(t *testing.T) {
+func TestConfigServiceDispatchPersists(t *testing.T) {
 	dir := t.TempDir()
 
 	sessionsDir := filepath.Join(dir, "sessions")
@@ -31,9 +31,12 @@ func TestPreferencesServiceDispatchPersists(t *testing.T) {
 		Thinking: "off",
 	})
 
-	loaded, err := app.LoadPreferences(dir)
+	loaded, ok, err := app.LoadConfigFile(app.GlobalConfigPath(dir))
 	if err != nil {
-		t.Fatalf("LoadPreferences: %v", err)
+		t.Fatalf("LoadConfigFile: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected config.toml to be written")
 	}
 	if loaded.Model != "deepseek-v4-pro" {
 		t.Fatalf("persisted model: want deepseek-v4-pro, got %s", loaded.Model)

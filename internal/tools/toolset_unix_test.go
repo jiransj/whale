@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-func TestExecShellCancelKillsProcessGroup(t *testing.T) {
+func TestShellRunCancelKillsProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	ts, err := NewToolset(dir)
 	if err != nil {
@@ -30,7 +30,7 @@ func TestExecShellCancelKillsProcessGroup(t *testing.T) {
 	}
 	done := make(chan execResult, 1)
 	go func() {
-		res, err := ts.execShell(ctx, tc("exec_shell", map[string]any{
+		res, err := ts.shellRun(ctx, tc("shell_run", map[string]any{
 			"command":    "sleep 30 & echo $! > child.pid; wait",
 			"timeout_ms": 120000,
 		}))
@@ -55,30 +55,30 @@ func TestExecShellCancelKillsProcessGroup(t *testing.T) {
 	waitForProcessExit(t, pid)
 }
 
-func TestExecShellBackgroundTimeoutKillsProcessGroup(t *testing.T) {
+func TestShellRunBackgroundTimeoutKillsProcessGroup(t *testing.T) {
 	dir := t.TempDir()
 	ts, err := NewToolset(dir)
 	if err != nil {
 		t.Fatalf("new toolset: %v", err)
 	}
 
-	startRes, err := ts.execShell(context.Background(), tc("exec_shell", map[string]any{
+	startRes, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
 		"command":    "sleep 30 & echo $! > child.pid; wait",
 		"background": true,
 		"timeout_ms": 100,
 	}))
 	if err != nil || startRes.IsError {
-		t.Fatalf("exec_shell background failed: err=%v res=%+v", err, startRes)
+		t.Fatalf("shell_run background failed: err=%v res=%+v", err, startRes)
 	}
 	taskID := backgroundTaskID(t, startRes.Content)
 	pid := waitForPIDFile(t, filepath.Join(dir, "child.pid"))
 
-	waitRes, err := ts.execShellWait(context.Background(), tc("exec_shell_wait", map[string]any{
+	waitRes, err := ts.shellWait(context.Background(), tc("shell_wait", map[string]any{
 		"task_id":    taskID,
 		"timeout_ms": 3000,
 	}))
 	if err != nil || waitRes.IsError {
-		t.Fatalf("exec_shell_wait failed: err=%v res=%+v", err, waitRes)
+		t.Fatalf("shell_wait failed: err=%v res=%+v", err, waitRes)
 	}
 	if !strings.Contains(waitRes.Content, `"status":"timeout"`) {
 		t.Fatalf("expected timeout status, got: %s", waitRes.Content)

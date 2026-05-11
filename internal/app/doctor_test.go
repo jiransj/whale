@@ -19,8 +19,8 @@ func TestRunDoctorReportsHealthyWorkspace(t *testing.T) {
 		t.Fatalf("SaveCredentials: %v", err)
 	}
 	thinking := true
-	if err := SavePreferences(dataDir, Preferences{Model: "deepseek-v4-flash", ThinkingEnabled: &thinking}); err != nil {
-		t.Fatalf("SavePreferences: %v", err)
+	if err := SaveConfigFile(GlobalConfigPath(dataDir), FileConfig{Model: "deepseek-v4-flash", ThinkingEnabled: &thinking}); err != nil {
+		t.Fatalf("SaveConfigFile: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("hello"), 0o600); err != nil {
 		t.Fatalf("write AGENTS.md: %v", err)
@@ -28,8 +28,8 @@ func TestRunDoctorReportsHealthyWorkspace(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspace, ".whale"), 0o755); err != nil {
 		t.Fatalf("mkdir .whale: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workspace, ".whale", "settings.json"), []byte(`{"hooks":{"PreToolUse":[{"command":"echo ok"}]}}`), 0o600); err != nil {
-		t.Fatalf("write settings.json: %v", err)
+	if err := os.WriteFile(filepath.Join(workspace, ".whale", "config.toml"), []byte("[[hooks.PreToolUse]]\ncommand = \"echo ok\"\n"), 0o600); err != nil {
+		t.Fatalf("write config.toml: %v", err)
 	}
 
 	t.Setenv("DEEPSEEK_BASE_URL", newDoctorServer(t, http.StatusOK).URL)
@@ -46,11 +46,31 @@ func TestRunDoctorReportsHealthyWorkspace(t *testing.T) {
 	if got := findDoctorCheck(report.Checks, "api reach"); got.Level != DoctorOK {
 		t.Fatalf("api reach level: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "memory"); got.Level != DoctorOK {
-		t.Fatalf("memory level: %+v", got)
+	if got := findDoctorCheck(report.Checks, "project doc"); got.Level != DoctorOK {
+		t.Fatalf("project doc level: %+v", got)
 	}
 	if got := findDoctorCheck(report.Checks, "hooks"); got.Level != DoctorOK {
 		t.Fatalf("hooks level: %+v", got)
+	}
+}
+
+func TestRunDoctorOmitsHooksWhenNoneConfigured(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := SaveCredentials(dataDir, Credentials{DeepSeekAPIKey: "sk-1234567890abcdef1234"}); err != nil {
+		t.Fatalf("SaveCredentials: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "AGENTS.md"), []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	t.Setenv("DEEPSEEK_BASE_URL", newDoctorServer(t, http.StatusOK).URL)
+	report, err := RunDoctor(context.Background(), Config{DataDir: dataDir, MemoryFileOrder: "AGENTS.md"}, workspace)
+	if err != nil {
+		t.Fatalf("RunDoctor: %v", err)
+	}
+	if got := findDoctorCheck(report.Checks, "hooks"); got.Level != "" {
+		t.Fatalf("hooks check should be omitted when none configured: %+v", got)
 	}
 }
 
@@ -60,8 +80,8 @@ func TestRunDoctorFlagsBrokenFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dataDir, "credentials.json"), []byte("{"), 0o600); err != nil {
 		t.Fatalf("write credentials: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dataDir, "preferences.json"), []byte("{"), 0o600); err != nil {
-		t.Fatalf("write preferences: %v", err)
+	if err := os.WriteFile(filepath.Join(dataDir, "config.toml"), []byte("[["), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(workspace, ".whale"), 0o755); err != nil {
 		t.Fatalf("mkdir .whale: %v", err)
@@ -77,14 +97,43 @@ func TestRunDoctorFlagsBrokenFiles(t *testing.T) {
 	if got := findDoctorCheck(report.Checks, "credentials"); got.Level != DoctorFail {
 		t.Fatalf("credentials level: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "preferences"); got.Level != DoctorFail {
-		t.Fatalf("preferences level: %+v", got)
+	if got := findDoctorCheck(report.Checks, "config"); got.Level != DoctorFail {
+		t.Fatalf("config level: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "hooks"); got.Level != DoctorWarn {
-		t.Fatalf("hooks level: %+v", got)
+	if got := findDoctorCheck(report.Checks, "legacy config"); got.Level != DoctorWarn {
+		t.Fatalf("legacy config level: %+v", got)
 	}
-	if got := findDoctorCheck(report.Checks, "memory"); got.Level != DoctorWarn {
-		t.Fatalf("memory level: %+v", got)
+	if got := findDoctorCheck(report.Checks, "legacy config"); !strings.Contains(got.Detail, "v0.1.8-or-earlier") || !strings.Contains(got.Detail, "run `whale migrate-config`") {
+		t.Fatalf("legacy config detail: %+v", got)
+	}
+	if got := findDoctorCheck(report.Checks, "project doc"); got.Level != DoctorWarn {
+		t.Fatalf("project doc level: %+v", got)
+	}
+}
+
+func TestRunDoctorLegacyConfigIgnoredWhenConfigExists(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := SaveConfigFile(GlobalConfigPath(dataDir), FileConfig{Model: "deepseek-v4-flash"}); err != nil {
+		t.Fatalf("SaveConfigFile: %v", err)
+	}
+	if err := os.WriteFile(preferencesPath(dataDir), []byte(`{"model":"deepseek-v4-pro"}`), 0o600); err != nil {
+		t.Fatalf("write preferences: %v", err)
+	}
+
+	report, err := RunDoctor(context.Background(), Config{DataDir: dataDir, MemoryFileOrder: "AGENTS.md"}, workspace)
+	if err != nil {
+		t.Fatalf("RunDoctor: %v", err)
+	}
+	got := findDoctorCheck(report.Checks, "legacy config")
+	if got.Level != DoctorWarn {
+		t.Fatalf("legacy config level: %+v", got)
+	}
+	if !strings.Contains(got.Detail, "v0.1.8-or-earlier") || !strings.Contains(got.Detail, "ignored") || !strings.Contains(got.Detail, "config.toml is active") || !strings.Contains(got.Detail, "no migration needed") {
+		t.Fatalf("legacy config detail: %+v", got)
+	}
+	if strings.Contains(got.Detail, "run `whale migrate-config`") {
+		t.Fatalf("legacy config should not suggest migration after config exists: %+v", got)
 	}
 }
 

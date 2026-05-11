@@ -333,7 +333,7 @@ func (p *execFailureProvider) StreamResponse(_ context.Context, _ []core.Message
 		Response: &llm.ProviderResponse{
 			FinishReason: core.FinishReasonToolUse,
 			ToolCalls: []core.ToolCall{
-				{ID: "exec-fail-1", Name: "exec_shell", Input: `{"command":"exit 7"}`},
+				{ID: "exec-fail-1", Name: "shell_run", Input: `{"command":"exit 7"}`},
 			},
 		},
 	}
@@ -381,7 +381,7 @@ func (p *execTimeoutProvider) StreamResponse(_ context.Context, _ []core.Message
 		Response: &llm.ProviderResponse{
 			FinishReason: core.FinishReasonToolUse,
 			ToolCalls: []core.ToolCall{
-				{ID: "exec-timeout-1", Name: "exec_shell", Input: `{"command":"sleep 1","timeout_ms":10}`},
+				{ID: "exec-timeout-1", Name: "shell_run", Input: `{"command":"sleep 1","timeout_ms":10}`},
 			},
 		},
 	}
@@ -446,7 +446,7 @@ func (p *backgroundShellProvider) StreamResponse(_ context.Context, history []co
 			Response: &llm.ProviderResponse{
 				FinishReason: core.FinishReasonToolUse,
 				ToolCalls: []core.ToolCall{
-					{ID: "bg-start-1", Name: "exec_shell", Input: `{"command":"sleep 1","background":true}`},
+					{ID: "bg-start-1", Name: "shell_run", Input: `{"command":"sleep 1","background":true}`},
 				},
 			},
 		}
@@ -462,7 +462,7 @@ func (p *backgroundShellProvider) StreamResponse(_ context.Context, history []co
 			Response: &llm.ProviderResponse{
 				FinishReason: core.FinishReasonToolUse,
 				ToolCalls: []core.ToolCall{
-					{ID: "bg-wait-1", Name: "exec_shell_wait", Input: `{"task_id":"` + taskID + `","timeout_ms":1}`},
+					{ID: "bg-wait-1", Name: "shell_wait", Input: `{"task_id":"` + taskID + `","timeout_ms":1}`},
 				},
 			},
 		}
@@ -479,7 +479,7 @@ func (p *backgroundShellProvider) StreamResponse(_ context.Context, history []co
 	return out
 }
 
-func TestRuntimeExecShellWaitReturnsRunningOnShortTimeout(t *testing.T) {
+func TestRuntimeShellWaitReturnsRunningOnShortTimeout(t *testing.T) {
 	root := t.TempDir()
 	toolset, err := tools.NewToolset(root)
 	if err != nil {
@@ -510,7 +510,7 @@ func TestRuntimeExecShellWaitReturnsRunningOnShortTimeout(t *testing.T) {
 		}
 	}
 	if !sawRunning {
-		t.Fatalf("expected exec_shell_wait to return running on short timeout, got %v", toolResults)
+		t.Fatalf("expected shell_wait to return running on short timeout, got %v", toolResults)
 	}
 }
 
@@ -523,7 +523,7 @@ func (p *shellWaitNotFoundProvider) StreamResponse(_ context.Context, _ []core.M
 		Response: &llm.ProviderResponse{
 			FinishReason: core.FinishReasonToolUse,
 			ToolCalls: []core.ToolCall{
-				{ID: "wait-missing-1", Name: "exec_shell_wait", Input: `{"task_id":"missing-task","timeout_ms":5}`},
+				{ID: "wait-missing-1", Name: "shell_wait", Input: `{"task_id":"missing-task","timeout_ms":5}`},
 			},
 		},
 	}
@@ -531,7 +531,7 @@ func (p *shellWaitNotFoundProvider) StreamResponse(_ context.Context, _ []core.M
 	return out
 }
 
-func TestRuntimeExecShellWaitUnknownTaskReturnsNotFound(t *testing.T) {
+func TestRuntimeShellWaitUnknownTaskReturnsNotFound(t *testing.T) {
 	root := t.TempDir()
 	toolset, err := tools.NewToolset(root)
 	if err != nil {
@@ -556,7 +556,7 @@ func TestRuntimeExecShellWaitUnknownTaskReturnsNotFound(t *testing.T) {
 		}
 	}
 	if !sawNotFound {
-		t.Fatal("expected not_found from exec_shell_wait on unknown task id")
+		t.Fatal("expected not_found from shell_wait on unknown task id")
 	}
 }
 
@@ -578,7 +578,7 @@ func (p *backgroundShellDoneProvider) StreamResponse(_ context.Context, history 
 			Response: &llm.ProviderResponse{
 				FinishReason: core.FinishReasonToolUse,
 				ToolCalls: []core.ToolCall{
-					{ID: "bg-done-start-1", Name: "exec_shell", Input: `{"command":"printf done","background":true}`},
+					{ID: "bg-done-start-1", Name: "shell_run", Input: `{"command":"printf done","background":true}`},
 				},
 			},
 		}
@@ -594,7 +594,7 @@ func (p *backgroundShellDoneProvider) StreamResponse(_ context.Context, history 
 			Response: &llm.ProviderResponse{
 				FinishReason: core.FinishReasonToolUse,
 				ToolCalls: []core.ToolCall{
-					{ID: "bg-done-wait-1", Name: "exec_shell_wait", Input: `{"task_id":"` + taskID + `","timeout_ms":5000}`},
+					{ID: "bg-done-wait-1", Name: "shell_wait", Input: `{"task_id":"` + taskID + `","timeout_ms":5000}`},
 				},
 			},
 		}
@@ -608,7 +608,7 @@ func (p *backgroundShellDoneProvider) StreamResponse(_ context.Context, history 
 	return out
 }
 
-func TestRuntimeExecShellWaitReturnsExitedResult(t *testing.T) {
+func TestRuntimeShellWaitReturnsExitedResult(t *testing.T) {
 	root := t.TempDir()
 	toolset, err := tools.NewToolset(root)
 	if err != nil {
@@ -636,7 +636,7 @@ func TestRuntimeExecShellWaitReturnsExitedResult(t *testing.T) {
 		}
 	}
 	if !sawExited {
-		t.Fatal("expected exec_shell_wait exited result with stdout")
+		t.Fatal("expected shell_wait exited result with stdout")
 	}
 }
 
@@ -658,7 +658,7 @@ func (p *backgroundShellFailProvider) StreamResponse(_ context.Context, history 
 			Response: &llm.ProviderResponse{
 				FinishReason: core.FinishReasonToolUse,
 				ToolCalls: []core.ToolCall{
-					{ID: "bg-fail-start-1", Name: "exec_shell", Input: `{"command":"exit 7","background":true}`},
+					{ID: "bg-fail-start-1", Name: "shell_run", Input: `{"command":"exit 7","background":true}`},
 				},
 			},
 		}
@@ -674,7 +674,7 @@ func (p *backgroundShellFailProvider) StreamResponse(_ context.Context, history 
 			Response: &llm.ProviderResponse{
 				FinishReason: core.FinishReasonToolUse,
 				ToolCalls: []core.ToolCall{
-					{ID: "bg-fail-wait-1", Name: "exec_shell_wait", Input: `{"task_id":"` + taskID + `","timeout_ms":5000}`},
+					{ID: "bg-fail-wait-1", Name: "shell_wait", Input: `{"task_id":"` + taskID + `","timeout_ms":5000}`},
 				},
 			},
 		}
@@ -688,7 +688,7 @@ func (p *backgroundShellFailProvider) StreamResponse(_ context.Context, history 
 	return out
 }
 
-func TestRuntimeExecShellWaitReturnsFailedResult(t *testing.T) {
+func TestRuntimeShellWaitReturnsFailedResult(t *testing.T) {
 	root := t.TempDir()
 	toolset, err := tools.NewToolset(root)
 	if err != nil {
@@ -716,7 +716,7 @@ func TestRuntimeExecShellWaitReturnsFailedResult(t *testing.T) {
 		}
 	}
 	if !sawFailed {
-		t.Fatal("expected exec_shell_wait failed result with exit code")
+		t.Fatal("expected shell_wait failed result with exit code")
 	}
 }
 

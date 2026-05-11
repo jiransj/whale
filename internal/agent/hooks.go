@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/usewhale/whale/internal/core"
 )
 
@@ -37,11 +39,11 @@ var defaultHookTimeouts = map[HookEvent]time.Duration{
 }
 
 type HookConfig struct {
-	Match       string `json:"match,omitempty"`
-	Command     string `json:"command"`
-	Description string `json:"description,omitempty"`
-	TimeoutMS   int    `json:"timeout,omitempty"`
-	CWD         string `json:"cwd,omitempty"`
+	Match       string `json:"match,omitempty" toml:"match,omitempty"`
+	Command     string `json:"command" toml:"command,omitempty"`
+	Description string `json:"description,omitempty" toml:"description,omitempty"`
+	TimeoutMS   int    `json:"timeout,omitempty" toml:"timeout,omitempty"`
+	CWD         string `json:"cwd,omitempty" toml:"cwd,omitempty"`
 }
 
 type HookSettings struct {
@@ -214,31 +216,31 @@ func LoadProjectHooks(workspaceRoot string) ([]ResolvedHook, error) {
 	return hooks, err
 }
 
-func LoadHooks(workspaceRoot, homeDir string) ([]ResolvedHook, []string, error) {
+func LoadHooks(workspaceRoot, dataDir string) ([]ResolvedHook, []string, error) {
 	out := make([]ResolvedHook, 0)
 	loaded := make([]string, 0, 2)
-	projectPath := filepath.Join(workspaceRoot, ".whale", "settings.json")
+	projectPath := filepath.Join(workspaceRoot, ".whale", "config.toml")
 	projectHooks, projectLoaded, err := loadHooksFile(projectPath)
 	if err != nil {
 		return nil, loaded, err
 	}
-	if projectLoaded {
+	if projectLoaded && len(projectHooks) > 0 {
 		out = append(out, projectHooks...)
 		loaded = append(loaded, projectPath)
 	}
-	home := strings.TrimSpace(homeDir)
-	if home == "" {
+	globalDir := strings.TrimSpace(dataDir)
+	if globalDir == "" {
 		if v, err := os.UserHomeDir(); err == nil {
-			home = v
+			globalDir = filepath.Join(v, ".whale")
 		}
 	}
-	if home != "" {
-		globalPath := filepath.Join(home, ".whale", "settings.json")
+	if globalDir != "" {
+		globalPath := filepath.Join(globalDir, "config.toml")
 		globalHooks, globalLoaded, err := loadHooksFile(globalPath)
 		if err != nil {
 			return nil, loaded, err
 		}
-		if globalLoaded {
+		if globalLoaded && len(globalHooks) > 0 {
 			out = append(out, globalHooks...)
 			loaded = append(loaded, globalPath)
 		}
@@ -254,14 +256,20 @@ func loadHooksFile(path string) ([]ResolvedHook, bool, error) {
 		}
 		return nil, false, err
 	}
-	var st HookSettings
-	if err := json.Unmarshal(b, &st); err != nil {
-		return nil, false, nil
+	var raw struct {
+		Hooks map[string][]HookConfig `toml:"hooks"`
 	}
-	return resolveHooks(st, path), true, nil
+	if err := toml.Unmarshal(b, &raw); err != nil {
+		return nil, true, fmt.Errorf("parse hooks config %s: %w", path, err)
+	}
+	st := HookSettings{Hooks: map[HookEvent][]HookConfig{}}
+	for ev, hooks := range raw.Hooks {
+		st.Hooks[HookEvent(strings.TrimSpace(ev))] = append(st.Hooks[HookEvent(strings.TrimSpace(ev))], hooks...)
+	}
+	return ResolveHooks(st, path), true, nil
 }
 
-func resolveHooks(st HookSettings, source string) []ResolvedHook {
+func ResolveHooks(st HookSettings, source string) []ResolvedHook {
 	events := []HookEvent{HookEventPreToolUse, HookEventPostToolUse, HookEventUserPromptSubmit, HookEventStop}
 	out := make([]ResolvedHook, 0)
 	for _, ev := range events {

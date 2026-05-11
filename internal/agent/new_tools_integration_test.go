@@ -23,13 +23,13 @@ func (p *e2eNewToolsProvider) StreamResponse(_ context.Context, _ []agent.Messag
 	if p.turn == 1 {
 		out <- agent.ProviderEvent{Type: agent.EventComplete, Response: &agent.ProviderResponse{FinishReason: agent.FinishReasonToolUse, ToolCalls: []agent.ToolCall{
 			{ID: "c1", Name: "search_files", Input: `{"path":".","pattern":"target.txt","limit":20}`},
-			{ID: "c2", Name: "exec_shell", Input: `{"command":"echo e2e-pass","background":true}`},
+			{ID: "c2", Name: "shell_run", Input: `{"command":"echo e2e-pass","background":true}`},
 			{ID: "c3", Name: "todo_add", Input: `{"text":"verify e2e tools","priority":2}`},
 			{ID: "c4", Name: "todo_list", Input: `{}`},
 		}}}
 	} else if p.turn == 2 {
 		out <- agent.ProviderEvent{Type: agent.EventComplete, Response: &agent.ProviderResponse{FinishReason: agent.FinishReasonToolUse, ToolCalls: []agent.ToolCall{
-			{ID: "c5", Name: "exec_shell_wait", Input: p.waitInput},
+			{ID: "c5", Name: "shell_wait", Input: p.waitInput},
 		}}}
 	} else {
 		out <- agent.ProviderEvent{Type: agent.EventComplete, Response: &agent.ProviderResponse{FinishReason: agent.FinishReasonEndTurn, Content: "done"}}
@@ -44,7 +44,7 @@ func (p *e2eNewToolsProvider) setWaitInputFromToolMessage(msgs []agent.Message) 
 			continue
 		}
 		for _, tr := range m.ToolResults {
-			if tr.Name != "exec_shell" {
+			if tr.Name != "shell_run" {
 				continue
 			}
 			s := tr.Content
@@ -97,7 +97,7 @@ func TestAgentE2ENewToolsFlow(t *testing.T) {
 	}
 	provider.setWaitInputFromToolMessage(msgs)
 	if provider.waitInput == "" {
-		t.Fatalf("failed to capture task_id from exec_shell result")
+		t.Fatalf("failed to capture task_id from shell_run result")
 	}
 
 	if _, err := a.Run(context.Background(), "s-e2e-tools", "wait"); err != nil {
@@ -121,7 +121,7 @@ func TestAgentE2ENewToolsFlow(t *testing.T) {
 		t.Fatalf("search_files result missing target.txt")
 	}
 	if !strings.Contains(joined, "e2e-pass") {
-		t.Fatalf("exec_shell_wait result missing command output")
+		t.Fatalf("shell_wait result missing command output")
 	}
 	if !strings.Contains(joined, "verify e2e tools") {
 		t.Fatalf("todo result missing item text")

@@ -28,16 +28,16 @@
 
 ## Quick Start
 
+Install with the script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | sh
+```
+
 Install with Homebrew:
 
 ```bash
 brew install usewhale/tap/whale
-```
-
-If you do not use Homebrew, use the install script:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | sh
 ```
 
 First run:
@@ -51,17 +51,13 @@ whale
 Upgrade:
 
 ```bash
-brew upgrade whale
+brew upgrade usewhale/tap/whale
 # or rerun the install script
 ```
 
-Install a specific version:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | VERSION=v0.1.8 sh
-```
-
 Whale currently uses the DeepSeek API. Before running Whale, create an API key in the [DeepSeek Platform](https://platform.deepseek.com/). See the [DeepSeek API docs](https://api-docs.deepseek.com/) for API details.
+
+> **Platform support:** Whale currently supports **macOS** and **Linux**. Windows support is a work in progress.
 
 <p align="center">
   <img src="docs/screenshot-01.png" alt="Whale TUI screenshot" width="860">
@@ -138,50 +134,44 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 | `whale setup` | Save a DeepSeek API key |
 | `whale doctor` | Run health checks |
 | `whale exec "prompt"` | Run one prompt non-interactively |
+| `whale migrate-config` | Migrate Whale v0.1.8-or-earlier config files to `config.toml` |
 | `whale resume` | Open the session picker |
 | `whale resume --last` | Resume the most recent session |
 | `whale resume <id>` | Resume a specific session |
+| `/model` | Change model, reasoning effort, and thinking |
+| `/permissions` | Adjust tool approval mode |
 | `/ask [prompt]` | Read-only question mode |
 | `/plan [prompt]` | Plan first, then decide whether to execute |
+| `/status` | Show current session, mode, model, and config status |
+| `/compact` | Compact the current conversation context |
+| `/init` | Generate AGENTS.md for the current repository |
 | `/skills` | List local skills |
 | `/mcp` | Show MCP server status |
 
 ## MCP
 
-Whale can load tools from MCP servers. MCP tools are registered as normal Whale tools and still go through approval handling.
+Whale can load external tools from MCP servers.
 
-Currently supported:
-
-- stdio MCP servers
-- Streamable HTTP MCP servers
-- `disabled_tools`
-- HTTP headers and environment variable expansion
-- filesystem server allowed-directory checks
-
-See [docs/mcp.md](docs/mcp.md) for setup.
+See [docs/mcp.md](docs/mcp.md) for setup and supported features.
 
 ## Skills
 
-Whale supports local Agent Skills. A skill is an instruction folder containing `SKILL.md`, useful for reusable workflows, team conventions, or tool-specific guidance.
-
-Default discovery paths:
-
-- `.whale/skills`
-- `.agents/skills`
-- `~/.whale/skills`
-- `~/.agents/skills`
-
-Invoke a skill in the TUI with:
-
-```text
-$my-skill apply this workflow to the current task
-```
+Whale supports local Agent Skills for reusable workflows, team conventions, or tool-specific guidance.
 
 See [docs/skills.md](docs/skills.md) for details.
 
 ## Configuration
 
-Whale stores local state under `~/.whale/`. API keys, preferences, session records, and MCP configuration are managed locally.
+Whale uses `~/.whale/config.toml` for global settings and `./.whale/config.toml` for project settings.
+
+Run this only if you used Whale v0.1.8 or earlier and have local
+`preferences.json` or `settings.json` files:
+
+```bash
+whale migrate-config
+```
+
+If you started with Whale v0.1.9 or newer, you do not need this command.
 
 See [docs/configuration.md](docs/configuration.md) for details.
 

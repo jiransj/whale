@@ -7,8 +7,7 @@ import (
 	"path/filepath"
 )
 
-// Preferences stores persistent user preferences that survive across sessions.
-// Written to ~/.whale/preferences.json.
+// Preferences is the legacy preferences.json shape used only by migrate-config.
 type Preferences struct {
 	Model           string `json:"model,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
@@ -19,8 +18,7 @@ func preferencesPath(dataDir string) string {
 	return filepath.Join(dataDir, "preferences.json")
 }
 
-// LoadPreferences reads preferences from disk. Returns zero-value Preferences
-// (not an error) when the file does not exist.
+// LoadPreferences reads the legacy preferences file for migration tests/helpers.
 func LoadPreferences(dataDir string) (Preferences, error) {
 	path := preferencesPath(dataDir)
 	b, err := os.ReadFile(path)
@@ -37,7 +35,7 @@ func LoadPreferences(dataDir string) (Preferences, error) {
 	return prefs, nil
 }
 
-// SavePreferences writes preferences to disk, creating directories as needed.
+// SavePreferences writes the legacy preferences file for migration tests/helpers.
 func SavePreferences(dataDir string, prefs Preferences) error {
 	b, err := json.Marshal(prefs)
 	if err != nil {

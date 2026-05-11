@@ -77,18 +77,18 @@ func TestLoadHooksProjectThenGlobalOrder(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	ws := filepath.Join(root, "ws")
-	if err := os.MkdirAll(filepath.Join(home, ".whale"), 0o755); err != nil {
+	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatalf("mkdir home hooks failed: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(ws, ".whale"), 0o755); err != nil {
 		t.Fatalf("mkdir workspace hooks failed: %v", err)
 	}
-	projectCfg := `{"hooks":{"PreToolUse":[{"command":"echo project"}]}}`
-	globalCfg := `{"hooks":{"PreToolUse":[{"command":"echo global"}]}}`
-	if err := os.WriteFile(filepath.Join(ws, ".whale", "settings.json"), []byte(projectCfg), 0o600); err != nil {
+	projectCfg := "[[hooks.PreToolUse]]\ncommand = \"echo project\"\n"
+	globalCfg := "[[hooks.PreToolUse]]\ncommand = \"echo global\"\n"
+	if err := os.WriteFile(filepath.Join(ws, ".whale", "config.toml"), []byte(projectCfg), 0o600); err != nil {
 		t.Fatalf("write project config failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".whale", "settings.json"), []byte(globalCfg), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(globalCfg), 0o600); err != nil {
 		t.Fatalf("write global config failed: %v", err)
 	}
 	hooks, loaded, err := LoadHooks(ws, home)

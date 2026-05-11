@@ -78,8 +78,8 @@ func TestReadOnlyRegistryFiltersMutatingAndTaskTools(t *testing.T) {
 		testTool{name: "read_file", readOnly: true},
 		testTool{name: "write", readOnly: false},
 		testTool{name: "apply_patch", readOnly: false},
-		testTool{name: "exec_shell", readOnly: false, readOnlyCheck: func(args map[string]any) bool { return true }},
-		testTool{name: "exec_shell_wait", readOnly: true},
+		testTool{name: "shell_run", readOnly: false, readOnlyCheck: func(args map[string]any) bool { return true }},
+		testTool{name: "shell_wait", readOnly: true},
 		testTool{name: "todo_add", readOnly: true},
 		testTool{name: "parallel_reason", readOnly: true},
 	})
@@ -90,7 +90,7 @@ func TestReadOnlyRegistryFiltersMutatingAndTaskTools(t *testing.T) {
 	if child.Get("read_file") == nil {
 		t.Fatalf("expected read_file")
 	}
-	for _, name := range []string{"write", "apply_patch", "exec_shell", "exec_shell_wait", "todo_add", "parallel_reason"} {
+	for _, name := range []string{"write", "apply_patch", "shell_run", "shell_wait", "todo_add", "parallel_reason"} {
 		if child.Get(name) != nil {
 			t.Fatalf("expected %s to be filtered", name)
 		}

@@ -75,14 +75,14 @@ func TestJSONLStoreApprovalPersistence(t *testing.T) {
 		t.Fatalf("new store: %v", err)
 	}
 	ctx := context.Background()
-	if err := store.GrantApproval(ctx, "s1", "exec_shell|cmd:echo hi"); err != nil {
+	if err := store.GrantApproval(ctx, "s1", "shell_run|cmd:echo hi"); err != nil {
 		t.Fatalf("grant approval: %v", err)
 	}
 	got, err := store.GetApprovals(ctx, "s1")
 	if err != nil {
 		t.Fatalf("get approvals: %v", err)
 	}
-	if !got["exec_shell|cmd:echo hi"] {
+	if !got["shell_run|cmd:echo hi"] {
 		t.Fatalf("expected approval key persisted, got: %+v", got)
 	}
 }

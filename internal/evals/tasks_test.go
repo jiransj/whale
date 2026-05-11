@@ -73,14 +73,14 @@ func TestTaskBackgroundShellWaitFlow(t *testing.T) {
 			Turns: []TurnSpec{
 				{
 					Steps: []StepSpec{
-						{ID: "start", ToolName: "exec_shell", Input: `{"command":"printf bg-eval","background":true}`},
+						{ID: "start", ToolName: "shell_run", Input: `{"command":"printf bg-eval","background":true}`},
 					},
 				},
 				{
 					Steps: []StepSpec{
 						{
 							ID:       "wait",
-							ToolName: "exec_shell_wait",
+							ToolName: "shell_wait",
 							InputFunc: func(history []core.Message) (string, error) {
 								taskID, err := shellTaskIDFromHistory(history)
 								if err != nil {
@@ -149,7 +149,7 @@ func shellTaskIDFromHistory(history []core.Message) (string, error) {
 			continue
 		}
 		for _, tr := range msg.ToolResults {
-			if tr.Name != "exec_shell" {
+			if tr.Name != "shell_run" {
 				continue
 			}
 			env, ok := core.ParseToolEnvelope(tr.Content)

@@ -47,7 +47,7 @@ Ask mode is active.
 	systemBlocks = append(systemBlocks, renderDelegationPolicyBlock())
 	systemBlocks = append(systemBlocks, "Current OS: "+runtime.GOOS)
 	if strings.TrimSpace(a.workspaceRoot) != "" {
-		systemBlocks = append(systemBlocks, "Current Whale workspace root: "+a.workspaceRoot+"\nShell commands run from this directory by default. Do not assume a synthetic path such as /workspace; use relative paths or the exec_shell cwd parameter for subdirectories.")
+		systemBlocks = append(systemBlocks, "Current Whale workspace root: "+a.workspaceRoot+"\nShell commands run from this directory by default. Do not assume a synthetic path such as /workspace; use relative paths or the shell_run cwd parameter for subdirectories.")
 	}
 	systemBlocks = append(systemBlocks, renderToolSpecsBlock(a.tools.Specs()))
 	if strings.TrimSpace(a.workspaceRoot) != "" {

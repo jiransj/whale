@@ -181,7 +181,7 @@ func TestSessionHydrationTrimsRenderedResumeHistoryLines(t *testing.T) {
 	}
 }
 
-func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
+func TestSlashCommandsShowSupportedCommandsAndOmitRemovedCommands(t *testing.T) {
 	cmds := parseSlashCommands(app.CommandsHelp)
 	if !containsString(cmds, "/permissions") {
 		t.Fatalf("expected /permissions in slash commands: %+v", cmds)
@@ -193,16 +193,16 @@ func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
 		t.Fatalf("expected /ask in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/approval") {
-		t.Fatalf("expected /approval to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /approval should not appear in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/thinking") {
-		t.Fatalf("expected /thinking to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /thinking should not appear in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/budget") {
-		t.Fatalf("expected /budget to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /budget should not appear in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/step") {
-		t.Fatalf("expected /step to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /step should not appear in slash commands: %+v", cmds)
 	}
 }
 
@@ -644,7 +644,7 @@ func TestRenderQueuedPromptsShowsPreviewLimit(t *testing.T) {
 
 func TestApprovalNoticeTextUsesDecisionAndSummary(t *testing.T) {
 	m := newModel(nil, "", "", "")
-	m.approval.reason = "exec_shell: go test ./..."
+	m.approval.reason = "shell_run: go test ./..."
 	if got := m.approvalNoticeText("allow"); !strings.Contains(got, "You approved whale to run go test ./... this time") {
 		t.Fatalf("unexpected allow notice: %q", got)
 	}
@@ -1163,11 +1163,30 @@ func TestApprovalViewHidesToolCallID(t *testing.T) {
 	m.approval.toolName = "edit"
 	m.approval.reason = "edit: internal/tui/model.go"
 	view := m.View()
-	if !strings.Contains(view, "approval: edit") {
+	if !strings.Contains(view, "Approval required") || !strings.Contains(view, "edit") {
 		t.Fatalf("expected approval header in view:\n%s", view)
 	}
 	if strings.Contains(view, "id: tc-123") {
 		t.Fatalf("approval view should not expose tool call id:\n%s", view)
+	}
+}
+
+func TestApprovalViewSeparatesToolNameFromDetail(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 24
+	m.mode = modeApproval
+	m.approval.toolName = "shell_run"
+	m.approval.reason = "shell_run: date"
+	view := m.View()
+	if strings.Contains(view, "shell_run: date") {
+		t.Fatalf("approval view should not repeat tool name in body:\n%s", view)
+	}
+	if strings.Contains(view, "shell_run") {
+		t.Fatalf("approval view should not expose internal shell tool name:\n%s", view)
+	}
+	if !strings.Contains(view, "Approval required") || !strings.Contains(view, "shell command") || !strings.Contains(view, "  date") {
+		t.Fatalf("expected separated approval tool and detail:\n%s", view)
 	}
 }
 
@@ -1262,9 +1281,9 @@ func TestFormatElapsedCompact(t *testing.T) {
 	}
 }
 
-func TestSummarizeToolResultForChat_ExecShellSuccessShowsOutputSummary(t *testing.T) {
+func TestSummarizeToolResultForChat_ShellRunSuccessShowsOutputSummary(t *testing.T) {
 	raw := `{"success":true,"code":"ok","data":{"status":"ok","metrics":{"exit_code":0,"duration_ms":29},"payload":{"command":"date","stdout":"Sun May 3\n","stderr":""}}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_ok" {
 		t.Fatalf("expected result_ok role, got %q", role)
 	}
@@ -1274,13 +1293,41 @@ func TestSummarizeToolResultForChat_ExecShellSuccessShowsOutputSummary(t *testin
 	}
 }
 
-func TestSummarizeToolResultForChat_ExecShellFailureShowsReason(t *testing.T) {
+func TestShellRunTranscriptKeepsStatusAndOutputSeparate(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-shell",
+		ToolName:   "shell_run",
+		Text:       `shell_run: {"command":"cd internal/tui && wc -l model.go model_events.go model_keys.go model_prompt.go"}`,
+	}))
+	m = next.(model)
+	raw := `{"success":true,"code":"ok","data":{"status":"ok","metrics":{"exit_code":0,"duration_ms":23},"payload":{"command":"cd internal/tui && wc -l model.go model_events.go model_keys.go model_prompt.go","stdout":"284 model.go\n202 model_events.go\n401 model_keys.go\n88 model_prompt.go\n975 total\n","stderr":""}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-shell",
+		ToolName:   "shell_run",
+		Text:       raw,
+	}))
+	m = next.(model)
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	if strings.Contains(rendered, "23ms 284 model.go") {
+		t.Fatalf("status and shell output collapsed onto one line:\n%s", rendered)
+	}
+	for _, want := range []string{"Ran cd internal/tui && wc -l", "✓ · 23ms", "284 model.go", "202 model_events.go", "975 total"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected rendered transcript to contain %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestSummarizeToolResultForChat_ShellRunFailureShowsReason(t *testing.T) {
 	raw := `{"success":false,"code":"exec_failed","message":"command failed","data":{"status":"error","summary":"command failed","metrics":{"exit_code":2,"duration_ms":1210},"payload":{"stderr":"ls: cannot access x: No such file or directory\n","stdout":""}}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_failed" {
 		t.Fatalf("expected result_failed role, got %q", role)
 	}
-	want := "✗ (exit 2) · 1.2s · ls: cannot access x: No such file or directory"
+	want := "✗ (exit 2) · 1.2s\nls: cannot access x: No such file or directory"
 	if got != want {
 		t.Fatalf("unexpected summary text:\nwant: %q\ngot:  %q", want, got)
 	}
@@ -1328,7 +1375,7 @@ func TestSummarizeToolResultForChat_NonShellSummarized(t *testing.T) {
 
 func TestSummarizeToolResultForChat_Denied(t *testing.T) {
 	raw := `{"success":false,"code":"approval_denied","message":"tool approval denied"}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_denied" || got != "DENIED · tool approval denied" {
 		t.Fatalf("unexpected denied summary: role=%q text=%q", role, got)
 	}
@@ -1336,7 +1383,7 @@ func TestSummarizeToolResultForChat_Denied(t *testing.T) {
 
 func TestSummarizeToolResultForChat_AskModeBlockedShowsProductCommands(t *testing.T) {
 	raw := `{"success":false,"code":"ask_mode_blocked","message":"tool unavailable in ask mode","summary":"Current mode: ask. Ask mode only allows read-only tools. To execute or modify files, switch to agent mode. To propose a reviewed approach first, switch to plan mode.","data":{"current_mode":"ask","suggested_modes":["agent","plan"]}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_failed" {
 		t.Fatalf("expected result_failed role, got %q", role)
 	}
@@ -1348,7 +1395,7 @@ func TestSummarizeToolResultForChat_AskModeBlockedShowsProductCommands(t *testin
 
 func TestSummarizeToolResultForChat_Timeout(t *testing.T) {
 	raw := `{"success":false,"code":"timeout","message":"command timed out","data":{"metrics":{"duration_ms":15000}}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_timeout" || got != "TIMEOUT · 15s" {
 		t.Fatalf("unexpected timeout summary: role=%q text=%q", role, got)
 	}
@@ -1356,7 +1403,7 @@ func TestSummarizeToolResultForChat_Timeout(t *testing.T) {
 
 func TestSummarizeToolResultForChat_Canceled(t *testing.T) {
 	raw := `{"success":false,"code":"cancelled","message":"context canceled"}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_canceled" || got != "CANCELED" {
 		t.Fatalf("unexpected canceled summary: role=%q text=%q", role, got)
 	}
@@ -1392,21 +1439,21 @@ func TestToolDeniedDoesNotAddNoFinalAnswerNotice(t *testing.T) {
 
 func TestSummarizeToolResultForChat_FailedNoExitCodeDoesNotShowZero(t *testing.T) {
 	raw := `{"success":false,"code":"exec_failed","message":"command failed","data":{"metrics":{"duration_ms":41},"payload":{"stderr":"unknown flag: --bad"}}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_failed" {
 		t.Fatalf("expected result_failed role, got %q", role)
 	}
 	if got == "✗ (exit 0) · 41ms · unknown flag: --bad" {
 		t.Fatalf("must not show fake exit 0: %q", got)
 	}
-	if got != "✗ · 41ms · unknown flag: --bad" {
+	if got != "✗ · 41ms\nunknown flag: --bad" {
 		t.Fatalf("unexpected failed summary: %q", got)
 	}
 }
 
 func TestSummarizeToolResultForChat_OkWithoutSuccessField(t *testing.T) {
 	raw := `{"code":"ok","data":{"status":"ok","metrics":{"exit_code":0,"duration_ms":237},"payload":{"stdout":"142.251.214.110","stderr":""}}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_ok" {
 		t.Fatalf("expected result_ok role, got %q", role)
 	}
@@ -1420,7 +1467,7 @@ func TestSummarizeToolResultForChat_ShellOutputTruncated(t *testing.T) {
 		"l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", "l10", "l11", "l12", "l13", "l14",
 	}, `\n`) + `\n`
 	raw := `{"success":true,"data":{"status":"ok","payload":{"stdout":"` + stdout + `"}}}`
-	role, got := summarizeToolResultForChat("exec_shell", raw)
+	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_ok" {
 		t.Fatalf("expected result_ok role, got %q", role)
 	}
@@ -1432,7 +1479,7 @@ func TestSummarizeToolResultForChat_ShellOutputTruncated(t *testing.T) {
 	if strings.Contains(got, "l3") || strings.Contains(got, "l12") {
 		t.Fatalf("expected middle output to be omitted, got: %q", got)
 	}
-	if !strings.Contains(got, "10 lines omitted; use /tool for full output") {
+	if !strings.Contains(got, "10 lines omitted") {
 		t.Fatalf("expected omitted output marker, got: %q", got)
 	}
 }

@@ -85,6 +85,114 @@ func TestDoctorBadge(t *testing.T) {
 	}
 }
 
+func TestMigrateConfigHelpExplainsVersionBoundary(t *testing.T) {
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"migrate-config", "--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("migrate-config help: %v", err)
+	}
+	help := out.String()
+	if !strings.Contains(help, "v0.1.8 or earlier") || !strings.Contains(help, "v0.1.9") || !strings.Contains(help, "newer") {
+		t.Fatalf("expected version boundary in help, got:\n%s", help)
+	}
+}
+
+func TestMigrateConfigOutputExplainsVersionBoundary(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"migrate-config"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("migrate-config: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "v0.1.8 or earlier") || !strings.Contains(got, "no legacy config to migrate") {
+		t.Fatalf("expected version boundary in output, got:\n%s", got)
+	}
+}
+
+func TestPrepareCLIConfigLoadsConfigAndAppliesFlagOverride(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".whale"), 0o755); err != nil {
+		t.Fatalf("mkdir .whale: %v", err)
+	}
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{Model: "deepseek-v4-pro"}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("model", "deepseek-v4-flash"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if opts.cfg.Model != "deepseek-v4-flash" {
+		t.Fatalf("model: want CLI override, got %s", opts.cfg.Model)
+	}
+	if !opts.cfg.ModelExplicit {
+		t.Fatal("model should be explicit")
+	}
+}
+
+func TestPrepareCLIConfigPreservesConfiguredThinking(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	thinking := true
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{ThinkingEnabled: &thinking}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if !opts.cfg.ThinkingEnabled {
+		t.Fatal("thinking_enabled should stay true from config")
+	}
+}
+
 func TestReadExecPromptPrefersArg(t *testing.T) {
 	got, err := readExecPrompt(strings.NewReader("stdin prompt"), []string{"arg prompt"})
 	if err != nil {
@@ -189,6 +297,53 @@ func TestPrepareCLIConfigMarksExplicitDefaultModel(t *testing.T) {
 	if !opts.cfg.ModelExplicit {
 		t.Fatal("expected ModelExplicit=true")
 	}
+}
+
+func TestRootHelpOnlyShowsPublicRootFlags(t *testing.T) {
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	help := out.String()
+	for _, removed := range []string{
+		"--data-dir",
+		"--approval-mode",
+		"--allow-prefixes",
+		"--deny-prefixes",
+		"--auto-compact",
+		"--auto-compact-threshold",
+		"--model-context-window",
+		"--memory-enabled",
+		"--memory-max-chars",
+		"--memory-file-order",
+		"--mcp-config",
+		"--budget-warning-usd",
+		"--config",
+		"--session",
+		"--mode",
+	} {
+		if helpHasFlag(help, removed) {
+			t.Fatalf("removed flag should not appear in help: %s\n%s", removed, help)
+		}
+	}
+	if !helpHasFlag(help, "--model") || !helpHasFlag(help, "--version") {
+		t.Fatalf("expected public flags in help, got:\n%s", help)
+	}
+}
+
+func helpHasFlag(help, flag string) bool {
+	for _, field := range strings.Fields(help) {
+		field = strings.TrimRight(field, ",")
+		if field == flag || strings.HasPrefix(field, flag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResumeStartOptions(t *testing.T) {

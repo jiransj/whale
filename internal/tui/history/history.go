@@ -44,7 +44,7 @@ func SummarizeHydratedToolCall(call core.ToolCall) string {
 	if strings.TrimSpace(call.Input) == "" {
 		return call.Name
 	}
-	if call.Name == "exec_shell" {
+	if call.Name == "shell_run" {
 		var body map[string]any
 		if err := json.Unmarshal([]byte(call.Input), &body); err == nil {
 			if cmd, _ := body["command"].(string); strings.TrimSpace(cmd) != "" {
