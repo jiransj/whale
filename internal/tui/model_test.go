@@ -1528,7 +1528,7 @@ func TestTaskActivityEventsUpdateStatusOnly(t *testing.T) {
 	}
 }
 
-func TestMCPStatusFailureAddsVisibleWarning(t *testing.T) {
+func TestMCPStatusFailureUpdatesStatusOnly(t *testing.T) {
 	m := model{assembler: tuirender.NewAssembler(), mode: modeChat}
 	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventMCPStatus, Status: "failed", Text: "MCP startup failed: fs. Run /mcp for details."}))
 	m = next.(model)
@@ -1536,8 +1536,8 @@ func TestMCPStatusFailureAddsVisibleWarning(t *testing.T) {
 		t.Fatalf("unexpected status: %q", m.status)
 	}
 	snap := m.assembler.Snapshot()
-	if len(snap) == 0 || !strings.Contains(snap[0].Text, "MCP startup failed: fs") {
-		t.Fatalf("expected visible warning, got: %+v", snap)
+	if len(snap) != 0 {
+		t.Fatalf("MCP startup failure should stay out of transcript, got: %+v", snap)
 	}
 }
 

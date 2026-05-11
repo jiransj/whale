@@ -92,9 +92,6 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		m.addLog(logEntry{Kind: "task_completed", Source: ev.ToolName, Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
 	case service.EventMCPStatus:
 		m.status = ev.Text
-		if ev.Status == "failed" || ev.Status == "cancelled" {
-			m.append("error", ev.Text)
-		}
 		m.addLog(logEntry{Kind: "mcp_status", Source: "mcp", Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
 	case service.EventMCPComplete:
 		m.status = ev.Text
