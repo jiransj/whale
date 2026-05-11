@@ -1,16 +1,25 @@
 package tools
 
 import (
+	"runtime"
 	"strings"
 
 	"github.com/usewhale/whale/internal/core"
 )
 
+func shellExecDescription() string {
+	base := "Run a shell command from the current Whale workspace. Commands default to the workspace root; do not assume synthetic paths like /workspace. Use relative paths, or set cwd to a subdirectory inside the workspace, instead of prefixing commands with cd."
+	if runtime.GOOS == "windows" {
+		return base + " This system is Windows. Commands run in cmd.exe by default (use cmd syntax: dir, type, del, mkdir, set, etc.). Do not use Linux commands like ls, cat, rm, grep — they will not work in cmd.exe."
+	}
+	return base + " This system is Unix (Linux/macOS). Use standard Unix shell syntax with /bin/sh."
+}
+
 func (b *Toolset) shellTools() []core.Tool {
 	return []core.Tool{
 		toolFn{
 			name:        "shell_run",
-			description: "Run a shell command from the current Whale workspace. Commands default to the workspace root; do not assume synthetic paths like /workspace. Use relative paths, or set cwd to a subdirectory inside the workspace, instead of prefixing commands with cd.",
+			description: shellExecDescription(),
 			parameters: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,

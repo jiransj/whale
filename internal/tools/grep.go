@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/usewhale/whale/internal/core"
 )
@@ -117,7 +118,7 @@ func searchWithRipgrep(pattern, path, include string, literal bool, root string)
 		rawLine, _ := textObj["text"].(string)
 		num, _ := data["line_number"].(float64)
 
-		rel := rawPath
+		rel := filepath.ToSlash(rawPath)
 		if rp, rerr := filepath.Rel(root, rawPath); rerr == nil {
 			rel = filepath.ToSlash(rp)
 		}
@@ -133,7 +134,13 @@ func searchWithRipgrep(pattern, path, include string, literal bool, root string)
 				mv, _ := mobj["text"].(string)
 				sv, _ := obj["start"].(float64)
 				ev, _ := obj["end"].(float64)
-				row.Submatches = append(row.Submatches, submatch{Match: mv, Start: int(sv), End: int(ev)})
+				// Convert byte offsets from ripgrep to rune/character offsets
+				// for Chinese text compatibility
+				byteStart := int(sv)
+				byteEnd := int(ev)
+				startRune := utf8.RuneCountInString(rawLine[:byteStart])
+				endRune := startRune + utf8.RuneCountInString(rawLine[byteStart:byteEnd])
+				row.Submatches = append(row.Submatches, submatch{Match: mv, Start: startRune, End: endRune})
 			}
 		}
 		matches = append(matches, row)
@@ -240,10 +247,13 @@ func grepFile(filePath string, re *regexp.Regexp, root string) ([]matchRow, erro
 			Line:       line,
 		}
 		for _, loc := range locs {
+			// Convert byte indices to rune/character offsets for Chinese text compatibility
+			startRune := utf8.RuneCountInString(line[:loc[0]])
+			endRune := startRune + utf8.RuneCountInString(line[loc[0]:loc[1]])
 			row.Submatches = append(row.Submatches, submatch{
 				Match: line[loc[0]:loc[1]],
-				Start: loc[0],
-				End:   loc[1],
+				Start: startRune,
+				End:   endRune,
 			})
 		}
 		matches = append(matches, row)

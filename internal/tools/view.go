@@ -31,8 +31,8 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		return marshalToolError(call, "read_failed", err.Error()), nil
 	}
 	text := string(data)
-	// Normalize Windows \r\n line endings before splitting
-	text = strings.ReplaceAll(text, "\r\n", "\n")
+	// Strip UTF-8 BOM (common on Windows editors like Notepad)
+	text = strings.TrimLeft(text, "\uFEFF")
 	lines := strings.Split(text, "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]

@@ -15,11 +15,6 @@ import (
 
 func shellCommand(command string) (string, []string) {
 	if runtime.GOOS == "windows" {
-		for _, name := range []string{"bash", "sh"} {
-			if p, err := exec.LookPath(name); err == nil {
-				return p, []string{"-lc", command}
-			}
-		}
 		return "cmd", []string{"/c", command}
 	}
 	return "/bin/sh", []string{"-lc", command}

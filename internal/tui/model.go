@@ -110,6 +110,8 @@ type model struct {
 	sawAssistantThisTurn           bool
 	sawReasoningThisTurn           bool
 	sawTerminalToolOutcomeThisTurn bool
+	lastNonEnterKeyTime            time.Time
+	lastPasteEnterTime             time.Time
 	quitArmedUntil                 time.Time
 	promptHistory                  []string
 	historyIndex                   int
@@ -118,6 +120,8 @@ type model struct {
 	inHistoryNav                   bool
 	queuedPrompts                  []queuedPrompt
 	nativeScrollbackPrinted        int
+	pasteBuffer                    []rune
+	pasteBufferTime                time.Time
 }
 
 type queuedPrompt struct {
@@ -146,6 +150,13 @@ type svcMsg service.Event
 type errMsg struct{ err error }
 type quitTimeoutMsg struct{}
 type busyTickMsg struct{}
+type pasteFlushMsg struct{}
+
+// pasteBufferThreshold defines the maximum inter-character gap that distinguishes
+// a paste stream from normal typing. Characters arriving within this window are
+// accumulated and flushed as a single paste operation. 50ms easily covers paste
+// events (microsecond gaps) while staying well below human typing speed (~200ms).
+const pasteBufferThreshold = 50 * time.Millisecond
 
 func newModel(svc *service.Service, modelName, effort, thinking string) model {
 	filter := textinput.New()
@@ -255,6 +266,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, busyTickCmd()
 		}
 		return m, nil
+	case pasteFlushMsg:
+		m.flushPasteBuffer()
+		m.refreshViewportContent()
+		return m, nil
 	case tea.MouseMsg:
 		m.refreshViewportContent()
 		switch msg.Button {
@@ -265,12 +280,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
+		if msg.Type != tea.KeyEnter {
+			m.lastNonEnterKeyTime = time.Now()
+		}
 		cmd, quit, handled := m.handleKeyMsg(msg)
 		if quit {
+			m.flushPasteBuffer()
 			return m, tea.Quit
 		}
 		if handled {
+			m.flushPasteBuffer()
 			return m, cmd
+		}
+		// Unhandled key: detect paste streams by measuring inter-character gaps.
+		// The first character always falls through to normal textarea processing.
+		// Subsequent characters arriving within the threshold are accumulated and
+		// flushed atomically, avoiding the "one character at a time" rendering.
+		if m.mode == modeChat && msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+			now := time.Now()
+			if !m.pasteBufferTime.IsZero() && now.Sub(m.pasteBufferTime) <= pasteBufferThreshold {
+				// Rapid character stream: buffer it as part of a paste.
+				m.pasteBuffer = append(m.pasteBuffer, msg.Runes...)
+				m.pasteBufferTime = now
+				m.updateSlashMatches()
+				m.refreshViewportContent()
+				// Arm a timer to flush this batch if no more chars arrive.
+				return m, tea.Tick(pasteBufferThreshold, func(time.Time) tea.Msg {
+					return pasteFlushMsg{}
+				})
+			}
+			// First character, or gap too large: flush any pending buffer,
+			// then fall through so this character is processed normally.
+			m.flushPasteBuffer()
+		} else {
+			// Non-character event: flush accumulated paste buffer.
+			m.flushPasteBuffer()
 		}
 	}
 	prevInput := m.input.Value()
@@ -281,4 +325,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	m.refreshViewportContent()
 	return m, cmd
+}
+
+func (m *model) flushPasteBuffer() {
+	if len(m.pasteBuffer) == 0 {
+		return
+	}
+	text := string(m.pasteBuffer)
+	m.pasteBuffer = nil
+	m.pasteBufferTime = time.Time{}
+
+	m.input.HandlePaste(text)
+	m.resetHistoryNavigation()
+	m.updateSlashMatches()
+	m.refreshViewportContent()
 }
