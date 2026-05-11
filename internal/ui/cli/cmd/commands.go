@@ -95,6 +95,40 @@ func newSetupCmd(opts *cliOptions) *cobra.Command {
 	}
 }
 
+func newMigrateConfigCmd(opts *cliOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate-config",
+		Short: "Migrate legacy Whale config files to config.toml",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			workspaceRoot, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get workspace: %w", err)
+			}
+			report, err := app.MigrateConfig(opts.cfg.DataDir, workspaceRoot)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if len(report.Written) == 0 {
+				fmt.Fprintln(out, "no legacy config to migrate")
+			} else {
+				fmt.Fprintln(out, "migrated config:")
+				for _, path := range report.Written {
+					fmt.Fprintf(out, "  %s\n", path)
+				}
+			}
+			if len(report.Skipped) > 0 {
+				fmt.Fprintln(out, "obsolete files are no longer read:")
+				for _, path := range report.Skipped {
+					fmt.Fprintf(out, "  %s\n", path)
+				}
+			}
+			return nil
+		},
+	}
+}
+
 func runSetup(out io.Writer, in io.Reader, dataDir string) error {
 	reader := bufio.NewReader(in)
 	envKey := strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))

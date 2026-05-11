@@ -67,7 +67,10 @@ func TestExpandUniqueSlashPrefix(t *testing.T) {
 		t.Fatalf("expected /compact, got %q", got)
 	}
 	if got := expandUniqueSlashPrefix("/tool"); got != "/tool" {
-		t.Fatalf("ambiguous exact command should stay unchanged, got %q", got)
+		t.Fatalf("removed local command should stay unchanged, got %q", got)
+	}
+	if got := expandUniqueSlashPrefix("/bud"); got != "/bud" {
+		t.Fatalf("removed local command should stay unchanged, got %q", got)
 	}
 	if got := expandUniqueSlashPrefix("/plan inspect"); got != "/plan inspect" {
 		t.Fatalf("commands with args should stay unchanged, got %q", got)
@@ -133,14 +136,6 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 		t.Fatalf("unexpected /status result: %+v", res)
 	}
 
-	res, err = handleCommand("/context", "cur", now)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if !res.Handled || !res.ShowContext {
-		t.Fatalf("unexpected /context result: %+v", res)
-	}
-
 	res, err = handleCommand("/plan", "cur", now)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -184,7 +179,7 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 		t.Fatalf("unexpected /ask prompt result: %+v", res)
 	}
 
-	for _, old := range []string{"/step", "/checkpoint", "/continue", "/stop", "/revise add retry"} {
+	for _, old := range []string{"/step", "/checkpoint", "/continue", "/stop", "/revise add retry", "/context", "/memory"} {
 		res, err = handleCommand(old, "cur", now)
 		if err != nil || res.Handled {
 			t.Fatalf("expected %s to be unhandled, got %+v err=%v", old, res, err)
@@ -194,20 +189,9 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 	if err != nil || !res.Handled || !res.InitMemory {
 		t.Fatalf("unexpected /init result: %+v err=%v", res, err)
 	}
-	res, err = handleCommand("/memory", "cur", now)
-	if err != nil || !res.Handled || !res.ShowMemory {
-		t.Fatalf("unexpected /memory result: %+v err=%v", res, err)
-	}
 	res, err = handleCommand("/skills", "cur", now)
 	if err != nil || !res.Handled || !res.ShowSkills {
 		t.Fatalf("unexpected /skills result: %+v err=%v", res, err)
-	}
-	res, err = handleCommand("/skill test-skill with args", "cur", now)
-	if err != nil || !res.Handled || res.SkillName != "test-skill" || res.SkillArgs != "with args" {
-		t.Fatalf("unexpected /skill result: %+v err=%v", res, err)
-	}
-	if _, err = handleCommand("/skill", "cur", now); err == nil {
-		t.Fatal("expected /skill usage error")
 	}
 }
 
@@ -282,6 +266,39 @@ func TestHandleSlashClearReturnsClearScreenFlag(t *testing.T) {
 	}
 }
 
+func TestBuildStatusIncludesContextAndBudget(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	msgStore, err := store.NewJSONLStore(sessionsDir)
+	if err != nil {
+		t.Fatalf("store init: %v", err)
+	}
+	cfg := DefaultConfig()
+	cfg.ContextWindow = 1000
+	app := &App{
+		ctx:           context.Background(),
+		workspaceRoot: dir,
+		sessionID:     "sess-1",
+		msgStore:      msgStore,
+		cfg:           cfg,
+	}
+
+	out := app.buildStatus()
+	for _, want := range []string{
+		"- context window:",
+		"- budget warning: disabled",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected status to contain %q, got:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"- memory:", "- mcp:"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("expected status not to contain %q, got:\n%s", unwanted, out)
+		}
+	}
+}
+
 func TestHandleSlashSkillsCommands(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -300,35 +317,6 @@ func TestHandleSlashSkillsCommands(t *testing.T) {
 		t.Fatalf("unexpected /skills output: %q", out)
 	}
 
-	handled, out, synthetic, shouldExit, clearScreen, err = app.HandleSlash("/skill test-skill arg1 arg2")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if !handled || shouldExit || clearScreen {
-		t.Fatalf("unexpected /skill flags handled=%v shouldExit=%v clearScreen=%v", handled, shouldExit, clearScreen)
-	}
-	if !strings.Contains(out, "loaded skill: test-skill") {
-		t.Fatalf("unexpected /skill output: %q", out)
-	}
-	if !strings.Contains(synthetic, "Follow workspace instructions") || !strings.Contains(synthetic, "arg1 arg2") {
-		t.Fatalf("unexpected synthetic prompt: %q", synthetic)
-	}
-}
-
-func TestHandleSlashSkillUnknownListsAvailable(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	dir := t.TempDir()
-	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "known-skill"), "known-skill", "Known skill.", "# Known")
-	app := &App{sessionID: "sess-1", workspaceRoot: dir}
-
-	handled, _, _, _, _, err := app.HandleSlash("/skill missing-skill")
-	if !handled {
-		t.Fatal("expected /skill to be handled")
-	}
-	if err == nil || !strings.Contains(err.Error(), "known-skill") {
-		t.Fatalf("expected available skill in error, got %v", err)
-	}
 }
 
 func TestBuildSkillMentionSyntheticPrompt(t *testing.T) {

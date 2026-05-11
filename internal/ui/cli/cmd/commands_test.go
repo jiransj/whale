@@ -85,6 +85,74 @@ func TestDoctorBadge(t *testing.T) {
 	}
 }
 
+func TestPrepareCLIConfigLoadsConfigAndAppliesFlagOverride(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, ".whale"), 0o755); err != nil {
+		t.Fatalf("mkdir .whale: %v", err)
+	}
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{Model: "deepseek-v4-pro"}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("data-dir", dataDir); err != nil {
+		t.Fatalf("set data-dir: %v", err)
+	}
+	if err := root.PersistentFlags().Set("model", "deepseek-v4-flash"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if opts.cfg.Model != "deepseek-v4-flash" {
+		t.Fatalf("model: want CLI override, got %s", opts.cfg.Model)
+	}
+	if !opts.cfg.ModelExplicit {
+		t.Fatal("model should be explicit")
+	}
+}
+
+func TestPrepareCLIConfigPreservesConfiguredThinking(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	thinking := true
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{ThinkingEnabled: &thinking}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("data-dir", dataDir); err != nil {
+		t.Fatalf("set data-dir: %v", err)
+	}
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if !opts.cfg.ThinkingEnabled {
+		t.Fatal("thinking_enabled should stay true from config")
+	}
+}
+
 func TestReadExecPromptPrefersArg(t *testing.T) {
 	got, err := readExecPrompt(strings.NewReader("stdin prompt"), []string{"arg prompt"})
 	if err != nil {

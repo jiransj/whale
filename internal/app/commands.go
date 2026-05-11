@@ -9,9 +9,6 @@ import (
 
 	appcommands "github.com/usewhale/whale/internal/app/commands"
 	"github.com/usewhale/whale/internal/compact"
-	"github.com/usewhale/whale/internal/core"
-	whalemcp "github.com/usewhale/whale/internal/mcp"
-	"github.com/usewhale/whale/internal/memory"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
 	"github.com/usewhale/whale/internal/skills"
@@ -63,39 +60,15 @@ func (a *App) buildStatus() string {
 		fmt.Sprintf("- thinking: %s", onOff(a.thinkingEnabled)),
 	}
 	parts = append(parts, formatContextWindowStatus(a))
-	if mcpLine := a.formatMCPStatusLine(); mcpLine != "" {
-		parts = append(parts, mcpLine)
-	}
+	parts = append(parts, a.formatBudgetStatusLine())
 	return strings.Join(parts, "\n")
 }
 
-func (a *App) formatMCPStatusLine() string {
-	if a == nil || a.mcpManager == nil {
-		return ""
+func (a *App) formatBudgetStatusLine() string {
+	if a == nil || a.budgetWarningUSD <= 0 {
+		return "- budget warning: disabled"
 	}
-	states := a.mcpManager.States()
-	if len(states) == 0 {
-		return "- mcp: no configured servers"
-	}
-	connected := 0
-	failed := 0
-	starting := 0
-	tools := 0
-	for _, st := range states {
-		switch {
-		case st.Connected || st.Status == whalemcp.StatusConnected:
-			connected++
-			tools += st.Tools
-		case st.Status == whalemcp.StatusStarting:
-			starting++
-		case st.Error != "" || st.Status == whalemcp.StatusFailed || st.Status == whalemcp.StatusCancelled:
-			failed++
-		}
-	}
-	if starting > 0 {
-		return fmt.Sprintf("- mcp: %d server(s), %d connected, %d starting, %d failed, %d tool(s)", len(states), connected, starting, failed, tools)
-	}
-	return fmt.Sprintf("- mcp: %d server(s), %d connected, %d failed, %d tool(s)", len(states), connected, failed, tools)
+	return fmt.Sprintf("- budget warning: $%.4f", a.budgetWarningUSD)
 }
 
 func (a *App) buildMCPStatus() string {
@@ -187,39 +160,6 @@ func formatTokenCount(v int) string {
 	return fmt.Sprintf("%d", v)
 }
 
-func (a *App) buildContext() (string, error) {
-	msgs, err := a.msgStore.List(a.ctx, a.sessionID)
-	if err != nil {
-		return "", err
-	}
-	est := compact.EstimateMessagesTokens(msgs)
-	window := a.cfg.ContextWindow
-	if window < 1 {
-		window = 1
-	}
-	usage := (est * 100) / window
-	left := 100 - usage
-	if left < 0 {
-		left = 0
-	}
-	roleCount := map[core.Role]int{}
-	for _, m := range msgs {
-		roleCount[m.Role]++
-	}
-	lines := []string{
-		"Context",
-		"",
-		fmt.Sprintf("- messages: %d", len(msgs)),
-		fmt.Sprintf("- estimated tokens: %s", formatTokenCount(est)),
-		fmt.Sprintf("- context window: %s", formatTokenCount(window)),
-		fmt.Sprintf("- usage: %d%% used (%d%% left)", usage, left),
-		fmt.Sprintf("- roles: user=%d assistant=%d tool=%d system=%d", roleCount[core.RoleUser], roleCount[core.RoleAssistant], roleCount[core.RoleTool], roleCount[core.RoleSystem]),
-		"",
-		"- hint: use /compact to summarize long history if needed",
-	}
-	return strings.Join(lines, "\n"), nil
-}
-
 func (a *App) initMemory() (string, error) {
 	path := filepath.Join(a.workspaceRoot, "AGENTS.md")
 	if _, err := os.Stat(path); err == nil {
@@ -269,15 +209,6 @@ Commit & Pull Request Guidelines
 - Outline pull request requirements (descriptions, linked issues, screenshots, etc.).
 
 (Optional) Add other sections if relevant, such as Security & Configuration Tips, Architecture Overview, or Agent-Specific Instructions.`)
-}
-
-func (a *App) showMemory() string {
-	order := parseCSVList(a.cfg.MemoryFileOrder)
-	pm, ok := memory.ReadProjectMemory(a.workspaceRoot, order, a.cfg.MemoryMaxChars)
-	if !ok {
-		return "memory: no project memory file found"
-	}
-	return fmt.Sprintf("memory: path=%s chars=%d truncated=%v", pm.Path, pm.OriginalChars, pm.Truncated)
 }
 
 func (a *App) buildSkillsList() string {

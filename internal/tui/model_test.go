@@ -181,7 +181,7 @@ func TestSessionHydrationTrimsRenderedResumeHistoryLines(t *testing.T) {
 	}
 }
 
-func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
+func TestSlashCommandsShowSupportedCommandsAndOmitRemovedCommands(t *testing.T) {
 	cmds := parseSlashCommands(app.CommandsHelp)
 	if !containsString(cmds, "/permissions") {
 		t.Fatalf("expected /permissions in slash commands: %+v", cmds)
@@ -193,16 +193,16 @@ func TestSlashCommandsShowPermissionsAndHideApproval(t *testing.T) {
 		t.Fatalf("expected /ask in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/approval") {
-		t.Fatalf("expected /approval to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /approval should not appear in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/thinking") {
-		t.Fatalf("expected /thinking to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /thinking should not appear in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/budget") {
-		t.Fatalf("expected /budget to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /budget should not appear in slash commands: %+v", cmds)
 	}
 	if containsString(cmds, "/step") {
-		t.Fatalf("expected /step to stay hidden from slash commands: %+v", cmds)
+		t.Fatalf("removed command /step should not appear in slash commands: %+v", cmds)
 	}
 }
 

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -39,7 +41,7 @@ func bindPersistentFlags(c *cobra.Command, opts *cliOptions) {
 	c.PersistentFlags().StringVar(&opts.cfg.MCPConfigPath, "mcp-config", opts.cfg.MCPConfigPath, "Path to Whale MCP config file")
 	c.PersistentFlags().Float64Var(&opts.cfg.BudgetWarningUSD, "budget-warning-usd", 0, "Warn at >=80% and >=100% of cumulative session token cost estimate; 0 disables")
 	c.PersistentFlags().StringVarP(&opts.cfg.Model, "model", "m", opts.cfg.Model, "Model to use ("+strings.Join(defaults.SupportedModels(), "|")+")")
-	c.PersistentFlags().StringArrayVar(&opts.configs, "config", nil, "Config overrides (supports: model_reasoning_effort=...)")
+	c.PersistentFlags().StringArrayVar(&opts.configs, "config", nil, "Config overrides (supports: model_reasoning_effort=..., thinking_enabled=...)")
 	c.PersistentFlags().StringVar(&opts.session, "session", "", "Force startup session id")
 	c.PersistentFlags().StringVar(&opts.mode, "mode", "", "Force startup mode: plan|agent")
 	c.Flags().BoolP("version", "V", false, "Print version")
@@ -83,14 +85,66 @@ func runLoop(opts *cliOptions, start app.StartOptions) error {
 }
 
 func prepareCLIConfig(cmd *cobra.Command, opts *cliOptions) error {
-	opts.cfg.ModelExplicit = false
-	if flag := cmd.Flags().Lookup("model"); flag != nil && flag.Changed {
-		opts.cfg.ModelExplicit = true
+	flagCfg := opts.cfg
+	workspaceRoot, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get workspace: %w", err)
 	}
-	if err := applyCLIConfigs(&opts.cfg, opts.configs); err != nil {
+	cfg, err := app.LoadAndApplyConfig(flagCfg, workspaceRoot)
+	if err != nil {
 		return err
 	}
+	applyChangedFlags(cmd, &cfg, flagCfg)
+	if err := applyCLIConfigs(&cfg, opts.configs); err != nil {
+		return err
+	}
+	opts.cfg = cfg
 	return validateModel(opts.cfg.Model)
+}
+
+func applyChangedFlags(cmd *cobra.Command, cfg *app.Config, flagCfg app.Config) {
+	if flagChanged(cmd, "approval-mode") {
+		cfg.ApprovalMode = flagCfg.ApprovalMode
+	}
+	if flagChanged(cmd, "allow-prefixes") {
+		cfg.AllowPrefixes = flagCfg.AllowPrefixes
+	}
+	if flagChanged(cmd, "deny-prefixes") {
+		cfg.DenyPrefixes = flagCfg.DenyPrefixes
+	}
+	if flagChanged(cmd, "auto-compact") {
+		cfg.AutoCompact = flagCfg.AutoCompact
+	}
+	if flagChanged(cmd, "auto-compact-threshold") {
+		cfg.AutoCompactThreshold = flagCfg.AutoCompactThreshold
+	}
+	if flagChanged(cmd, "model-context-window") {
+		cfg.ContextWindow = flagCfg.ContextWindow
+	}
+	if flagChanged(cmd, "memory-enabled") {
+		cfg.MemoryEnabled = flagCfg.MemoryEnabled
+	}
+	if flagChanged(cmd, "memory-max-chars") {
+		cfg.MemoryMaxChars = flagCfg.MemoryMaxChars
+	}
+	if flagChanged(cmd, "memory-file-order") {
+		cfg.MemoryFileOrder = flagCfg.MemoryFileOrder
+	}
+	if flagChanged(cmd, "mcp-config") {
+		cfg.MCPConfigPath = flagCfg.MCPConfigPath
+	}
+	if flagChanged(cmd, "budget-warning-usd") {
+		cfg.BudgetWarningUSD = flagCfg.BudgetWarningUSD
+	}
+	if flagChanged(cmd, "model") {
+		cfg.Model = flagCfg.Model
+		cfg.ModelExplicit = true
+	}
+}
+
+func flagChanged(cmd *cobra.Command, name string) bool {
+	f := cmd.Flag(name)
+	return f != nil && f.Changed
 }
 
 func applyCLIConfigs(cfg *app.Config, entries []string) error {
@@ -112,6 +166,12 @@ func applyCLIConfigs(cfg *app.Config, entries []string) error {
 				return err
 			}
 			cfg.ReasoningEffort = mapped
+		case "thinking_enabled":
+			enabled, err := strconv.ParseBool(val)
+			if err != nil {
+				return fmt.Errorf("invalid thinking_enabled: %s", val)
+			}
+			cfg.ThinkingEnabled = enabled
 		default:
 			return fmt.Errorf("unsupported --config key: %s", key)
 		}
@@ -164,6 +224,7 @@ func newRootCmd(opts *cliOptions) *cobra.Command {
 	bindPersistentFlags(root, opts)
 	root.AddCommand(newExecCmd(opts))
 	root.AddCommand(newDoctorCmd(opts))
+	root.AddCommand(newMigrateConfigCmd(opts))
 	root.AddCommand(newSetupCmd(opts))
 	root.AddCommand(newResumeCmd(opts))
 	return root

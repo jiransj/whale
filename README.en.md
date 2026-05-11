@@ -28,16 +28,16 @@
 
 ## Quick Start
 
+Install with the script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | sh
+```
+
 Install with Homebrew:
 
 ```bash
 brew install usewhale/tap/whale
-```
-
-If you do not use Homebrew, use the install script:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | sh
 ```
 
 First run:
@@ -53,12 +53,6 @@ Upgrade:
 ```bash
 brew upgrade whale
 # or rerun the install script
-```
-
-Install a specific version:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.sh | VERSION=v0.1.8 sh
 ```
 
 Whale currently uses the DeepSeek API. Before running Whale, create an API key in the [DeepSeek Platform](https://platform.deepseek.com/). See the [DeepSeek API docs](https://api-docs.deepseek.com/) for API details.
@@ -140,11 +134,17 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 | `whale setup` | Save a DeepSeek API key |
 | `whale doctor` | Run health checks |
 | `whale exec "prompt"` | Run one prompt non-interactively |
+| `whale migrate-config` | Migrate legacy config files to `config.toml` |
 | `whale resume` | Open the session picker |
 | `whale resume --last` | Resume the most recent session |
 | `whale resume <id>` | Resume a specific session |
+| `/model` | Change model, reasoning effort, and thinking |
+| `/permissions` | Adjust tool approval mode |
 | `/ask [prompt]` | Read-only question mode |
 | `/plan [prompt]` | Plan first, then decide whether to execute |
+| `/status` | Show current session, mode, model, and config status |
+| `/compact` | Compact the current conversation context |
+| `/init` | Generate AGENTS.md for the current repository |
 | `/skills` | List local skills |
 | `/mcp` | Show MCP server status |
 
@@ -183,7 +183,13 @@ See [docs/skills.md](docs/skills.md) for details.
 
 ## Configuration
 
-Whale stores local state under `~/.whale/`. API keys, preferences, session records, and MCP configuration are managed locally.
+Whale stores local state under `~/.whale/`, including API keys, global `config.toml`, session records, usage logs, and MCP configuration. Project config can live at `./.whale/config.toml` in the current repository.
+
+If you upgraded from an older version and used `preferences.json` or `settings.json`, run once:
+
+```bash
+whale migrate-config
+```
 
 See [docs/configuration.md](docs/configuration.md) for details.
 

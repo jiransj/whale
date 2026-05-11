@@ -26,6 +26,7 @@ const CommandsHelp = "/model, /permissions, /ask [prompt], /plan [prompt], /skil
 
 type Config struct {
 	DataDir              string
+	ConfigLoaded         bool
 	ApprovalMode         string
 	AllowPrefixes        string
 	DenyPrefixes         string
@@ -108,6 +109,14 @@ func DefaultConfig() Config {
 }
 
 func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
+	workspaceRoot, _ := os.Getwd()
+	if !cfg.ConfigLoaded {
+		resolved, err := LoadAndApplyConfig(cfg, workspaceRoot)
+		if err != nil {
+			return nil, err
+		}
+		cfg = resolved
+	}
 	sessionsDir := store.DefaultSessionsDir(cfg.DataDir)
 	msgStore, err := store.NewJSONLStore(sessionsDir)
 	if err != nil {
@@ -129,7 +138,6 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid --approval-mode: %w", err)
 	}
-	workspaceRoot, _ := os.Getwd()
 	toolset, err := tools.NewToolset(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("init tools failed: %w", err)
@@ -149,7 +157,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init base tool registry failed: %w", err)
 	}
-	hooks, hookSources, hookLoadErr := agent.LoadHooks(workspaceRoot, "")
+	hooks, hookSources, hookLoadErr := agent.LoadHooks(workspaceRoot, cfg.DataDir)
 	if hookLoadErr != nil {
 		return nil, fmt.Errorf("load hooks failed: %w", hookLoadErr)
 	}
@@ -172,22 +180,9 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		return nil, fmt.Errorf("patch session meta failed: %w", err)
 	}
 
-	// Load persisted preferences to overlay on Config defaults.
-	// Explicit CLI flags (non-default cfg values) take priority over preferences.
-	prefs, _ := LoadPreferences(cfg.DataDir)
 	model := firstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel)
 	effort := normalizeEffort(firstNonEmpty(strings.TrimSpace(cfg.ReasoningEffort), defaults.DefaultReasoningEffort))
 	thinking := cfg.ThinkingEnabled
-	// If cfg values match hardcoded defaults, try preferences.
-	if !cfg.ModelExplicit && strings.TrimSpace(cfg.Model) == defaults.DefaultModel && strings.TrimSpace(prefs.Model) != "" {
-		model = prefs.Model
-	}
-	if strings.TrimSpace(cfg.ReasoningEffort) == defaults.DefaultReasoningEffort && strings.TrimSpace(prefs.ReasoningEffort) != "" {
-		effort = normalizeEffort(prefs.ReasoningEffort)
-	}
-	if cfg.ThinkingEnabled && prefs.ThinkingEnabled != nil {
-		thinking = *prefs.ThinkingEnabled
-	}
 	cfg.ContextWindow = resolveContextWindow(cfg.ContextWindow, model)
 	apiKey, err := LoadDeepSeekAPIKey(cfg.DataDir)
 	if err != nil {
@@ -407,9 +402,5 @@ func (a *App) Close() error {
 
 func (a *App) savePreferences() {
 	enabled := a.thinkingEnabled
-	_ = SavePreferences(a.cfg.DataDir, Preferences{
-		Model:           a.model,
-		ReasoningEffort: a.reasoningEffort,
-		ThinkingEnabled: &enabled,
-	})
+	_ = SaveGlobalPreferences(a.cfg.DataDir, a.model, a.reasoningEffort, enabled)
 }

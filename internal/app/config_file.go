@@ -1,0 +1,285 @@
+package app
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+
+	"github.com/usewhale/whale/internal/agent"
+	"github.com/usewhale/whale/internal/store"
+)
+
+const ConfigFileName = "config.toml"
+
+type FileConfig struct {
+	Model            string   `toml:"model,omitempty"`
+	ReasoningEffort  string   `toml:"reasoning_effort,omitempty"`
+	ThinkingEnabled  *bool    `toml:"thinking_enabled,omitempty"`
+	ApprovalMode     string   `toml:"approval_mode,omitempty"`
+	AllowPrefixes    []string `toml:"allow_prefixes,omitempty"`
+	DenyPrefixes     []string `toml:"deny_prefixes,omitempty"`
+	BudgetWarningUSD *float64 `toml:"budget_warning_usd,omitempty"`
+	MCPConfig        string   `toml:"mcp_config,omitempty"`
+
+	Compact FileCompactConfig             `toml:"compact,omitempty"`
+	Memory  FileMemoryConfig              `toml:"memory,omitempty"`
+	Hooks   map[string][]agent.HookConfig `toml:"hooks,omitempty"`
+}
+
+type FileCompactConfig struct {
+	Auto      *bool    `toml:"auto,omitempty"`
+	Threshold *float64 `toml:"threshold,omitempty"`
+}
+
+type FileMemoryConfig struct {
+	Enabled   *bool    `toml:"enabled,omitempty"`
+	MaxChars  *int     `toml:"max_chars,omitempty"`
+	FileOrder []string `toml:"file_order,omitempty"`
+}
+
+type LoadedConfig struct {
+	Global        FileConfig
+	GlobalLoaded  bool
+	GlobalPath    string
+	Project       FileConfig
+	ProjectLoaded bool
+	ProjectPath   string
+}
+
+func GlobalConfigPath(dataDir string) string {
+	if strings.TrimSpace(dataDir) == "" {
+		dataDir = store.DefaultDataDir()
+	}
+	return filepath.Join(dataDir, ConfigFileName)
+}
+
+func ProjectConfigPath(workspaceRoot string) string {
+	return filepath.Join(workspaceRoot, ".whale", ConfigFileName)
+}
+
+func LoadConfigFiles(dataDir, workspaceRoot string) (LoadedConfig, error) {
+	globalPath := GlobalConfigPath(dataDir)
+	global, globalLoaded, err := LoadConfigFile(globalPath)
+	if err != nil {
+		return LoadedConfig{}, err
+	}
+	projectPath := ProjectConfigPath(workspaceRoot)
+	project, projectLoaded, err := LoadConfigFile(projectPath)
+	if err != nil {
+		return LoadedConfig{}, err
+	}
+	return LoadedConfig{
+		Global:        global,
+		GlobalLoaded:  globalLoaded,
+		GlobalPath:    globalPath,
+		Project:       project,
+		ProjectLoaded: projectLoaded,
+		ProjectPath:   projectPath,
+	}, nil
+}
+
+func LoadConfigFile(path string) (FileConfig, bool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return FileConfig{}, false, nil
+		}
+		return FileConfig{}, false, fmt.Errorf("read config %s: %w", path, err)
+	}
+	var cfg FileConfig
+	if err := toml.Unmarshal(b, &cfg); err != nil {
+		return FileConfig{}, true, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	return cfg, true, nil
+}
+
+func SaveConfigFile(path string, cfg FileConfig) error {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir config dir: %w", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+func ApplyLoadedConfig(cfg *Config, loaded LoadedConfig) {
+	ApplyFileConfig(cfg, loaded.Global)
+	ApplyFileConfig(cfg, loaded.Project)
+}
+
+func ApplyFileConfig(cfg *Config, file FileConfig) {
+	if strings.TrimSpace(file.Model) != "" {
+		cfg.Model = strings.TrimSpace(file.Model)
+	}
+	if strings.TrimSpace(file.ReasoningEffort) != "" {
+		cfg.ReasoningEffort = strings.TrimSpace(file.ReasoningEffort)
+	}
+	if file.ThinkingEnabled != nil {
+		cfg.ThinkingEnabled = *file.ThinkingEnabled
+	}
+	if strings.TrimSpace(file.ApprovalMode) != "" {
+		cfg.ApprovalMode = strings.TrimSpace(file.ApprovalMode)
+	}
+	if len(file.AllowPrefixes) > 0 {
+		cfg.AllowPrefixes = strings.Join(trimList(file.AllowPrefixes), ",")
+	}
+	if len(file.DenyPrefixes) > 0 {
+		cfg.DenyPrefixes = strings.Join(trimList(file.DenyPrefixes), ",")
+	}
+	if file.BudgetWarningUSD != nil {
+		cfg.BudgetWarningUSD = *file.BudgetWarningUSD
+	}
+	if strings.TrimSpace(file.MCPConfig) != "" {
+		cfg.MCPConfigPath = expandUserPath(file.MCPConfig)
+	}
+	if file.Compact.Auto != nil {
+		cfg.AutoCompact = *file.Compact.Auto
+	}
+	if file.Compact.Threshold != nil {
+		cfg.AutoCompactThreshold = *file.Compact.Threshold
+	}
+	if file.Memory.Enabled != nil {
+		cfg.MemoryEnabled = *file.Memory.Enabled
+	}
+	if file.Memory.MaxChars != nil {
+		cfg.MemoryMaxChars = *file.Memory.MaxChars
+	}
+	if len(file.Memory.FileOrder) > 0 {
+		cfg.MemoryFileOrder = strings.Join(trimList(file.Memory.FileOrder), ",")
+	}
+}
+
+func LoadAndApplyConfig(cfg Config, workspaceRoot string) (Config, error) {
+	base := DefaultConfig()
+	base.DataDir = firstNonEmpty(strings.TrimSpace(cfg.DataDir), store.DefaultDataDir())
+
+	loaded, err := LoadConfigFiles(base.DataDir, workspaceRoot)
+	if err != nil {
+		return Config{}, err
+	}
+	ApplyLoadedConfig(&base, loaded)
+	overlayExplicitConfig(&base, cfg)
+	base.ConfigLoaded = true
+	return base, nil
+}
+
+func overlayExplicitConfig(dst *Config, src Config) {
+	def := DefaultConfig()
+	dst.DataDir = firstNonEmpty(strings.TrimSpace(src.DataDir), dst.DataDir)
+	if src.ModelExplicit || (strings.TrimSpace(src.Model) != "" && src.Model != def.Model) {
+		dst.Model = src.Model
+		dst.ModelExplicit = src.ModelExplicit
+	}
+	if strings.TrimSpace(src.ApprovalMode) != "" && src.ApprovalMode != def.ApprovalMode {
+		dst.ApprovalMode = src.ApprovalMode
+	}
+	if strings.TrimSpace(src.AllowPrefixes) != "" {
+		dst.AllowPrefixes = src.AllowPrefixes
+	}
+	if strings.TrimSpace(src.DenyPrefixes) != "" {
+		dst.DenyPrefixes = src.DenyPrefixes
+	}
+	if src.AutoCompact != def.AutoCompact {
+		dst.AutoCompact = src.AutoCompact
+	}
+	if src.AutoCompactThreshold != def.AutoCompactThreshold {
+		dst.AutoCompactThreshold = src.AutoCompactThreshold
+	}
+	if src.ContextWindow != 0 && src.ContextWindow != def.ContextWindow {
+		dst.ContextWindow = src.ContextWindow
+	}
+	if src.MemoryEnabled != def.MemoryEnabled {
+		dst.MemoryEnabled = src.MemoryEnabled
+	}
+	if src.MemoryMaxChars != 0 && src.MemoryMaxChars != def.MemoryMaxChars {
+		dst.MemoryMaxChars = src.MemoryMaxChars
+	}
+	if strings.TrimSpace(src.MemoryFileOrder) != "" && src.MemoryFileOrder != def.MemoryFileOrder {
+		dst.MemoryFileOrder = src.MemoryFileOrder
+	}
+	if src.BudgetWarningUSD != def.BudgetWarningUSD {
+		dst.BudgetWarningUSD = src.BudgetWarningUSD
+	}
+	if strings.TrimSpace(src.ReasoningEffort) != "" && src.ReasoningEffort != def.ReasoningEffort {
+		dst.ReasoningEffort = src.ReasoningEffort
+	}
+	if src.ThinkingEnabled != def.ThinkingEnabled {
+		dst.ThinkingEnabled = src.ThinkingEnabled
+	}
+	if strings.TrimSpace(src.MCPConfigPath) != "" {
+		dst.MCPConfigPath = src.MCPConfigPath
+	}
+}
+
+func SaveGlobalPreferences(dataDir, model, effort string, thinking bool) error {
+	path := GlobalConfigPath(dataDir)
+	cfg, _, err := LoadConfigFile(path)
+	if err != nil {
+		return err
+	}
+	cfg.Model = strings.TrimSpace(model)
+	cfg.ReasoningEffort = strings.TrimSpace(effort)
+	cfg.ThinkingEnabled = &thinking
+	return SaveConfigFile(path, cfg)
+}
+
+func ConfigSources(loaded LoadedConfig) []string {
+	out := make([]string, 0, 2)
+	if loaded.ProjectLoaded {
+		out = append(out, loaded.ProjectPath)
+	}
+	if loaded.GlobalLoaded {
+		out = append(out, loaded.GlobalPath)
+	}
+	return out
+}
+
+func hooksFromFileConfig(cfg FileConfig) agent.HookSettings {
+	out := agent.HookSettings{Hooks: map[agent.HookEvent][]agent.HookConfig{}}
+	for raw, hooks := range cfg.Hooks {
+		ev := agent.HookEvent(strings.TrimSpace(raw))
+		switch ev {
+		case agent.HookEventPreToolUse, agent.HookEventPostToolUse, agent.HookEventUserPromptSubmit, agent.HookEventStop:
+			out.Hooks[ev] = append(out.Hooks[ev], hooks...)
+		}
+	}
+	return out
+}
+
+func countFileConfigHooks(cfg FileConfig) int {
+	return countHooks(hooksFromFileConfig(cfg))
+}
+
+func trimList(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func expandUserPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return home
+		}
+	}
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	return path
+}

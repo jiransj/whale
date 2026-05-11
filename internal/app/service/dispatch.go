@@ -90,7 +90,7 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 	if line == "" {
 		return
 	}
-	line = appcommands.ExpandUniqueSlashPrefix(line, app.CommandsHelp, "/tools", "/tool", "/mcp", "/budget", "/approval", "/thinking")
+	line = appcommands.ExpandUniqueSlashPrefix(line, app.CommandsHelp, "/mcp")
 	prevSessionID := s.app.SessionID()
 	if line == "/model" {
 		s.emit(Event{

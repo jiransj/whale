@@ -3,12 +3,9 @@ package app
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/usewhale/whale/internal/core"
-	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
 )
 
@@ -26,10 +23,6 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 	if cmdResult.ShowStatus {
 		return true, a.buildStatus(), "", false, false, nil
 	}
-	if cmdResult.ShowContext {
-		ctxLine, err := a.buildContext()
-		return true, ctxLine, "", false, false, err
-	}
 	if cmdResult.InitMemory {
 		line, err := a.initMemory()
 		if err != nil || line != "" {
@@ -37,16 +30,8 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 		}
 		return true, "Initializing AGENTS.md from repository context...", buildInitSyntheticPrompt(), false, false, nil
 	}
-	if cmdResult.ShowMemory {
-		line := a.showMemory()
-		return true, line, "", false, false, nil
-	}
 	if cmdResult.ShowSkills {
 		return true, a.buildSkillsList(), "", false, false, nil
-	}
-	if cmdResult.SkillName != "" {
-		out, synthetic, err := a.buildSkillSyntheticPrompt(cmdResult.SkillName, cmdResult.SkillArgs)
-		return true, out, synthetic, false, false, err
 	}
 	if cmdResult.Mode != "" {
 		mode, err := session.ParseMode(cmdResult.Mode)
@@ -105,64 +90,6 @@ func (a *App) HandleLocalCommand(line string) (handled bool, output string, err 
 	if strings.TrimSpace(line) == "/mcp" {
 		return true, a.buildMCPStatus(), nil
 	}
-	if strings.TrimSpace(line) == "/tools" {
-		specs := a.toolRegistry.Specs()
-		if len(specs) == 0 {
-			return true, "no tools registered", nil
-		}
-		parts := make([]string, 0, len(specs)*2)
-		for i, s := range specs {
-			ro := "write"
-			if s.ReadOnly {
-				ro = "read-only"
-			}
-			parts = append(parts, fmt.Sprintf("%d. %s [%s]", i+1, s.Name, ro))
-			if s.Description != "" {
-				parts = append(parts, "   "+s.Description)
-			}
-		}
-		return true, strings.Join(parts, "\n"), nil
-	}
-	if strings.HasPrefix(line, "/tool") {
-		n := 5
-		fields := strings.Fields(line)
-		if len(fields) == 2 {
-			v, err := strconv.Atoi(fields[1])
-			if err != nil || v < 1 {
-				return true, "", errors.New("usage: /tool [N]")
-			}
-			n = v
-		}
-		msgs, err := a.msgStore.List(a.ctx, a.sessionID)
-		if err != nil {
-			return true, "", err
-		}
-		hits := make([]core.ToolResult, 0, n)
-		for i := len(msgs) - 1; i >= 0 && len(hits) < n; i-- {
-			if msgs[i].Role != core.RoleTool {
-				continue
-			}
-			for j := len(msgs[i].ToolResults) - 1; j >= 0 && len(hits) < n; j-- {
-				hits = append(hits, msgs[i].ToolResults[j])
-			}
-		}
-		if len(hits) == 0 {
-			return true, "no tool results in this session", nil
-		}
-		rows := make([]string, 0, len(hits)*2)
-		for i, r := range hits {
-			status := "ok"
-			if r.IsError {
-				status = "error"
-			}
-			content := r.Content
-			if len(content) > 240 {
-				content = content[:240] + "..."
-			}
-			rows = append(rows, fmt.Sprintf("#%d %s [%s]\n%s", i+1, r.Name, status, content))
-		}
-		return true, strings.Join(rows, "\n"), nil
-	}
 	if strings.HasPrefix(line, "/compact") {
 		fields := strings.Fields(line)
 		if len(fields) != 1 || fields[0] != "/compact" {
@@ -181,72 +108,6 @@ func (a *App) HandleLocalCommand(line string) (handled bool, output string, err 
 			return true, "nothing to compact", nil
 		}
 		return true, fmt.Sprintf("compacted conversation: %d -> %d messages; ~%d -> ~%d tokens", info.MessagesBefore, info.MessagesAfter, info.BeforeEstimate, info.AfterEstimate), nil
-	}
-	if strings.HasPrefix(line, "/budget") {
-		fields := strings.Fields(line)
-		if len(fields) == 1 || (len(fields) == 2 && strings.EqualFold(fields[1], "show")) {
-			if a.budgetWarningUSD > 0 {
-				return true, fmt.Sprintf("budget warning cap: $%.4f", a.budgetWarningUSD), nil
-			}
-			return true, "budget warning cap: disabled", nil
-		}
-		if len(fields) != 2 {
-			return true, "", errors.New("usage: /budget [off|show|USD]")
-		}
-		arg := strings.TrimSpace(fields[1])
-		if strings.EqualFold(arg, "off") {
-			a.budgetWarningUSD = 0
-			a.a = nil
-			return true, "budget warning disabled", nil
-		}
-		v, err := strconv.ParseFloat(arg, 64)
-		if err != nil || v <= 0 {
-			return true, "", errors.New("usage: /budget [off|show|USD]")
-		}
-		a.budgetWarningUSD = v
-		a.a = nil
-		return true, fmt.Sprintf("budget warning cap set: $%.4f", a.budgetWarningUSD), nil
-	}
-	if strings.HasPrefix(line, "/approval ") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			return true, "", errors.New("usage: /approval <on-request|never-ask>")
-		}
-		mode, err := policy.ParseApprovalMode(fields[1])
-		if err != nil {
-			return true, "", err
-		}
-		a.SetApprovalMode(mode)
-		return true, fmt.Sprintf("approval mode set: %s", approvalModeDisplay(a.approvalMode)), nil
-	}
-	if strings.HasPrefix(line, "/thinking") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			return true, "", errors.New("usage: /thinking [on|off]")
-		}
-		switch strings.ToLower(strings.TrimSpace(fields[1])) {
-		case "on":
-			a.SetThinkingEnabled(true)
-			return true, "thinking: on", nil
-		case "off":
-			a.SetThinkingEnabled(false)
-			return true, "thinking: off", nil
-		default:
-			return true, "", errors.New("usage: /thinking [on|off]")
-		}
-	}
-	if strings.HasPrefix(line, "/key ") {
-		a.apiKey = strings.TrimSpace(strings.TrimPrefix(line, "/key "))
-		if a.apiKey == "" {
-			return true, "", errors.New("empty key")
-		}
-		a.a = nil
-		return true, "api key set for current session", nil
-	}
-	if strings.HasPrefix(line, "sk-") && a.apiKey == "" {
-		a.apiKey = line
-		a.a = nil
-		return true, "api key set for current session", nil
 	}
 	return false, "", nil
 }

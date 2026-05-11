@@ -60,6 +60,10 @@ func RunDoctor(ctx context.Context, cfg Config, workspaceRoot string) (DoctorRep
 		dataDir = store.DefaultDataDir()
 	}
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if resolved, err := LoadAndApplyConfig(cfg, workspaceRoot); err == nil {
+		cfg = resolved
+		dataDir = cfg.DataDir
+	}
 	order := parseCSVList(cfg.MemoryFileOrder)
 	if len(order) == 0 {
 		order = defaults.DefaultMemoryFileOrder()
@@ -67,11 +71,13 @@ func RunDoctor(ctx context.Context, cfg Config, workspaceRoot string) (DoctorRep
 
 	apiKeyCheck, source, key := doctorCheckAPIKey(dataDir)
 	credsCheck := doctorCheckCredentials(dataDir)
-	prefsCheck := doctorCheckPreferences(dataDir)
+	loadedConfig, configErr := LoadConfigFiles(dataDir, workspaceRoot)
+	configCheck := doctorCheckConfig(loadedConfig, configErr)
+	legacyCheck := doctorCheckLegacyConfig(dataDir, workspaceRoot, len(ConfigSources(loadedConfig)) > 0)
 	dataDirCheck := doctorCheckDataDir(dataDir)
 	apiReachCheck := doctorCheckAPIReach(ctx, key)
 	memoryCheck := doctorCheckMemory(workspaceRoot, order, cfg.MemoryMaxChars)
-	hooksCheck := doctorCheckHooks(workspaceRoot)
+	hooksCheck := doctorCheckHooks(dataDir, workspaceRoot)
 
 	_ = source
 
@@ -81,7 +87,8 @@ func RunDoctor(ctx context.Context, cfg Config, workspaceRoot string) (DoctorRep
 		Checks: []DoctorCheck{
 			apiKeyCheck,
 			credsCheck,
-			prefsCheck,
+			configCheck,
+			legacyCheck,
 			dataDirCheck,
 			apiReachCheck,
 			memoryCheck,
@@ -171,30 +178,6 @@ func doctorCheckCredentials(dataDir string) DoctorCheck {
 	}
 }
 
-func doctorCheckPreferences(dataDir string) DoctorCheck {
-	st := readPreferencesState(dataDir)
-	switch {
-	case st.Err != nil:
-		return DoctorCheck{
-			Label:  "preferences",
-			Level:  DoctorFail,
-			Detail: fmt.Sprintf("%s unreadable — %v", st.Path, st.Err),
-		}
-	case !st.Present:
-		return DoctorCheck{
-			Label:  "preferences",
-			Level:  DoctorWarn,
-			Detail: fmt.Sprintf("%s missing — defaults will be used", st.Path),
-		}
-	default:
-		return DoctorCheck{
-			Label:  "preferences",
-			Level:  DoctorOK,
-			Detail: st.Path,
-		}
-	}
-}
-
 func doctorCheckDataDir(dataDir string) DoctorCheck {
 	sessionsDir := store.DefaultSessionsDir(dataDir)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -276,42 +259,88 @@ func doctorCheckMemory(workspaceRoot string, fileOrder []string, maxChars int) D
 	}
 }
 
-func doctorCheckHooks(workspaceRoot string) DoctorCheck {
-	projectPath := filepath.Join(workspaceRoot, ".whale", "settings.json")
-	home, _ := os.UserHomeDir()
-	globalPath := filepath.Join(home, ".whale", "settings.json")
-	paths := []string{projectPath}
-	if strings.TrimSpace(home) != "" {
-		paths = append(paths, globalPath)
+func doctorCheckConfig(loaded LoadedConfig, err error) DoctorCheck {
+	if err != nil {
+		return DoctorCheck{
+			Label:  "config",
+			Level:  DoctorFail,
+			Detail: err.Error(),
+		}
 	}
+	sources := ConfigSources(loaded)
+	if len(sources) == 0 {
+		return DoctorCheck{
+			Label:  "config",
+			Level:  DoctorOK,
+			Detail: "no config.toml found — defaults will be used",
+		}
+	}
+	return DoctorCheck{
+		Label:  "config",
+		Level:  DoctorOK,
+		Detail: strings.Join(sources, ", "),
+	}
+}
 
-	totalHooks := 0
-	loaded := make([]string, 0, len(paths))
+func doctorCheckLegacyConfig(dataDir, workspaceRoot string, hasActiveConfig bool) DoctorCheck {
+	paths := []string{
+		preferencesPath(dataDir),
+		filepath.Join(dataDir, "settings.json"),
+		filepath.Join(workspaceRoot, ".whale", "settings.json"),
+	}
+	found := make([]string, 0, len(paths))
 	for _, path := range paths {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
+		if _, err := os.Stat(path); err == nil {
+			found = append(found, path)
+		} else if err != nil && !os.IsNotExist(err) {
 			return DoctorCheck{
-				Label:  "hooks",
+				Label:  "legacy config",
 				Level:  DoctorFail,
 				Detail: fmt.Sprintf("%s unreadable — %v", path, err),
 			}
 		}
-		var st agent.HookSettings
-		if err := json.Unmarshal(b, &st); err != nil {
-			return DoctorCheck{
-				Label:  "hooks",
-				Level:  DoctorWarn,
-				Detail: fmt.Sprintf("%s parse error — %v", path, err),
-			}
-		}
-		loaded = append(loaded, path)
-		totalHooks += countHooks(st)
 	}
+	if len(found) == 0 {
+		return DoctorCheck{
+			Label:  "legacy config",
+			Level:  DoctorOK,
+			Detail: "no obsolete config files found",
+		}
+	}
+	if hasActiveConfig {
+		return DoctorCheck{
+			Label:  "legacy config",
+			Level:  DoctorWarn,
+			Detail: fmt.Sprintf("%d obsolete file(s) ignored — config.toml is active", len(found)),
+		}
+	}
+	return DoctorCheck{
+		Label:  "legacy config",
+		Level:  DoctorWarn,
+		Detail: fmt.Sprintf("%d obsolete file(s) found — run `whale migrate-config`", len(found)),
+	}
+}
 
-	if len(loaded) == 0 {
+func doctorCheckHooks(dataDir, workspaceRoot string) DoctorCheck {
+	loaded, err := LoadConfigFiles(dataDir, workspaceRoot)
+	if err != nil {
+		return DoctorCheck{
+			Label:  "hooks",
+			Level:  DoctorFail,
+			Detail: err.Error(),
+		}
+	}
+	totalHooks := 0
+	loadedFiles := 0
+	if loaded.ProjectLoaded {
+		totalHooks += countFileConfigHooks(loaded.Project)
+		loadedFiles++
+	}
+	if loaded.GlobalLoaded {
+		totalHooks += countFileConfigHooks(loaded.Global)
+		loadedFiles++
+	}
+	if totalHooks == 0 {
 		return DoctorCheck{
 			Label:  "hooks",
 			Level:  DoctorOK,
@@ -321,7 +350,7 @@ func doctorCheckHooks(workspaceRoot string) DoctorCheck {
 	return DoctorCheck{
 		Label:  "hooks",
 		Level:  DoctorOK,
-		Detail: fmt.Sprintf("%d hook(s) from %d file(s)", totalHooks, len(loaded)),
+		Detail: fmt.Sprintf("%d hook(s) from %d file(s)", totalHooks, loadedFiles),
 	}
 }
 
@@ -363,22 +392,6 @@ func readCredentialsState(dataDir string) fileState {
 	var creds Credentials
 	if err := json.Unmarshal(b, &creds); err != nil {
 		return fileState{Path: path, Present: true, Err: fmt.Errorf("unmarshal credentials: %w", err)}
-	}
-	return fileState{Path: path, Present: true}
-}
-
-func readPreferencesState(dataDir string) fileState {
-	path := preferencesPath(dataDir)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fileState{Path: path}
-		}
-		return fileState{Path: path, Present: true, Err: err}
-	}
-	var prefs Preferences
-	if err := json.Unmarshal(b, &prefs); err != nil {
-		return fileState{Path: path, Present: true, Err: fmt.Errorf("unmarshal preferences: %w", err)}
 	}
 	return fileState{Path: path, Present: true}
 }
