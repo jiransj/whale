@@ -1293,13 +1293,41 @@ func TestSummarizeToolResultForChat_ShellRunSuccessShowsOutputSummary(t *testing
 	}
 }
 
+func TestShellRunTranscriptKeepsStatusAndOutputSeparate(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-shell",
+		ToolName:   "shell_run",
+		Text:       `shell_run: {"command":"cd internal/tui && wc -l model.go model_events.go model_keys.go model_prompt.go"}`,
+	}))
+	m = next.(model)
+	raw := `{"success":true,"code":"ok","data":{"status":"ok","metrics":{"exit_code":0,"duration_ms":23},"payload":{"command":"cd internal/tui && wc -l model.go model_events.go model_keys.go model_prompt.go","stdout":"284 model.go\n202 model_events.go\n401 model_keys.go\n88 model_prompt.go\n975 total\n","stderr":""}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-shell",
+		ToolName:   "shell_run",
+		Text:       raw,
+	}))
+	m = next.(model)
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	if strings.Contains(rendered, "23ms 284 model.go") {
+		t.Fatalf("status and shell output collapsed onto one line:\n%s", rendered)
+	}
+	for _, want := range []string{"Ran cd internal/tui && wc -l", "✓ · 23ms", "284 model.go", "202 model_events.go", "975 total"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected rendered transcript to contain %q:\n%s", want, rendered)
+		}
+	}
+}
+
 func TestSummarizeToolResultForChat_ShellRunFailureShowsReason(t *testing.T) {
 	raw := `{"success":false,"code":"exec_failed","message":"command failed","data":{"status":"error","summary":"command failed","metrics":{"exit_code":2,"duration_ms":1210},"payload":{"stderr":"ls: cannot access x: No such file or directory\n","stdout":""}}}`
 	role, got := summarizeToolResultForChat("shell_run", raw)
 	if role != "result_failed" {
 		t.Fatalf("expected result_failed role, got %q", role)
 	}
-	want := "✗ (exit 2) · 1.2s · ls: cannot access x: No such file or directory"
+	want := "✗ (exit 2) · 1.2s\nls: cannot access x: No such file or directory"
 	if got != want {
 		t.Fatalf("unexpected summary text:\nwant: %q\ngot:  %q", want, got)
 	}
@@ -1418,7 +1446,7 @@ func TestSummarizeToolResultForChat_FailedNoExitCodeDoesNotShowZero(t *testing.T
 	if got == "✗ (exit 0) · 41ms · unknown flag: --bad" {
 		t.Fatalf("must not show fake exit 0: %q", got)
 	}
-	if got != "✗ · 41ms · unknown flag: --bad" {
+	if got != "✗ · 41ms\nunknown flag: --bad" {
 		t.Fatalf("unexpected failed summary: %q", got)
 	}
 }

@@ -113,7 +113,7 @@ func summarizeShellResult(env toolResultEnvelope, successBySignal bool) (string,
 	}
 
 	if !successBySignal {
-		return summarizeFailedResult(env, "command failed")
+		return summarizeFailedShellResult(env)
 	}
 
 	_ = exitCode
@@ -122,11 +122,61 @@ func summarizeShellResult(env toolResultEnvelope, successBySignal bool) (string,
 	if duration != "" {
 		parts = append(parts, duration)
 	}
-	output := summarizeShellOutput(firstNonEmpty(asString(env.payload["stdout"]), asString(env.payload["stderr"])))
+	output := summarizeShellOutput(shellPayloadOutput(env, false))
 	if output != "" {
 		return "result_ok", strings.Join(parts, " · ") + "\n" + output
 	}
 	return "result_ok", strings.Join(parts, " · ")
+}
+
+func summarizeFailedShellResult(env toolResultEnvelope) (string, string) {
+	if shellFailureUsesGenericSummary(env) {
+		return summarizeFailedResult(env, "command failed")
+	}
+	output := summarizeShellOutput(shellPayloadOutput(env, true))
+	if output == "" {
+		return summarizeFailedResult(env, "command failed")
+	}
+	exitCode := asInt(env.metrics["exit_code"])
+	hasExitCode := hasInt(env.metrics["exit_code"])
+	duration := formatDurationMS(asInt64(env.metrics["duration_ms"]))
+	prefix := "✗"
+	if hasExitCode && exitCode > 0 {
+		prefix = fmt.Sprintf("✗ (exit %d)", exitCode)
+	}
+	parts := []string{prefix}
+	if duration != "" {
+		parts = append(parts, duration)
+	}
+	return "result_failed", strings.Join(parts, " · ") + "\n" + output
+}
+
+func shellFailureUsesGenericSummary(env toolResultEnvelope) bool {
+	switch env.code {
+	case "request_replan", "approval_denied", "policy_denied", "permission_denied", "timeout", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellPayloadOutput(env toolResultEnvelope, preferStderr bool) string {
+	stdout := strings.TrimRight(asString(env.payload["stdout"]), "\n")
+	stderr := strings.TrimRight(asString(env.payload["stderr"]), "\n")
+	if preferStderr {
+		return joinShellOutput(stderr, stdout)
+	}
+	return joinShellOutput(stdout, stderr)
+}
+
+func joinShellOutput(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			out = append(out, part)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 func summarizeShellOutput(text string) string {
