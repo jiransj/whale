@@ -26,12 +26,12 @@ func TestDefaultToolPolicyPrefixRules(t *testing.T) {
 		AllowPrefixes: []string{"echo"},
 		DenyPrefixes:  []string{"rm -rf"},
 	}
-	spec := ToolSpec{Name: "exec_shell"}
-	allow := p.Decide(spec, ToolCall{Name: "exec_shell", Input: `{"command":"echo hi"}`})
+	spec := ToolSpec{Name: "shell_run"}
+	allow := p.Decide(spec, ToolCall{Name: "shell_run", Input: `{"command":"echo hi"}`})
 	if !allow.Allow || allow.RequiresApproval {
 		t.Fatalf("expected allow-prefix decision: %+v", allow)
 	}
-	deny := p.Decide(spec, ToolCall{Name: "exec_shell", Input: `{"command":"rm -rf /tmp/x"}`})
+	deny := p.Decide(spec, ToolCall{Name: "shell_run", Input: `{"command":"rm -rf /tmp/x"}`})
 	if deny.Allow || deny.Code != "policy_denied" {
 		t.Fatalf("expected deny-prefix decision: %+v", deny)
 	}

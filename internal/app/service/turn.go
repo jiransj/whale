@@ -217,13 +217,13 @@ func summarizeToolCall(call core.ToolCall) string {
 			return fmt.Sprintf("spawn_subagent: %s · %s", role, task)
 		}
 		return "spawn_subagent: " + role
-	case "exec_shell":
+	case "shell_run":
 		if cmd, _ := body["command"].(string); strings.TrimSpace(cmd) != "" {
-			return fmt.Sprintf("exec_shell: %s", strings.TrimSpace(cmd))
+			return fmt.Sprintf("shell_run: %s", strings.TrimSpace(cmd))
 		}
-	case "exec_shell_wait":
+	case "shell_wait":
 		if taskID, _ := body["task_id"].(string); strings.TrimSpace(taskID) != "" {
-			return fmt.Sprintf("exec_shell_wait: %s", strings.TrimSpace(taskID))
+			return fmt.Sprintf("shell_wait: %s", strings.TrimSpace(taskID))
 		}
 	case "write", "edit":
 		if path, _ := body["file_path"].(string); strings.TrimSpace(path) != "" {

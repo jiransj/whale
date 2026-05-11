@@ -169,14 +169,14 @@ func normalizeToolCallLabel(text string) string {
 	if t == "" {
 		return t
 	}
-	if strings.HasPrefix(t, "exec_shell:") {
-		cmd := strings.TrimSpace(strings.TrimPrefix(t, "exec_shell:"))
+	if strings.HasPrefix(t, "shell_run:") {
+		cmd := strings.TrimSpace(strings.TrimPrefix(t, "shell_run:"))
 		if cmd != "" {
 			return "Running " + cmd
 		}
 		return "Running shell command"
 	}
-	if t == "exec_shell" {
+	if t == "shell_run" {
 		return "Running shell command"
 	}
 	return t

@@ -53,25 +53,10 @@ func (m model) View() string {
 		bottomParts = append(bottomParts, m.renderSlashSuggestions())
 	}
 	if m.mode == modeApproval {
-		opts := []string{"Allow (a)", "Allow for Session (s)", "Deny (d)"}
-		for i := range opts {
-			if i == m.approval.selected {
-				opts[i] = "[" + opts[i] + "]"
-			}
+		if len(bottomParts) > 0 {
+			bottomParts = append(bottomParts, "")
 		}
-		approvalBody := m.approval.reason
-		if diff := renderFileDiffMetadataPlain(m.approval.metadata, 80); diff != "" {
-			approvalBody += "\n\n" + diff
-		}
-		approval := lipgloss.NewStyle().Foreground(tuitheme.Default.Error).Render(
-			fmt.Sprintf(
-				"approval: %s\n%s\n\n%s\n(←/→/tab select, enter confirm, esc deny)",
-				m.approval.toolName,
-				approvalBody,
-				strings.Join(opts, "   "),
-			),
-		)
-		bottomParts = append(bottomParts, approval)
+		bottomParts = append(bottomParts, m.renderApprovalPrompt())
 	}
 	if m.mode == modePlanImplementation {
 		bottomParts = append(bottomParts, m.renderPlanImplementationPicker())
@@ -131,6 +116,86 @@ func (m model) View() string {
 		return bottom
 	}
 	return body + "\n" + bottom
+}
+
+func (m model) renderApprovalPrompt() string {
+	title := lipgloss.NewStyle().Foreground(tuitheme.Default.Palette).Bold(true)
+	tool := lipgloss.NewStyle().Foreground(tuitheme.Default.Muted)
+	body := lipgloss.NewStyle()
+	hint := lipgloss.NewStyle().Foreground(tuitheme.Default.Muted)
+
+	approvalBody := body.Render(indentApprovalBody(approvalDisplayBody(m.approval.toolName, m.approval.reason)))
+	if diff := renderFileDiffMetadataPlain(m.approval.metadata, 80); diff != "" {
+		approvalBody += "\n\n" + diff
+	}
+
+	opts := []string{
+		renderApprovalOption("Allow once", "a", m.approval.selected == 0, false),
+		renderApprovalOption("Allow for session", "s", m.approval.selected == 1, false),
+		renderApprovalOption("Deny", "d", m.approval.selected == 2, true),
+	}
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		title.Render("Approval required")+"  "+tool.Render(approvalToolDisplayName(m.approval.toolName)),
+		"",
+		approvalBody,
+		"",
+		"  "+strings.Join(opts, "   "),
+		"",
+		hint.Render("Enter confirm · Esc deny · ←/→/tab switch"),
+	)
+}
+
+func approvalToolDisplayName(toolName string) string {
+	switch toolName {
+	case "shell_run":
+		return "shell command"
+	default:
+		return toolName
+	}
+}
+
+func approvalDisplayBody(toolName, summary string) string {
+	if detail, ok := strings.CutPrefix(summary, toolName+":"); ok {
+		detail = strings.TrimSpace(detail)
+		if detail != "" {
+			return detail
+		}
+	}
+	return strings.TrimSpace(summary)
+}
+
+func indentApprovalBody(body string) string {
+	if body == "" {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = "  " + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderApprovalOption(label, shortcut string, selected, destructive bool) string {
+	prefix := mutedSelectionPrefix(selected)
+	key := lipgloss.NewStyle().Foreground(tuitheme.Default.Muted).Render("(" + shortcut + ")")
+	style := lipgloss.NewStyle().Foreground(tuitheme.Default.Muted)
+	if selected {
+		color := tuitheme.Default.InfoSoft
+		if destructive {
+			color = tuitheme.Default.ResultDenied
+		}
+		style = lipgloss.NewStyle().Foreground(color).Bold(true)
+	}
+	return prefix + style.Render(label) + " " + key
+}
+
+func mutedSelectionPrefix(selected bool) string {
+	if selected {
+		return lipgloss.NewStyle().Foreground(tuitheme.Default.InfoSoft).Bold(true).Render("› ")
+	}
+	return lipgloss.NewStyle().Foreground(tuitheme.Default.Muted).Render("  ")
 }
 
 func countVisibleLines(s string) int {

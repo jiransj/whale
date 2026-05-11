@@ -11,8 +11,8 @@ var excludedChildTools = map[string]bool{
 	"parallel_reason":    true,
 	"spawn_subagent":     true,
 	"request_user_input": true,
-	"exec_shell":         true,
-	"exec_shell_wait":    true,
+	"shell_run":          true,
+	"shell_wait":         true,
 	"edit":               true,
 	"write":              true,
 	"apply_patch":        true,
@@ -64,7 +64,7 @@ func (t guardedReadOnlyTool) Capabilities() []string {
 func (t guardedReadOnlyTool) ApprovalHint() string { return t.spec.ApprovalHint }
 
 func (t guardedReadOnlyTool) Run(ctx context.Context, call core.ToolCall) (core.ToolResult, error) {
-	if t.spec.Name == "exec_shell" && shellBackgroundRequested(call.Input) {
+	if t.spec.Name == "shell_run" && shellBackgroundRequested(call.Input) {
 		return core.ToolResult{
 			ToolCallID: call.ID,
 			Name:       call.Name,

@@ -171,7 +171,7 @@ func (a *Agent) executeFallbackReadonly(ctx context.Context, call core.ToolCall,
 		}
 	case "apply_patch":
 		fallbackCall = core.ToolCall{ID: call.ID + "-fallback", Name: "list_dir", Input: `{"path":"."}`}
-	case "exec_shell":
+	case "shell_run":
 		fallbackCall = core.ToolCall{ID: call.ID + "-fallback", Name: "list_dir", Input: `{"path":"."}`}
 	default:
 		return core.ToolResult{}, false

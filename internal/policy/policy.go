@@ -50,7 +50,7 @@ func (p DefaultToolPolicy) Decide(spec core.ToolSpec, call core.ToolCall) Policy
 	if mode == "" {
 		mode = ApprovalModeOnRequest
 	}
-	if spec.Name == "exec_shell" {
+	if spec.Name == "shell_run" {
 		cmd := bashCommandFromInput(call.Input)
 		for _, deny := range p.DenyPrefixes {
 			if hasCommandPrefix(cmd, deny) {
@@ -82,7 +82,7 @@ func (p DefaultToolPolicy) Decide(spec core.ToolSpec, call core.ToolCall) Policy
 		return PolicyDecision{Allow: true, Code: "read_only", Phase: "allowed"}
 	}
 	switch spec.Name {
-	case "edit", "write", "apply_patch", "exec_shell":
+	case "edit", "write", "apply_patch", "shell_run":
 	default:
 		if strings.HasPrefix(spec.Name, "mcp__") {
 			return PolicyDecision{

@@ -158,7 +158,7 @@ func completedToolTitle(toolName, raw, previous string) string {
 
 func toolDisplayKind(toolName string) string {
 	switch strings.TrimSpace(toolName) {
-	case "exec_shell", "exec_shell_wait":
+	case "shell_run", "shell_wait":
 		return "shell"
 	case "read_file", "list_dir", "search_files", "grep", "search_content", "fetch", "web_fetch", "web_search":
 		return "explore"

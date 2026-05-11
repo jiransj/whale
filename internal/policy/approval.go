@@ -109,7 +109,7 @@ func ApprovalKey(call core.ToolCall) string {
 		if v, _ := body["file_path"].(string); strings.TrimSpace(v) != "" {
 			return base + "|file:" + strings.TrimSpace(v)
 		}
-	case "exec_shell":
+	case "shell_run":
 		if v, _ := body["command"].(string); strings.TrimSpace(v) != "" {
 			return base + "|cmd:" + strings.TrimSpace(v)
 		}
@@ -123,9 +123,9 @@ func ApprovalSummary(call core.ToolCall) string {
 		return call.Name
 	}
 	switch call.Name {
-	case "exec_shell":
+	case "shell_run":
 		if v, _ := body["command"].(string); strings.TrimSpace(v) != "" {
-			return fmt.Sprintf("exec_shell: %s", strings.TrimSpace(v))
+			return fmt.Sprintf("shell_run: %s", strings.TrimSpace(v))
 		}
 	case "write":
 		if v, _ := body["file_path"].(string); strings.TrimSpace(v) != "" {
@@ -152,7 +152,7 @@ func ApprovalScope(call core.ToolCall) string {
 	if v, _ := body["path"].(string); strings.TrimSpace(v) != "" {
 		return "path:" + strings.TrimSpace(v)
 	}
-	if call.Name == "exec_shell" {
+	if call.Name == "shell_run" {
 		return "shell"
 	}
 	if call.Name == "apply_patch" {

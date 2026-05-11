@@ -14,7 +14,7 @@ import (
 	"github.com/usewhale/whale/internal/session"
 )
 
-func TestTaskExecShellFailureReturnsExecFailed(t *testing.T) {
+func TestTaskShellRunFailureReturnsExecFailed(t *testing.T) {
 	run, err := RunTask(context.Background(), TaskSpec{
 		ID:    "exec-shell-failure",
 		Suite: SuiteRegression,
@@ -22,7 +22,7 @@ func TestTaskExecShellFailureReturnsExecFailed(t *testing.T) {
 			Turns: []TurnSpec{
 				{
 					Steps: []StepSpec{
-						{ID: "fail", ToolName: "exec_shell", Input: `{"command":"exit 9"}`, ExpectError: true},
+						{ID: "fail", ToolName: "shell_run", Input: `{"command":"exit 9"}`, ExpectError: true},
 					},
 				},
 			},
@@ -201,14 +201,14 @@ func TestTaskBackgroundShellRunningThenFailed(t *testing.T) {
 			Turns: []TurnSpec{
 				{
 					Steps: []StepSpec{
-						{ID: "start", ToolName: "exec_shell", Input: `{"command":"sleep 0.1; echo nope >&2; exit 7","background":true}`},
+						{ID: "start", ToolName: "shell_run", Input: `{"command":"sleep 0.1; echo nope >&2; exit 7","background":true}`},
 					},
 				},
 				{
 					Steps: []StepSpec{
 						{
 							ID:       "wait-running",
-							ToolName: "exec_shell_wait",
+							ToolName: "shell_wait",
 							InputFunc: func(history []core.Message) (string, error) {
 								taskID, err := shellTaskIDFromHistory(history)
 								if err != nil {
@@ -223,7 +223,7 @@ func TestTaskBackgroundShellRunningThenFailed(t *testing.T) {
 					Steps: []StepSpec{
 						{
 							ID:       "wait-failed",
-							ToolName: "exec_shell_wait",
+							ToolName: "shell_wait",
 							InputFunc: func(history []core.Message) (string, error) {
 								taskID, err := shellTaskIDFromHistory(history)
 								if err != nil {

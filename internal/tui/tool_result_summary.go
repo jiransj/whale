@@ -147,7 +147,7 @@ func summarizeShellOutput(text string) string {
 	omitted := len(lines) - head - tail
 	out := make([]string, 0, head+1+tail)
 	out = append(out, lines[:head]...)
-	out = append(out, fmt.Sprintf("... %d lines omitted; use /tool for full output", omitted))
+	out = append(out, fmt.Sprintf("... %d lines omitted", omitted))
 	out = append(out, lines[len(lines)-tail:]...)
 	return strings.Join(out, "\n")
 }

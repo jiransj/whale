@@ -33,7 +33,7 @@ func (p *toolsetProvider) StreamResponse(_ context.Context, _ []agent.Message, _
 					},
 					{
 						ID:    "tc-3",
-						Name:  "exec_shell",
+						Name:  "shell_run",
 						Input: `{"command":"echo ok"}`,
 					},
 				},

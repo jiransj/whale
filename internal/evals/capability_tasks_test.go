@@ -51,7 +51,7 @@ func TestTaskSearchApplyPatchReadbackFlow(t *testing.T) {
 	}
 }
 
-func TestTaskExecShellCreatesFileInSubdir(t *testing.T) {
+func TestTaskShellRunCreatesFileInSubdir(t *testing.T) {
 	run, err := RunTask(context.Background(), TaskSpec{
 		ID:    "exec-shell-cwd-write",
 		Suite: SuiteCapability,
@@ -62,7 +62,7 @@ func TestTaskExecShellCreatesFileInSubdir(t *testing.T) {
 			Turns: []TurnSpec{
 				{
 					Steps: []StepSpec{
-						{ID: "shell", ToolName: "exec_shell", Input: `{"command":"printf from-shell > result.txt","cwd":"out"}`},
+						{ID: "shell", ToolName: "shell_run", Input: `{"command":"printf from-shell > result.txt","cwd":"out"}`},
 						{ID: "read", ToolName: "read_file", Input: `{"file_path":"out/result.txt","offset":0,"limit":20}`},
 					},
 				},
@@ -211,14 +211,14 @@ func TestTaskBackgroundShellWaitWithHistoryLookup(t *testing.T) {
 			Turns: []TurnSpec{
 				{
 					Steps: []StepSpec{
-						{ID: "start", ToolName: "exec_shell", Input: `{"command":"printf hello-from-bg","background":true}`},
+						{ID: "start", ToolName: "shell_run", Input: `{"command":"printf hello-from-bg","background":true}`},
 					},
 				},
 				{
 					Steps: []StepSpec{
 						{
 							ID:       "wait",
-							ToolName: "exec_shell_wait",
+							ToolName: "shell_wait",
 							InputFunc: func(history []core.Message) (string, error) {
 								taskID, err := shellTaskIDFromHistory(history)
 								if err != nil {
@@ -385,14 +385,14 @@ func TestTaskBackgroundShellRunningThenExited(t *testing.T) {
 			Turns: []TurnSpec{
 				{
 					Steps: []StepSpec{
-						{ID: "start", ToolName: "exec_shell", Input: `{"command":"sleep 0.2; printf delayed-ok","background":true}`},
+						{ID: "start", ToolName: "shell_run", Input: `{"command":"sleep 0.2; printf delayed-ok","background":true}`},
 					},
 				},
 				{
 					Steps: []StepSpec{
 						{
 							ID:       "wait-running",
-							ToolName: "exec_shell_wait",
+							ToolName: "shell_wait",
 							InputFunc: func(history []core.Message) (string, error) {
 								taskID, err := shellTaskIDFromHistory(history)
 								if err != nil {
@@ -407,7 +407,7 @@ func TestTaskBackgroundShellRunningThenExited(t *testing.T) {
 					Steps: []StepSpec{
 						{
 							ID:       "wait-exited",
-							ToolName: "exec_shell_wait",
+							ToolName: "shell_wait",
 							InputFunc: func(history []core.Message) (string, error) {
 								taskID, err := shellTaskIDFromHistory(history)
 								if err != nil {
