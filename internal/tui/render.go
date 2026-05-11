@@ -125,8 +125,14 @@ func (m model) renderApprovalPrompt() string {
 	hint := lipgloss.NewStyle().Foreground(tuitheme.Default.Muted)
 
 	approvalBody := body.Render(indentApprovalBody(approvalDisplayBody(m.approval.toolName, m.approval.reason)))
-	if diff := renderFileDiffMetadataPlain(m.approval.metadata, 80); diff != "" {
-		approvalBody += "\n\n" + diff
+	if diff := renderApprovalDiffMetadata(m.approval.metadata, 80); diff != "" {
+		if isReadableApprovalDiff(diff) {
+			approvalBody = diff
+		} else if approvalBody != "" {
+			approvalBody += "\n\n" + diff
+		} else {
+			approvalBody = diff
+		}
 	}
 
 	opts := []string{
@@ -293,6 +299,9 @@ func (m model) renderBusyStatusLine(width int) string {
 		label = "Stopping"
 	}
 	line := fmt.Sprintf("%s (%s)", label, formatElapsedCompact(m.busyElapsed()))
+	if !m.stopping {
+		line += " · Esc to interrupt"
+	}
 	return lipgloss.NewStyle().
 		Width(width).
 		Foreground(tuitheme.Default.Warn).
