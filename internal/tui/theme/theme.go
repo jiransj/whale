@@ -64,18 +64,20 @@ func RoleBorder(role string) lipgloss.Color {
 		return Default.Tool
 	case "result":
 		return Default.Result
-	case "result_ok":
+	case "result_ok", "shell_result_ok":
 		return Default.Success
-	case "result_denied":
+	case "result_denied", "shell_result_denied":
 		return Default.ResultDenied
-	case "result_failed", "error":
+	case "result_failed", "shell_result_failed", "error":
 		return Default.Error
-	case "result_timeout":
+	case "result_timeout", "shell_result_timeout":
 		return Default.ResultTimeout
-	case "result_error":
+	case "result_error", "shell_result_error":
 		return Default.ResultError
-	case "result_running":
+	case "result_running", "shell_result_running":
 		return Default.ResultRunning
+	case "shell_result_canceled":
+		return Default.Muted
 	default:
 		return Default.Border
 	}

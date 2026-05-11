@@ -31,6 +31,9 @@ func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, sum
 	if diff := renderFileDiffMetadataMarkdown(metadata, 80); diff != "" && role == "result_ok" {
 		title += "\n\n" + diff
 	}
+	if toolDisplayKind(toolName) == "shell" {
+		role = shellResultRole(role)
+	}
 	ok := m.assembler.UpdateToolCall(toolCallID, title, role)
 	if ok {
 		m.refreshViewportContentFollow(false)
@@ -153,6 +156,27 @@ func completedToolTitle(toolName, raw, previous string) string {
 			label = "tool"
 		}
 		return "Ran " + label
+	}
+}
+
+func shellResultRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "result_ok":
+		return "shell_result_ok"
+	case "result_failed":
+		return "shell_result_failed"
+	case "result_timeout":
+		return "shell_result_timeout"
+	case "result_denied":
+		return "shell_result_denied"
+	case "result_canceled":
+		return "shell_result_canceled"
+	case "result_error":
+		return "shell_result_error"
+	case "result_running":
+		return "shell_result_running"
+	default:
+		return role
 	}
 }
 

@@ -151,6 +151,26 @@ func TestChatLines_ToolCardHardWrapsLongLines(t *testing.T) {
 	assertVisibleWidthAtMost(t, lines, 54)
 }
 
+func TestChatLines_ShellResultPreservesOutputLines(t *testing.T) {
+	entries := []UIMessage{
+		{
+			Role: "shell_result_ok",
+			Kind: KindToolCall,
+			Text: "Ran cd internal/tui && wc -l model.go model_events.go model_keys.go model_prompt.go\n✓ · 23ms\n284 model.go\n202 model_events.go\n401 model_keys.go\n88 model_prompt.go\n975 total",
+		},
+	}
+	lines := ChatLines(entries, 100)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "23ms 284 model.go") {
+		t.Fatalf("shell status and output collapsed onto one line: %q", joined)
+	}
+	for _, want := range []string{"✓ · 23ms", "284 model.go", "202 model_events.go", "975 total"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected shell output line %q, got: %q", want, joined)
+		}
+	}
+}
+
 func TestMarkdown_NarrowWidthFallback(t *testing.T) {
 	input := "a **b** c"
 	got := Markdown(input, 10, false)
