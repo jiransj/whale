@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/usewhale/whale/internal/core"
 )
@@ -28,6 +29,8 @@ func (b *Toolset) writeFile(_ context.Context, call core.ToolCall) (core.ToolRes
 		return marshalToolError(call, "read_failed", readErr.Error()), nil
 	}
 	before := string(beforeBytes)
+	// Strip BOM from before for consistent diff display
+	before = strings.TrimLeft(before, "\uFEFF")
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
 	}
@@ -57,5 +60,8 @@ func (b *Toolset) previewWriteFile(_ context.Context, call core.ToolCall) (map[s
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	return fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: string(beforeBytes), after: in.Content}}), nil
+	before := string(beforeBytes)
+	// Strip BOM from before for consistent diff display
+	before = strings.TrimLeft(before, "\uFEFF")
+	return fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: in.Content}}), nil
 }
