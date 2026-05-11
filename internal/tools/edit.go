@@ -32,7 +32,10 @@ func (b *Toolset) editFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		}
 		return marshalToolError(call, "read_failed", err.Error()), nil
 	}
-	before := string(data)
+	rawContent := string(data)
+	// Strip UTF-8 BOM for search compatibility (common on Windows editors like Notepad)
+	before := strings.TrimLeft(rawContent, "\uFEFF")
+	hasBOM := len(before) != len(rawContent)
 	if in.Search == "" {
 		return marshalToolError(call, "invalid_args", "search is required"), nil
 	}
@@ -46,6 +49,10 @@ func (b *Toolset) editFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		after = strings.ReplaceAll(before, in.Search, in.Replace)
 	} else {
 		after = strings.Replace(before, in.Search, in.Replace, 1)
+	}
+	// Preserve BOM in output if it was present
+	if hasBOM {
+		after = "\uFEFF" + after
 	}
 	if err := os.WriteFile(abs, []byte(after), 0o644); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
@@ -78,7 +85,10 @@ func (b *Toolset) previewEditFile(_ context.Context, call core.ToolCall) (map[st
 	if err != nil {
 		return nil, err
 	}
-	before := string(data)
+	rawContent := string(data)
+	// Strip UTF-8 BOM for search compatibility (common on Windows editors like Notepad)
+	before := strings.TrimLeft(rawContent, "\uFEFF")
+	hasBOM := len(before) != len(rawContent)
 	if in.Search == "" {
 		return nil, os.ErrInvalid
 	}
@@ -88,6 +98,10 @@ func (b *Toolset) previewEditFile(_ context.Context, call core.ToolCall) (map[st
 	after := strings.Replace(before, in.Search, in.Replace, 1)
 	if in.All {
 		after = strings.ReplaceAll(before, in.Search, in.Replace)
+	}
+	// Preserve BOM in output if it was present
+	if hasBOM {
+		after = "\uFEFF" + after
 	}
 	return fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: after}}), nil
 }
