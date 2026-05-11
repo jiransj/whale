@@ -19,6 +19,14 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 			m.status = "ready"
 		}
 	}
+	// Skip \n or \r character that arrives right after a paste Enter
+	// was converted to a newline (prevents doubled newlines on Windows).
+	if m.mode == modeChat && !m.lastPasteEnterTime.IsZero() && time.Since(m.lastPasteEnterTime) < 20*time.Millisecond {
+		if s := msg.String(); s == "\n" || s == "\r" {
+			return nil, false, true
+		}
+		m.lastPasteEnterTime = time.Time{}
+	}
 	m.updateSlashMatches()
 	if m.mode == modeChat && msg.Paste {
 		m.input.HandlePaste(string(msg.Runes))
@@ -357,6 +365,20 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 			m.resetHistoryNavigation()
 			m.updateSlashMatches()
 			return nil, false, true
+		}
+		// Rapid enter detection for Windows paste where \r gets
+		// mapped to Enter. Paste events fire in microseconds;
+		// a human cannot type then press Enter in < 100ms.
+		if strings.TrimSpace(m.input.Value()) != "" {
+			rapidInterval := 100 * time.Millisecond
+			if time.Since(m.lastNonEnterKeyTime) < rapidInterval || time.Since(m.lastPasteEnterTime) < rapidInterval {
+				m.input.InsertNewline()
+				m.lastPasteEnterTime = time.Now()
+				m.resetHistoryNavigation()
+				m.updateSlashMatches()
+				m.refreshViewportContent()
+				return nil, false, true
+			}
 		}
 		value := strings.TrimSpace(m.input.Value())
 		if value == "" {
