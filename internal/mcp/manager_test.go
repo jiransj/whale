@@ -322,6 +322,22 @@ func TestManagerRecordsHTTPStartupTimeout(t *testing.T) {
 	}
 }
 
+func TestStartupTimeoutForNpxIncludesActionableHint(t *testing.T) {
+	err := startupTimeoutErr(ServerConfig{
+		Name:    "fs",
+		Command: "npx",
+		Args:    []string{"-y", "@modelcontextprotocol/server-filesystem", "/tmp"},
+		Timeout: 15,
+	}, "connect")
+
+	errText := err.Error()
+	for _, want := range []string{"npx/npm", "download packages", "consume stdio", "point command at its binary", "increase the server timeout"} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("error missing %q: %q", want, errText)
+		}
+	}
+}
+
 func singleFailedStateError(t *testing.T, mgr *Manager) string {
 	t.Helper()
 	if tools := mgr.Tools(); len(tools) != 0 {

@@ -326,9 +326,7 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 			if m.stopping {
 				m.status = "stopping"
 			}
-			if !m.enqueuePrompt(m.input.Value()) {
-				m.appendNotice(m.busySubmitNoticeText())
-			}
+			m.enqueuePrompt(m.input.Value())
 			return m.flushNativeScrollbackCmd(), false, true
 		}
 		if m.hasSlashSuggestions() {
