@@ -195,6 +195,9 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 	if err != nil || !res.Handled || !res.ShowSkills {
 		t.Fatalf("unexpected /skills result: %+v err=%v", res, err)
 	}
+	if _, err = handleCommand("/skills disable code-review", "cur", now); err == nil || !strings.Contains(err.Error(), "usage: /skills") {
+		t.Fatalf("expected /skills subcommand usage error, got %v", err)
+	}
 }
 
 func TestHandleLocalCommandStats(t *testing.T) {
@@ -454,7 +457,9 @@ func TestHandleSlashSkillsCommands(t *testing.T) {
 	t.Setenv("HOME", home)
 	dir := t.TempDir()
 	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.", "# Test Skill\n\nFollow workspace instructions.")
-	app := &App{sessionID: "sess-1", workspaceRoot: dir}
+	writeAppSkillWithFrontmatter(t, filepath.Join(dir, ".whale", "skills", "needs-setup"), "---\nname: needs-setup\ndescription: Needs setup skill.\nrequires:\n  env: [WHALE_TEST_MISSING_ENV]\n---\n\n# Needs setup")
+	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "disabled-skill"), "disabled-skill", "Disabled skill.", "# Disabled")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir, cfg: Config{SkillsDisabled: []string{"disabled-skill"}}}
 
 	handled, out, synthetic, shouldExit, clearScreen, err := app.HandleSlash("/skills")
 	if err != nil {
@@ -463,10 +468,69 @@ func TestHandleSlashSkillsCommands(t *testing.T) {
 	if !handled || shouldExit || clearScreen || synthetic != "" {
 		t.Fatalf("unexpected /skills flags handled=%v shouldExit=%v clearScreen=%v synthetic=%q", handled, shouldExit, clearScreen, synthetic)
 	}
-	if !strings.Contains(out, "test-skill") || strings.Contains(out, "Follow workspace instructions") {
+	for _, want := range []string{"Ready", "test-skill", "Needs setup", "needs-setup", "Disabled", "disabled-skill", "Use a skill with `$skill-name`.", "Manage skills from the TUI with `/skills`."} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected /skills output to contain %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Follow workspace instructions") {
 		t.Fatalf("unexpected /skills output: %q", out)
 	}
 
+}
+
+func TestSetSkillEnabledUpdatesProjectConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.", "# Test Skill\n\nFollow workspace instructions.")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir, cfg: DefaultConfig()}
+
+	out, err := app.SetSkillEnabled("test-skill", false)
+	if err != nil {
+		t.Fatalf("disable unexpected err: %v", err)
+	}
+	if !strings.Contains(out, "disabled skill: test-skill") {
+		t.Fatalf("unexpected disable output: %q", out)
+	}
+	if !containsString(app.cfg.SkillsDisabled, "test-skill") {
+		t.Fatalf("expected in-memory disabled list to include test-skill, got %+v", app.cfg.SkillsDisabled)
+	}
+	projectCfg, loaded, err := LoadConfigFile(ProjectConfigPath(dir))
+	if err != nil || !loaded {
+		t.Fatalf("load project config loaded=%v err=%v", loaded, err)
+	}
+	if !containsString(projectCfg.Skills.Disabled, "test-skill") {
+		t.Fatalf("expected project config disabled list to include test-skill, got %+v", projectCfg.Skills.Disabled)
+	}
+	if _, _, _, err := app.BuildSkillMentionSyntheticPrompt("$test-skill"); err == nil || !strings.Contains(err.Error(), "skill disabled") {
+		t.Fatalf("expected disabled skill mention error, got %v", err)
+	}
+	if out := app.buildSkillsList(); !strings.Contains(out, "Disabled") || !strings.Contains(out, "test-skill") {
+		t.Fatalf("expected /skills to show disabled skill, got:\n%s", out)
+	}
+
+	out, err = app.SetSkillEnabled("test-skill", true)
+	if err != nil {
+		t.Fatalf("enable unexpected err: %v", err)
+	}
+	if !strings.Contains(out, "enabled skill: test-skill") {
+		t.Fatalf("unexpected enable result out=%q", out)
+	}
+	if containsString(app.cfg.SkillsDisabled, "test-skill") {
+		t.Fatalf("expected in-memory disabled list to drop test-skill, got %+v", app.cfg.SkillsDisabled)
+	}
+	projectCfg, loaded, err = LoadConfigFile(ProjectConfigPath(dir))
+	if err != nil || !loaded {
+		t.Fatalf("reload project config loaded=%v err=%v", loaded, err)
+	}
+	if containsString(projectCfg.Skills.Disabled, "test-skill") {
+		t.Fatalf("expected project config disabled list to drop test-skill, got %+v", projectCfg.Skills.Disabled)
+	}
+	ok, out, synthetic, err := app.BuildSkillMentionSyntheticPrompt("$test-skill")
+	if err != nil || !ok || !strings.Contains(out, "loaded skill: test-skill") || !strings.Contains(synthetic, "Follow workspace instructions") {
+		t.Fatalf("expected enabled skill mention, ok=%v out=%q synthetic=%q err=%v", ok, out, synthetic, err)
+	}
 }
 
 func TestBuildSkillMentionSyntheticPrompt(t *testing.T) {
@@ -474,7 +538,9 @@ func TestBuildSkillMentionSyntheticPrompt(t *testing.T) {
 	t.Setenv("HOME", home)
 	dir := t.TempDir()
 	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.", "# Test Skill\n\nFollow workspace instructions.")
-	app := &App{sessionID: "sess-1", workspaceRoot: dir}
+	writeAppSkillWithFrontmatter(t, filepath.Join(dir, ".whale", "skills", "needs-setup"), "---\nname: needs-setup\ndescription: Needs setup skill.\nwhen: Use when setup is missing.\nrequires:\n  env: [WHALE_TEST_MISSING_ENV]\n---\n\n# Needs setup")
+	writeAppSkill(t, filepath.Join(dir, ".whale", "skills", "disabled-skill"), "disabled-skill", "Disabled skill.", "# Disabled")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir, cfg: Config{SkillsDisabled: []string{"disabled-skill"}}}
 
 	ok, out, synthetic, err := app.BuildSkillMentionSyntheticPrompt("$test-skill arg1 arg2")
 	if err != nil {
@@ -489,10 +555,56 @@ func TestBuildSkillMentionSyntheticPrompt(t *testing.T) {
 	if !strings.Contains(synthetic, "Follow workspace instructions") || !strings.Contains(synthetic, "arg1 arg2") {
 		t.Fatalf("unexpected synthetic prompt: %q", synthetic)
 	}
+	ok, out, synthetic, err = app.BuildSkillMentionSyntheticPrompt("$needs-setup do it")
+	if err != nil || !ok {
+		t.Fatalf("expected needs setup skill mention, ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(out, "Needs: WHALE_TEST_MISSING_ENV") || !strings.Contains(synthetic, "<setup_status>Needs: WHALE_TEST_MISSING_ENV</setup_status>") || !strings.Contains(synthetic, "<when>Use when setup is missing.</when>") {
+		t.Fatalf("unexpected needs setup output=%q synthetic=%q", out, synthetic)
+	}
+	ok, _, _, err = app.BuildSkillMentionSyntheticPrompt("$disabled-skill")
+	if err == nil || !strings.Contains(err.Error(), "skill disabled") || !ok {
+		t.Fatalf("expected disabled skill error, ok=%v err=%v", ok, err)
+	}
 
 	ok, _, _, err = app.BuildSkillMentionSyntheticPrompt("please use $test-skill")
 	if err != nil || ok {
 		t.Fatalf("expected non-leading mention to be ignored, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestBuildSkillMentionSyntheticPromptWithBinding(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, ".whale", "skills", "test-skill")
+	writeAppSkill(t, skillDir, "test-skill", "Workspace skill.", "# Test Skill\n\nBound instructions.")
+	app := &App{sessionID: "sess-1", workspaceRoot: dir, cfg: DefaultConfig()}
+	binding := &SkillBinding{Name: "test-skill", SkillFilePath: filepath.Join(skillDir, "SKILL.md")}
+
+	ok, out, synthetic, err := app.BuildSkillMentionSyntheticPromptWithBinding("$test-skill run bound", binding)
+	if err != nil || !ok {
+		t.Fatalf("expected bound skill mention, ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(out, "loaded skill: test-skill") || !strings.Contains(synthetic, "Bound instructions.") || !strings.Contains(synthetic, "run bound") {
+		t.Fatalf("unexpected bound skill output=%q synthetic=%q", out, synthetic)
+	}
+
+	_, _, _, err = app.BuildSkillMentionSyntheticPromptWithBinding("$other-skill", binding)
+	if err == nil || !strings.Contains(err.Error(), "skill binding mismatch") {
+		t.Fatalf("expected binding mismatch error, got %v", err)
+	}
+
+	outside := filepath.Join(t.TempDir(), "test-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(outside), 0o755); err != nil {
+		t.Fatalf("mkdir outside skill: %v", err)
+	}
+	if err := os.WriteFile(outside, []byte("---\nname: test-skill\ndescription: Outside skill.\n---\n\n# Outside\n"), 0o644); err != nil {
+		t.Fatalf("write outside skill: %v", err)
+	}
+	_, _, _, err = app.BuildSkillMentionSyntheticPromptWithBinding("$test-skill", &SkillBinding{Name: "test-skill", SkillFilePath: outside})
+	if err == nil || !strings.Contains(err.Error(), "skill unavailable") {
+		t.Fatalf("expected unavailable outside binding error, got %v", err)
 	}
 }
 
@@ -554,6 +666,16 @@ func writeAppSkill(t *testing.T, dir, name, desc, body string) {
 		t.Fatalf("mkdir skill dir: %v", err)
 	}
 	content := "---\nname: " + name + "\ndescription: " + desc + "\n---\n\n" + body + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+}
+
+func writeAppSkillWithFrontmatter(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write skill: %v", err)
 	}

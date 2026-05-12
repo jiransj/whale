@@ -225,6 +225,7 @@ type Agent struct {
 	projectMemoryMaxChars  int
 	projectMemoryFileOrder []string
 	workspaceRoot          string
+	disabledSkills         []string
 	extraSystemBlocks      []string
 	sessionRuntime         *memory.SessionRuntime
 	sessionsDir            string
@@ -375,6 +376,12 @@ func WithProjectMemory(enabled bool, maxChars int, fileOrder []string, workspace
 			a.projectMemoryFileOrder = fileOrder
 		}
 		a.workspaceRoot = strings.TrimSpace(workspaceRoot)
+	}
+}
+
+func WithDisabledSkills(names []string) AgentOption {
+	return func(a *Agent) {
+		a.disabledSkills = append([]string(nil), names...)
 	}
 }
 

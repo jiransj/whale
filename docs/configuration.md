@@ -48,6 +48,9 @@ mode = "on-request"
 allow_shell_prefixes = ["git status", "go test"]
 deny_shell_prefixes = ["rm -rf"]
 
+[api]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
 [budget]
 session_limit_usd = 1.0
 
@@ -58,6 +61,9 @@ config_path = "~/.whale/mcp.json"
 auto_compact = true
 compact_threshold = 0.85
 model_context_window = 128000
+
+[skills]
+disabled = ["legacy-review"]
 
 [project_doc]
 enabled = true
@@ -84,3 +90,7 @@ If you started with Whale v0.1.9 or newer, you do not need this command.
 - `whale exec` and the interactive TUI use the same underlying tool loop.
 - Normal approval behavior still applies in headless mode.
 - Reasoning effort and thinking are configured in `config.toml`.
+- `DEEPSEEK_BASE_URL` overrides `[api].base_url`; if neither is set, Whale uses
+  `https://api.deepseek.com`.
+- Skill enable/disable choices are stored in project config under
+  `[skills].disabled`.

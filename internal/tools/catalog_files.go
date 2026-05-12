@@ -6,12 +6,12 @@ func (b *Toolset) fileDiscoveryTools() []core.Tool {
 	return []core.Tool{
 		toolFn{
 			name:        "read_file",
-			description: "Read file content under workspace root. Use this before edit/write to confirm exact text. Prefer scoped reads with offset/limit for large files instead of loading entire files.",
+			description: "Read file content under workspace root or discovered local skill directories. Use this before edit/write to confirm exact text. Prefer scoped reads with offset/limit for large files instead of loading entire files.",
 			parameters: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"file_path": map[string]any{"type": "string", "description": "Path relative to workspace root, or an absolute path inside the workspace root"},
+					"file_path": map[string]any{"type": "string", "description": "Path relative to workspace root, an absolute path inside workspace root, or an absolute path inside a discovered local skill directory"},
 					"offset":    map[string]any{"type": "integer", "minimum": 0, "description": "Start line offset (0-based)"},
 					"limit":     map[string]any{"type": "integer", "minimum": 1, "maximum": 2000, "description": "Max lines to read"},
 				},
@@ -37,12 +37,12 @@ func (b *Toolset) fileDiscoveryTools() []core.Tool {
 		},
 		toolFn{
 			name:        "list_dir",
-			description: "List directory entries under workspace root. Use for structure discovery before deeper reads. Not recursive; combine with grep/read_file for targeted exploration.",
+			description: "List directory entries under workspace root or discovered local skill directories. Use for structure discovery before deeper reads. Not recursive; combine with grep/read_file for targeted exploration.",
 			parameters: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"path":   map[string]any{"type": "string", "description": "Directory path relative to workspace root, or an absolute path inside the workspace root"},
+					"path":   map[string]any{"type": "string", "description": "Directory path relative to workspace root, an absolute path inside workspace root, or an absolute path inside a discovered local skill directory"},
 					"ignore": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				},
 			},

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -21,11 +22,20 @@ var namePattern = regexp.MustCompile(`^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$`)
 
 // Skill represents a parsed SKILL.md file.
 type Skill struct {
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Instructions  string `json:"instructions"`
-	Path          string `json:"path"`
-	SkillFilePath string `json:"skill_file_path"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description"`
+	When          string   `json:"when,omitempty"`
+	Requires      Requires `json:"requires,omitempty"`
+	Instructions  string   `json:"instructions"`
+	Path          string   `json:"path"`
+	SkillFilePath string   `json:"skill_file_path"`
+}
+
+// Requires describes optional setup that makes a skill fully ready.
+type Requires struct {
+	Commands []string `json:"commands,omitempty"`
+	Env      []string `json:"env,omitempty"`
+	MCP      []string `json:"mcp,omitempty"`
 }
 
 // DiscoveryState represents the outcome of discovering a single skill file.
@@ -44,6 +54,52 @@ type SkillState struct {
 	Path  string
 	State DiscoveryState
 	Err   error
+}
+
+// Availability is the user-facing availability bucket for a discovered skill.
+type Availability string
+
+const (
+	AvailabilityReady      Availability = "ready"
+	AvailabilityNeedsSetup Availability = "needs_setup"
+	AvailabilityDisabled   Availability = "disabled"
+	AvailabilityProblem    Availability = "problem"
+)
+
+// MissingRequirement describes one unmet requirement from a skill manifest.
+type MissingRequirement struct {
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// SkillView is a user-facing view of a skill and its current availability.
+type SkillView struct {
+	Name          string
+	Description   string
+	When          string
+	Path          string
+	SkillFilePath string
+	Source        string
+	Status        Availability
+	Reason        string
+	Missing       []MissingRequirement
+}
+
+// Report groups discovered skills for display and selection.
+type Report struct {
+	Roots      []string
+	Ready      []SkillView
+	NeedsSetup []SkillView
+	Disabled   []SkillView
+	Problems   []SkillView
+}
+
+// ReportOptions controls user-facing skill availability evaluation.
+type ReportOptions struct {
+	DisabledNames []string
+	MCPConnected  map[string]bool
+	WorkspaceRoot string
 }
 
 // DefaultRoots returns the skill discovery roots for a workspace.
@@ -115,10 +171,12 @@ func ParseContent(content []byte) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	values := parseFlatFrontmatter(frontmatter)
+	values := parseFrontmatter(frontmatter)
 	skill := &Skill{
-		Name:         values["name"],
-		Description:  values["description"],
+		Name:         values.Name,
+		Description:  values.Description,
+		When:         values.When,
+		Requires:     values.Requires,
 		Instructions: strings.TrimSpace(body),
 	}
 	return skill, nil
@@ -196,6 +254,26 @@ func Find(roots []string, name string) (*Skill, []*SkillState, bool) {
 	return nil, states, false
 }
 
+// FindByPath returns a discovered skill by exact SKILL.md path.
+func FindByPath(roots []string, skillFilePath string) (*Skill, []*SkillState, bool) {
+	discovered, states := DiscoverWithStates(roots)
+	target, err := filepath.Abs(strings.TrimSpace(skillFilePath))
+	if err != nil || target == "" {
+		return nil, states, false
+	}
+	target = filepath.Clean(target)
+	for _, skill := range discovered {
+		path, err := filepath.Abs(strings.TrimSpace(skill.SkillFilePath))
+		if err != nil || path == "" {
+			continue
+		}
+		if filepath.Clean(path) == target {
+			return skill, states, true
+		}
+	}
+	return nil, states, false
+}
+
 // Sort returns a copy sorted by lowercase skill name.
 func Sort(all []*Skill) []*Skill {
 	out := append([]*Skill(nil), all...)
@@ -240,6 +318,10 @@ func RenderAvailableSkills(all []*Skill) string {
 			b.WriteString(": ")
 			b.WriteString(strings.TrimSpace(skill.Description))
 		}
+		if strings.TrimSpace(skill.When) != "" {
+			b.WriteString(" Use when: ")
+			b.WriteString(strings.TrimSpace(skill.When))
+		}
 		if strings.TrimSpace(skill.SkillFilePath) != "" {
 			b.WriteString(" (file: ")
 			b.WriteString(skill.SkillFilePath)
@@ -247,7 +329,7 @@ func RenderAvailableSkills(all []*Skill) string {
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("\nUsers can invoke a skill with a leading $skill-name mention. Use load_skill when the user explicitly mentions a skill, or when no direct tool/delegation path is clearly requested and the task strongly matches a skill. If the user explicitly asks for subagent, delegation, or parallel work, follow the delegation policy first and do not load a skill unless the user also names one. The index above is metadata only; load the skill before relying on its instructions. Do not browse skill file paths with ordinary file tools.")
+	b.WriteString("\nUsers can invoke a skill with a leading $skill-name mention. Use load_skill when the user explicitly mentions a skill, or when no direct tool/delegation path is clearly requested and the task strongly matches a skill. If the user explicitly asks for subagent, delegation, or parallel work, follow the delegation policy first and do not load a skill unless the user also names one. The index above is metadata only; load the skill before relying on its instructions. If loaded skill instructions reference relative files such as references/, scripts/, templates/, or assets/, resolve them relative to the skill directory and read only the specific files needed.")
 	return strings.TrimSpace(b.String())
 }
 
@@ -264,17 +346,157 @@ func Filter(all []*Skill, disabled []string) []*Skill {
 	if len(disabled) == 0 {
 		return all
 	}
-	disabledSet := make(map[string]bool, len(disabled))
-	for _, name := range disabled {
-		disabledSet[name] = true
-	}
+	disabledSet := disabledNameSet(disabled)
 	out := make([]*Skill, 0, len(all))
 	for _, skill := range all {
-		if skill != nil && !disabledSet[skill.Name] {
+		if skill != nil && !disabledSet[strings.ToLower(skill.Name)] {
 			out = append(out, skill)
 		}
 	}
 	return out
+}
+
+// BuildReport evaluates discovered skills for user-facing display.
+func BuildReport(roots []string, opts ReportOptions) Report {
+	roots = uniqueCleanPaths(roots)
+	discovered, states := DiscoverWithStates(roots)
+	disabled := disabledNameSet(opts.DisabledNames)
+	report := Report{Roots: roots}
+	for _, skill := range discovered {
+		if skill == nil {
+			continue
+		}
+		view := skillView(skill, opts.WorkspaceRoot)
+		if disabled[strings.ToLower(skill.Name)] {
+			view.Status = AvailabilityDisabled
+			view.Reason = "Disabled in config"
+			report.Disabled = append(report.Disabled, view)
+			continue
+		}
+		missing := MissingRequirements(skill, opts)
+		if len(missing) > 0 {
+			view.Status = AvailabilityNeedsSetup
+			view.Missing = missing
+			view.Reason = FormatMissingRequirements(missing)
+			report.NeedsSetup = append(report.NeedsSetup, view)
+			continue
+		}
+		view.Status = AvailabilityReady
+		report.Ready = append(report.Ready, view)
+	}
+	for _, st := range states {
+		if st == nil || st.State != StateError {
+			continue
+		}
+		name := strings.TrimSpace(st.Name)
+		if name == "" && strings.TrimSpace(st.Path) != "" {
+			name = filepath.Base(filepath.Dir(st.Path))
+		}
+		view := SkillView{
+			Name:          name,
+			Path:          filepath.Dir(st.Path),
+			SkillFilePath: st.Path,
+			Source:        SourceForPath(st.Path, opts.WorkspaceRoot),
+			Status:        AvailabilityProblem,
+			Reason:        "Invalid SKILL.md",
+		}
+		if st.Err != nil {
+			view.Reason = st.Err.Error()
+		}
+		report.Problems = append(report.Problems, view)
+	}
+	sortViews(report.Ready)
+	sortViews(report.NeedsSetup)
+	sortViews(report.Disabled)
+	sortViews(report.Problems)
+	return report
+}
+
+// Selectable returns skills that should appear in the quick picker.
+func (r Report) Selectable() []SkillView {
+	out := make([]SkillView, 0, len(r.Ready)+len(r.NeedsSetup))
+	out = append(out, r.Ready...)
+	out = append(out, r.NeedsSetup...)
+	sortViews(out)
+	return out
+}
+
+// All returns every discovered skill view in display order.
+func (r Report) All() []SkillView {
+	out := make([]SkillView, 0, len(r.Ready)+len(r.NeedsSetup)+len(r.Disabled)+len(r.Problems))
+	out = append(out, r.Ready...)
+	out = append(out, r.NeedsSetup...)
+	out = append(out, r.Disabled...)
+	out = append(out, r.Problems...)
+	sortViews(out)
+	return out
+}
+
+// MissingRequirements returns unmet command, env, and MCP requirements.
+func MissingRequirements(skill *Skill, opts ReportOptions) []MissingRequirement {
+	if skill == nil {
+		return nil
+	}
+	var missing []MissingRequirement
+	for _, name := range uniqueTrimmed(skill.Requires.Commands) {
+		if _, err := exec.LookPath(name); err != nil {
+			missing = append(missing, MissingRequirement{Kind: "command", Name: name, Detail: "command not found"})
+		}
+	}
+	for _, name := range uniqueTrimmed(skill.Requires.Env) {
+		if _, ok := os.LookupEnv(name); !ok {
+			missing = append(missing, MissingRequirement{Kind: "env", Name: name, Detail: "environment variable not set"})
+		}
+	}
+	for _, name := range uniqueTrimmed(skill.Requires.MCP) {
+		if !opts.MCPConnected[name] {
+			missing = append(missing, MissingRequirement{Kind: "mcp", Name: name, Detail: "MCP server not connected"})
+		}
+	}
+	return missing
+}
+
+// FormatMissingRequirements renders a compact user-facing setup reason.
+func FormatMissingRequirements(missing []MissingRequirement) string {
+	if len(missing) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(missing))
+	for _, req := range missing {
+		switch req.Kind {
+		case "command":
+			parts = append(parts, req.Name)
+		case "env":
+			parts = append(parts, req.Name)
+		case "mcp":
+			parts = append(parts, "MCP server "+req.Name)
+		default:
+			parts = append(parts, req.Name)
+		}
+	}
+	return "Needs: " + strings.Join(parts, ", ")
+}
+
+// SourceForPath returns a compact source label for display.
+func SourceForPath(path, workspaceRoot string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(path)
+	if err == nil {
+		path = abs
+	}
+	if workspaceRoot != "" {
+		root, err := filepath.Abs(workspaceRoot)
+		if err == nil {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+				return "project"
+			}
+		}
+	}
+	return "user"
 }
 
 func splitFrontmatter(content string) (frontmatter, body string, err error) {
@@ -305,25 +527,228 @@ func splitFrontmatter(content string) (frontmatter, body string, err error) {
 	return strings.Join(lines[start+1:end], "\n"), strings.Join(lines[end+1:], "\n"), nil
 }
 
-func parseFlatFrontmatter(frontmatter string) map[string]string {
-	values := map[string]string{}
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+type parsedFrontmatter struct {
+	Name        string
+	Description string
+	When        string
+	Requires    Requires
+}
+
+func parseFrontmatter(frontmatter string) parsedFrontmatter {
+	var values parsedFrontmatter
+	section := ""
+	listKey := ""
+	lines := strings.Split(frontmatter, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
-		key, value, ok := strings.Cut(line, ":")
+
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		trimmed := strings.TrimSpace(line)
+		if indent > 0 && section == "requires" {
+			if strings.HasPrefix(trimmed, "- ") && listKey != "" {
+				values.addRequirement(listKey, strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")))
+				continue
+			}
+			key, value, ok := strings.Cut(trimmed, ":")
+			if !ok {
+				continue
+			}
+			listKey = normalizeFrontmatterKey(key)
+			for _, item := range parseScalarOrList(value) {
+				values.addRequirement(listKey, item)
+			}
+			continue
+		}
+
+		section = ""
+		listKey = ""
+		key, value, ok := strings.Cut(trimmed, ":")
 		if !ok {
 			continue
 		}
-		key = strings.ToLower(strings.TrimSpace(key))
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if key == "name" || key == "description" {
-			values[key] = value
+		key = normalizeFrontmatterKey(key)
+		if folded, ok := blockScalarStyle(value); ok {
+			block, next := collectBlockScalar(lines, i+1, indent, folded)
+			value = block
+			i = next - 1
+		}
+		switch key {
+		case "name":
+			values.Name = firstScalar(value)
+		case "description":
+			values.Description = firstScalar(value)
+		case "when":
+			values.When = firstScalar(value)
+		case "requires":
+			section = "requires"
 		}
 	}
 	return values
+}
+
+func blockScalarStyle(value string) (folded bool, ok bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false, false
+	}
+	switch value[0] {
+	case '>':
+		return true, true
+	case '|':
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func collectBlockScalar(lines []string, start, parentIndent int, folded bool) (string, int) {
+	block := make([]string, 0, 4)
+	i := start
+	for ; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			block = append(block, "")
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent <= parentIndent {
+			break
+		}
+		block = append(block, strings.TrimSpace(line))
+	}
+	return formatBlockScalar(block, folded), i
+}
+
+func formatBlockScalar(lines []string, folded bool) string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if !folded {
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	var b strings.Builder
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n\n") {
+				b.WriteString("\n\n")
+			}
+			continue
+		}
+		if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n\n") {
+			b.WriteByte(' ')
+		}
+		b.WriteString(line)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func (p *parsedFrontmatter) addRequirement(key, value string) {
+	value = cleanScalar(value)
+	if value == "" {
+		return
+	}
+	switch key {
+	case "commands", "command":
+		p.Requires.Commands = append(p.Requires.Commands, value)
+	case "env", "environment", "environment_variables":
+		p.Requires.Env = append(p.Requires.Env, value)
+	case "mcp", "mcp_servers", "mcpservers":
+		p.Requires.MCP = append(p.Requires.MCP, value)
+	}
+}
+
+func normalizeFrontmatterKey(key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	key = strings.ReplaceAll(key, "-", "_")
+	return key
+}
+
+func firstScalar(value string) string {
+	items := parseScalarOrList(value)
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0]
+}
+
+func parseScalarOrList(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"))
+		if inner == "" {
+			return nil
+		}
+		parts := strings.Split(inner, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if cleaned := cleanScalar(part); cleaned != "" {
+				out = append(out, cleaned)
+			}
+		}
+		return out
+	}
+	return []string{cleanScalar(value)}
+}
+
+func cleanScalar(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"'`)
+	return strings.TrimSpace(value)
+}
+
+func disabledNameSet(names []string) map[string]bool {
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func uniqueTrimmed(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func skillView(skill *Skill, workspaceRoot string) SkillView {
+	return SkillView{
+		Name:          skill.Name,
+		Description:   skill.Description,
+		When:          skill.When,
+		Path:          skill.Path,
+		SkillFilePath: skill.SkillFilePath,
+		Source:        SourceForPath(skill.SkillFilePath, workspaceRoot),
+	}
+}
+
+func sortViews(views []SkillView) {
+	sort.SliceStable(views, func(i, j int) bool {
+		left := strings.ToLower(views[i].Name)
+		right := strings.ToLower(views[j].Name)
+		if left == right {
+			return views[i].Name < views[j].Name
+		}
+		return left < right
+	})
 }
 
 func uniqueCleanPaths(paths []string) []string {

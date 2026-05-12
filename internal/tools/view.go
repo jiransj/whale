@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/usewhale/whale/internal/core"
@@ -19,7 +18,7 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 	if err := decodeInput(call.Input, &in); err != nil {
 		return marshalToolError(call, "invalid_args", err.Error()), nil
 	}
-	abs, err := b.safePath(in.FilePath)
+	abs, err := b.safeReadPath(in.FilePath)
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}
@@ -71,7 +70,7 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 			truncatedLines++
 		}
 	}
-	rel := filepath.ToSlash(strings.TrimPrefix(abs, b.root+string(filepath.Separator)))
+	rel := b.displayPath(abs)
 	result := map[string]any{
 		"status": "ok",
 		"metrics": map[string]any{

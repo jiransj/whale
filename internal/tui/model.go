@@ -26,6 +26,8 @@ const (
 	modeModelPicker
 	modePermissionsPicker
 	modePlanImplementation
+	modeSkillsMenu
+	modeSkillsManager
 )
 
 type page int
@@ -90,6 +92,21 @@ type model struct {
 		matches  []string
 		selected int
 	}
+	skills struct {
+		all      []skillSuggestion
+		matches  []skillSuggestion
+		selected int
+	}
+	skillBinding *app.SkillBinding
+	skillsMenu   struct {
+		selected int
+	}
+	skillsManager struct {
+		all      []skillManagerItem
+		matches  []int
+		selected int
+		query    string
+	}
 	modelPicker struct {
 		stage     int // 0 model, 1 effort, 2 thinking
 		models    []string
@@ -121,7 +138,8 @@ type model struct {
 }
 
 type queuedPrompt struct {
-	Text string
+	Text         string
+	SkillBinding *app.SkillBinding
 }
 
 type paletteAction struct {
@@ -139,6 +157,26 @@ type logEntry struct {
 type diffEntry struct {
 	Source string
 	Line   string
+}
+
+type skillSuggestion struct {
+	Name          string
+	Description   string
+	When          string
+	SkillFilePath string
+	Status        string
+	Reason        string
+}
+
+type skillManagerItem struct {
+	Name                string
+	Description         string
+	OriginalDescription string
+	Status              string
+	Reason              string
+	Source              string
+	Enabled             bool
+	Toggleable          bool
 }
 
 type svcMsg service.Event

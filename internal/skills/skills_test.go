@@ -10,7 +10,7 @@ import (
 func TestParseContent(t *testing.T) {
 	t.Parallel()
 
-	skill, err := ParseContent([]byte("\n---\nname: test-skill\ndescription: Use this skill for tests.\n---\n\n# Test Skill\n\nInstructions here.\n"))
+	skill, err := ParseContent([]byte("\n---\nname: test-skill\ndescription: Use this skill for tests.\nwhen: Use when tests need a reusable workflow.\nrequires:\n  commands: [git]\n  env:\n    - TEST_SKILL_TOKEN\n  mcp: [github]\n---\n\n# Test Skill\n\nInstructions here.\n"))
 	if err != nil {
 		t.Fatalf("ParseContent failed: %v", err)
 	}
@@ -20,8 +20,33 @@ func TestParseContent(t *testing.T) {
 	if skill.Description != "Use this skill for tests." {
 		t.Fatalf("unexpected description: %q", skill.Description)
 	}
+	if skill.When != "Use when tests need a reusable workflow." {
+		t.Fatalf("unexpected when: %q", skill.When)
+	}
+	if strings.Join(skill.Requires.Commands, ",") != "git" {
+		t.Fatalf("unexpected command requirements: %v", skill.Requires.Commands)
+	}
+	if strings.Join(skill.Requires.Env, ",") != "TEST_SKILL_TOKEN" {
+		t.Fatalf("unexpected env requirements: %v", skill.Requires.Env)
+	}
+	if strings.Join(skill.Requires.MCP, ",") != "github" {
+		t.Fatalf("unexpected mcp requirements: %v", skill.Requires.MCP)
+	}
 	if skill.Instructions != "# Test Skill\n\nInstructions here." {
 		t.Fatalf("unexpected instructions: %q", skill.Instructions)
+	}
+}
+
+func TestParseContentFoldedDescription(t *testing.T) {
+	t.Parallel()
+
+	skill, err := ParseContent([]byte("---\nname: code-review\ndescription: >\n  Structured code review for Go projects and general-purpose code. Use when the user\n  asks for code review, PR review, code quality assessment, code audit, CR, or similar\n  terms.\n---\n\n# Code Review\n"))
+	if err != nil {
+		t.Fatalf("ParseContent failed: %v", err)
+	}
+	want := "Structured code review for Go projects and general-purpose code. Use when the user asks for code review, PR review, code quality assessment, code audit, CR, or similar terms."
+	if skill.Description != want {
+		t.Fatalf("description:\nwant %q\n got %q", want, skill.Description)
 	}
 }
 
@@ -107,6 +132,16 @@ func TestDiscoverDeduplicatesWithEarlierRootWinning(t *testing.T) {
 	if !strings.Contains(shared.Instructions, "Workspace") {
 		t.Fatalf("expected workspace skill to win, got %q", shared.Instructions)
 	}
+	byPath, _, ok := FindByPath([]string{workspace, global}, filepath.Join(workspace, "shared", "SKILL.md"))
+	if !ok {
+		t.Fatal("expected shared skill by path")
+	}
+	if !strings.Contains(byPath.Instructions, "Workspace") {
+		t.Fatalf("expected workspace skill by path, got %q", byPath.Instructions)
+	}
+	if _, _, ok := FindByPath([]string{workspace, global}, filepath.Join(global, "shared", "SKILL.md")); ok {
+		t.Fatal("expected duplicate lower-priority path not to be selectable")
+	}
 }
 
 func TestDiscoverSkipsMissingRootAndInvalidSkill(t *testing.T) {
@@ -164,7 +199,7 @@ func TestRenderAvailableSkillsDoesNotIncludeInstructions(t *testing.T) {
 	if !strings.Contains(rendered, "test-skill") || !strings.Contains(rendered, "load_skill") {
 		t.Fatalf("unexpected rendered skills: %q", rendered)
 	}
-	for _, want := range []string{"follow the delegation policy first", "do not load a skill unless the user also names one", "Do not browse skill file paths with ordinary file tools"} {
+	for _, want := range []string{"follow the delegation policy first", "do not load a skill unless the user also names one", "resolve them relative to the skill directory"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered skill index missing %q: %q", want, rendered)
 		}
@@ -195,6 +230,40 @@ func TestFilter(t *testing.T) {
 	}
 }
 
+func TestBuildReportGroupsAvailability(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeSkill(t, filepath.Join(root, "ready"), "ready", "Ready skill.", "# Ready")
+	writeSkillWithFrontmatter(t, filepath.Join(root, "needs-setup"), "---\nname: needs-setup\ndescription: Needs setup skill.\nrequires:\n  commands: [definitely-missing-whale-test-command]\n  env: [WHALE_TEST_MISSING_ENV]\n  mcp: [github]\n---\n\n# Needs setup")
+	writeSkill(t, filepath.Join(root, "disabled"), "disabled", "Disabled skill.", "# Disabled")
+	writeSkillWithFrontmatter(t, filepath.Join(root, "broken"), "---\nname: wrong-name\ndescription: Broken skill.\n---\n\n# Broken")
+
+	report := BuildReport([]string{root}, ReportOptions{
+		DisabledNames: []string{"disabled"},
+		MCPConnected:  map[string]bool{"github": false},
+		WorkspaceRoot: root,
+	})
+	if names := viewNames(report.Ready); strings.Join(names, ",") != "ready" {
+		t.Fatalf("unexpected ready skills: %v", names)
+	}
+	if names := viewNames(report.NeedsSetup); strings.Join(names, ",") != "needs-setup" {
+		t.Fatalf("unexpected needs setup skills: %v", names)
+	}
+	if reason := report.NeedsSetup[0].Reason; !strings.Contains(reason, "definitely-missing-whale-test-command") || !strings.Contains(reason, "WHALE_TEST_MISSING_ENV") || !strings.Contains(reason, "MCP server github") {
+		t.Fatalf("unexpected needs setup reason: %q", reason)
+	}
+	if names := viewNames(report.Disabled); strings.Join(names, ",") != "disabled" {
+		t.Fatalf("unexpected disabled skills: %v", names)
+	}
+	if names := viewNames(report.Problems); strings.Join(names, ",") != "wrong-name" {
+		t.Fatalf("unexpected problem skills: %v", names)
+	}
+	if names := viewNames(report.Selectable()); strings.Join(names, ",") != "needs-setup,ready" {
+		t.Fatalf("unexpected selectable skills: %v", names)
+	}
+}
+
 func writeSkill(t *testing.T, dir, name, desc, body string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -206,7 +275,25 @@ func writeSkill(t *testing.T, dir, name, desc, body string) {
 	}
 }
 
+func writeSkillWithFrontmatter(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, SkillFileName), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
+	}
+}
+
 func skillNames(all []*Skill) []string {
+	names := make([]string, 0, len(all))
+	for _, skill := range all {
+		names = append(names, skill.Name)
+	}
+	return names
+}
+
+func viewNames(all []SkillView) []string {
 	names := make([]string, 0, len(all))
 	for _, skill := range all {
 		names = append(names, skill.Name)

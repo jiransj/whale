@@ -143,6 +143,29 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		m.mode = modePermissionsPicker
 		m.permissionsPicker.choices = ev.ApprovalChoices
 		m.permissionsPicker.index = indexOf(ev.ApprovalChoices, ev.CurrentApproval)
+	case service.EventSkillLoaded:
+		m.addLog(logEntry{Kind: "skill_loaded", Source: "skills", Summary: ev.Text, Raw: ev.Text})
+		m.status = ev.Text
+	case service.EventSkillsMenu:
+		m.stopBusy()
+		m.stopping = false
+		m.mode = modeSkillsMenu
+		m.skillsMenu.selected = 0
+		m.slash.matches = nil
+		m.slash.selected = 0
+		m.skills.matches = nil
+		m.skills.selected = 0
+		m.status = "skills"
+	case service.EventSkillsManager:
+		m.stopBusy()
+		m.stopping = false
+		m.mode = modeSkillsManager
+		m.slash.matches = nil
+		m.slash.selected = 0
+		m.skills.matches = nil
+		m.skills.selected = 0
+		m.setSkillsManagerItems(ev.Skills)
+		m.status = "skills"
 	case service.EventClearScreen:
 		m.assembler.Reset()
 		m.resetTranscriptWithHeader()
@@ -183,7 +206,7 @@ func (m *model) handleTurnDone(ev service.Event) tea.Cmd {
 	if wasStopping {
 		queuedRestored = m.restoreQueuedPromptsToComposer()
 	} else if next, ok := m.popQueuedPrompt(); ok {
-		eventCmd = m.submitPrompt(next.Text)
+		eventCmd = m.submitPromptWithBinding(next.Text, next.SkillBinding)
 		queuedTurnStarted = true
 	}
 	if !queuedTurnStarted && !queuedRestored && wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {

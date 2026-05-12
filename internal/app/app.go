@@ -13,7 +13,6 @@ import (
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/defaults"
 	"github.com/usewhale/whale/internal/llm"
-	"github.com/usewhale/whale/internal/llm/deepseek"
 	whalemcp "github.com/usewhale/whale/internal/mcp"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
@@ -42,6 +41,8 @@ type Config struct {
 	ReasoningEffort      string
 	ThinkingEnabled      bool
 	MCPConfigPath        string
+	APIBaseURL           string
+	SkillsDisabled       []string
 }
 
 type StartOptions struct {
@@ -66,6 +67,7 @@ type App struct {
 	msgStore         *store.JSONLStore
 	toolRegistry     *core.ToolRegistry
 	baseToolRegistry *core.ToolRegistry
+	toolset          *tools.Toolset
 	baseTools        []core.Tool
 	taskTools        []core.Tool
 	hooks            []agent.ResolvedHook
@@ -142,6 +144,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init tools failed: %w", err)
 	}
+	toolset.SetSkillDisabled(cfg.SkillsDisabled)
 	mcpConfigPath := strings.TrimSpace(cfg.MCPConfigPath)
 	if mcpConfigPath == "" {
 		mcpConfigPath = whalemcp.DefaultConfigPath(cfg.DataDir)
@@ -189,17 +192,17 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		return nil, fmt.Errorf("load api key failed: %w", err)
 	}
 	providerFactory := func(model string, maxTokens int) (llm.Provider, error) {
-		opts := []deepseek.Option{deepseek.WithAPIKey(apiKey)}
-		if strings.TrimSpace(model) != "" {
-			opts = append(opts, deepseek.WithModel(model))
-		} else {
-			opts = append(opts, deepseek.WithModel(defaults.DefaultModel))
+		if strings.TrimSpace(model) == "" {
+			model = defaults.DefaultModel
 		}
-		opts = append(opts, deepseek.WithReasoningEffort(effort), deepseek.WithThinking(thinking))
-		if maxTokens > 0 {
-			opts = append(opts, deepseek.WithMaxTokens(maxTokens))
-		}
-		return deepseek.New(opts...)
+		return newDeepSeekProvider(providerOptions{
+			APIKey:          apiKey,
+			BaseURL:         cfg.APIBaseURL,
+			Model:           model,
+			ReasoningEffort: effort,
+			ThinkingEnabled: thinking,
+			MaxTokens:       maxTokens,
+		})
 	}
 	var appRef *App
 	taskRunner := tasks.NewRunner(tasks.RunnerConfig{
@@ -239,6 +242,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		msgStore:         msgStore,
 		toolRegistry:     toolRegistry,
 		baseToolRegistry: baseToolRegistry,
+		toolset:          toolset,
 		baseTools:        append([]core.Tool{}, baseTools...),
 		taskTools:        append([]core.Tool{}, taskTools...),
 		hooks:            hooks,

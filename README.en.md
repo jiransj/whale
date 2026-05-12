@@ -147,7 +147,7 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 | `/status` | Show current session, mode, model, and config status |
 | `/compact` | Compact the current conversation context |
 | `/init` | Generate AGENTS.md for the current repository |
-| `/skills` | List local skills |
+| `/skills` | Open the Skills menu to list, insert, or enable/disable local skills |
 | `/mcp` | Show MCP server status |
 
 ## MCP
@@ -159,6 +159,8 @@ See [docs/mcp.md](docs/mcp.md) for setup and supported features.
 ## Skills
 
 Whale supports local Agent Skills for reusable workflows, team conventions, or tool-specific guidance.
+
+In the TUI, type `$` to search and insert a `$skill-name`. You can also run `/skills`: `List skills` opens the same `$` picker and inserts the selected skill into the composer, while `Enable/Disable Skills` opens a searchable toggle manager.
 
 See [docs/skills.md](docs/skills.md) for details.
 

@@ -15,6 +15,7 @@ func TestConfigFileRoundTrip(t *testing.T) {
 		Model:           "deepseek-v4-pro",
 		ReasoningEffort: "max",
 		ThinkingEnabled: &enabled,
+		API:             FileAPIConfig{BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1/"},
 		Permissions: FilePermissionsConfig{
 			Mode:               "never",
 			AllowShellPrefixes: []string{"git status", "go test"},
@@ -47,6 +48,9 @@ func TestConfigFileRoundTrip(t *testing.T) {
 	}
 	if loaded.ThinkingEnabled == nil || !*loaded.ThinkingEnabled {
 		t.Fatal("thinking_enabled: want true")
+	}
+	if loaded.API.BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1/" {
+		t.Fatalf("api base_url: %+v", loaded.API)
 	}
 	if loaded.Permissions.Mode != "never" || len(loaded.Permissions.AllowShellPrefixes) != 2 {
 		t.Fatalf("permissions config: %+v", loaded.Permissions)
@@ -115,6 +119,7 @@ func TestApplyFileConfigUsesGroupedConfig(t *testing.T) {
 	budgetLimit := 1.25
 	cfg := DefaultConfig()
 	ApplyFileConfig(&cfg, FileConfig{
+		API: FileAPIConfig{BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1/"},
 		Permissions: FilePermissionsConfig{
 			Mode:               "never",
 			AllowShellPrefixes: []string{"git status"},
@@ -142,6 +147,9 @@ func TestApplyFileConfigUsesGroupedConfig(t *testing.T) {
 	}
 	if !strings.HasSuffix(cfg.MCPConfigPath, "custom-mcp.json") {
 		t.Fatalf("mcp path not applied: %s", cfg.MCPConfigPath)
+	}
+	if cfg.APIBaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
+		t.Fatalf("api base url not applied: %s", cfg.APIBaseURL)
 	}
 	if cfg.AutoCompact || cfg.AutoCompactThreshold != compactThreshold || cfg.ContextWindow != contextWindow {
 		t.Fatalf("context not applied: %+v", cfg)

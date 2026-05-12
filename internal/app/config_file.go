@@ -21,10 +21,12 @@ type FileConfig struct {
 	ThinkingEnabled *bool  `toml:"thinking_enabled,omitempty"`
 
 	Permissions FilePermissionsConfig         `toml:"permissions,omitempty"`
+	API         FileAPIConfig                 `toml:"api,omitempty"`
 	Budget      FileBudgetConfig              `toml:"budget,omitempty"`
 	MCP         FileMCPConfig                 `toml:"mcp,omitempty"`
 	Context     FileContextConfig             `toml:"context,omitempty"`
 	ProjectDoc  FileProjectDocConfig          `toml:"project_doc,omitempty"`
+	Skills      FileSkillsConfig              `toml:"skills,omitempty"`
 	Hooks       map[string][]agent.HookConfig `toml:"hooks,omitempty"`
 }
 
@@ -32,6 +34,10 @@ type FilePermissionsConfig struct {
 	Mode               string   `toml:"mode,omitempty"`
 	AllowShellPrefixes []string `toml:"allow_shell_prefixes,omitempty"`
 	DenyShellPrefixes  []string `toml:"deny_shell_prefixes,omitempty"`
+}
+
+type FileAPIConfig struct {
+	BaseURL string `toml:"base_url,omitempty"`
 }
 
 type FileBudgetConfig struct {
@@ -52,6 +58,10 @@ type FileProjectDocConfig struct {
 	Enabled           *bool    `toml:"enabled,omitempty"`
 	MaxBytes          *int     `toml:"max_bytes,omitempty"`
 	FallbackFilenames []string `toml:"fallback_filenames,omitempty"`
+}
+
+type FileSkillsConfig struct {
+	Disabled []string `toml:"disabled,omitempty"`
 }
 
 type LoadedConfig struct {
@@ -154,6 +164,9 @@ func ApplyFileConfig(cfg *Config, file FileConfig) {
 	if strings.TrimSpace(file.MCP.ConfigPath) != "" {
 		cfg.MCPConfigPath = expandUserPath(file.MCP.ConfigPath)
 	}
+	if strings.TrimSpace(file.API.BaseURL) != "" {
+		cfg.APIBaseURL = strings.TrimRight(strings.TrimSpace(file.API.BaseURL), "/")
+	}
 	if file.Context.AutoCompact != nil {
 		cfg.AutoCompact = *file.Context.AutoCompact
 	}
@@ -171,6 +184,9 @@ func ApplyFileConfig(cfg *Config, file FileConfig) {
 	}
 	if len(file.ProjectDoc.FallbackFilenames) > 0 {
 		cfg.MemoryFileOrder = strings.Join(trimList(file.ProjectDoc.FallbackFilenames), ",")
+	}
+	if len(file.Skills.Disabled) > 0 {
+		cfg.SkillsDisabled = trimList(file.Skills.Disabled)
 	}
 }
 
@@ -233,6 +249,12 @@ func overlayExplicitConfig(dst *Config, src Config) {
 	}
 	if strings.TrimSpace(src.MCPConfigPath) != "" {
 		dst.MCPConfigPath = src.MCPConfigPath
+	}
+	if strings.TrimSpace(src.APIBaseURL) != "" {
+		dst.APIBaseURL = strings.TrimRight(strings.TrimSpace(src.APIBaseURL), "/")
+	}
+	if len(src.SkillsDisabled) > 0 {
+		dst.SkillsDisabled = trimList(src.SkillsDisabled)
 	}
 }
 
