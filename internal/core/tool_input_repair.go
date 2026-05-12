@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	ToolInputRepairNullOptionalOmitted = "null_optional_omitted"
-	ToolInputRepairStringifiedArray    = "stringified_array"
-	ToolInputRepairBareStringToArray   = "bare_string_to_array"
-	ToolInputRepairEmptyObjectToArray  = "empty_object_to_array"
+	ToolInputRepairNullOptionalOmitted  = "null_optional_omitted"
+	ToolInputRepairStringifiedArray     = "stringified_array"
+	ToolInputRepairBareStringToArray    = "bare_string_to_array"
+	ToolInputRepairEmptyObjectToArray   = "empty_object_to_array"
+	ToolInputRepairMarkdownAutolinkPath = "markdown_autolink_path"
 )
 
 type ToolInputRepair struct {
@@ -42,11 +43,11 @@ func RepairToolInputForSpec(spec ToolSpec, raw string) (string, []ToolInputRepai
 	if err := json.Unmarshal([]byte(raw), &in); err != nil {
 		return raw, nil
 	}
+	repairs := collectPathStringRepairs(spec.Parameters, in, "")
 	issues := collectToolInputIssues(spec.Parameters, in, "", true)
-	if len(issues) == 0 {
+	if len(issues) == 0 && len(repairs) == 0 {
 		return raw, nil
 	}
-	repairs := make([]ToolInputRepair, 0, len(issues))
 	for _, issue := range issues {
 		repair, ok := applyToolInputIssueRepair(issue)
 		if ok {
@@ -64,6 +65,67 @@ func RepairToolInputForSpec(spec ToolSpec, raw string) (string, []ToolInputRepai
 		return raw, nil
 	}
 	return string(b), repairs
+}
+
+func collectPathStringRepairs(schema map[string]any, value any, path string) []ToolInputRepair {
+	switch schemaType(schema) {
+	case "object", "":
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		props, _ := schema["properties"].(map[string]any)
+		keys := make([]string, 0, len(props))
+		for key := range props {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		var out []ToolInputRepair
+		for _, key := range keys {
+			childSchema, ok := props[key].(map[string]any)
+			if !ok {
+				continue
+			}
+			childValue, present := obj[key]
+			if !present {
+				continue
+			}
+			childPath := joinToolInputPath(path, key)
+			if schemaType(childSchema) == "string" && isPathStringField(key) {
+				if s, ok := childValue.(string); ok {
+					if fixed, changed := unwrapMarkdownAutolinkPath(s); changed {
+						obj[key] = fixed
+						out = append(out, ToolInputRepair{
+							Kind:       ToolInputRepairMarkdownAutolinkPath,
+							Path:       childPath,
+							BeforeType: "string",
+							AfterType:  "string",
+						})
+					}
+				}
+				continue
+			}
+			out = append(out, collectPathStringRepairs(childSchema, childValue, childPath)...)
+		}
+		return out
+	case "array":
+		arr, ok := value.([]any)
+		if !ok {
+			return nil
+		}
+		itemSchema, _ := schema["items"].(map[string]any)
+		if itemSchema == nil {
+			return nil
+		}
+		var out []ToolInputRepair
+		for i, item := range arr {
+			itemPath := path + "[" + strconv.Itoa(i) + "]"
+			out = append(out, collectPathStringRepairs(itemSchema, item, itemPath)...)
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func collectToolInputIssues(schema map[string]any, value any, path string, required bool) []toolInputIssue {
@@ -343,6 +405,61 @@ func isJSONInteger(value any) bool {
 	default:
 		return false
 	}
+}
+
+func isPathStringField(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "file_path", "path", "cwd", "directory":
+		return true
+	default:
+		return false
+	}
+}
+
+func unwrapMarkdownAutolinkPath(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	start := strings.Index(trimmed, "[")
+	if start < 0 {
+		return "", false
+	}
+	prefix := trimmed[:start]
+	if prefix != "" && !strings.HasSuffix(prefix, "/") && !strings.HasSuffix(prefix, "\\") {
+		return "", false
+	}
+	rest := trimmed[start:]
+	endText := strings.Index(rest, "]")
+	if endText <= 1 || endText+1 >= len(rest) || rest[endText+1] != '(' || !strings.HasSuffix(rest, ")") {
+		return "", false
+	}
+	text := rest[1:endText]
+	url := rest[endText+2 : len(rest)-1]
+	target, ok := stripHTTPProtocol(url)
+	if !ok {
+		return "", false
+	}
+	replacement := prefix + text
+	normalizedTarget := normalizeMarkdownPathTarget(target)
+	if normalizedTarget != normalizeMarkdownPathTarget(text) && normalizedTarget != normalizeMarkdownPathTarget(replacement) {
+		return "", false
+	}
+	if replacement == value {
+		return "", false
+	}
+	return replacement, true
+}
+
+func stripHTTPProtocol(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	for _, prefix := range []string{"http://", "https://"} {
+		if strings.HasPrefix(value, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(value, prefix)), true
+		}
+	}
+	return "", false
+}
+
+func normalizeMarkdownPathTarget(value string) string {
+	return strings.TrimSpace(value)
 }
 
 func joinToolInputPath(parent, key string) string {

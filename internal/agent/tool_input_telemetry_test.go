@@ -130,6 +130,34 @@ func (t telemetryArrayTool) Run(_ context.Context, call ToolCall) (ToolResult, e
 	return ToolResult{ToolCallID: call.ID, Name: call.Name, Content: `{"success":true,"code":"ok"}`}, nil
 }
 
+type telemetryPathTool struct{}
+
+func (t telemetryPathTool) Name() string { return "path_args" }
+
+func (t telemetryPathTool) Parameters() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file_path": map[string]any{"type": "string"},
+		},
+		"required":             []string{"file_path"},
+		"additionalProperties": false,
+	}
+}
+
+func (t telemetryPathTool) Run(_ context.Context, call ToolCall) (ToolResult, error) {
+	var in struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal([]byte(call.Input), &in); err != nil {
+		return ToolResult{ToolCallID: call.ID, Name: call.Name, Content: `{"success":false,"error":"bad path","code":"invalid_args"}`, IsError: true}, nil
+	}
+	if in.FilePath != "README.md" {
+		return ToolResult{ToolCallID: call.ID, Name: call.Name, Content: `{"success":false,"error":"path was not repaired","code":"invalid_args"}`, IsError: true}, nil
+	}
+	return ToolResult{ToolCallID: call.ID, Name: call.Name, Content: `{"success":true,"code":"ok"}`}, nil
+}
+
 func TestToolInputTelemetryRecordsTruncatedJSONRepair(t *testing.T) {
 	dir := t.TempDir()
 	a := NewAgentWithRegistry(
@@ -174,6 +202,23 @@ func TestToolInputTelemetryRecordsSchemaGuidedRepairDetails(t *testing.T) {
 
 	events := readToolInputEvents(t, dir, "s-schema-repair")
 	assertToolInputRepairDetail(t, events, "stringified_array", "prompts", "string", "array")
+	assertNoToolInputInvalidEvent(t, events)
+}
+
+func TestToolInputTelemetryRecordsMarkdownAutolinkPathRepair(t *testing.T) {
+	dir := t.TempDir()
+	a := NewAgentWithRegistry(
+		&telemetryToolProvider{tool: "path_args", input: `{"file_path":"[README.md](http://README.md)"}`},
+		NewInMemoryStore(),
+		NewToolRegistry([]Tool{telemetryPathTool{}}),
+		WithSessionsDir(dir),
+		WithToolPolicy(policyNever()),
+		WithRecoveryPolicy(RecoveryPolicy{Enabled: false}),
+	)
+	drainAgentEvents(t, a, "s-path-repair")
+
+	events := readToolInputEvents(t, dir, "s-path-repair")
+	assertToolInputRepairDetail(t, events, "markdown_autolink_path", "file_path", "string", "string")
 	assertNoToolInputInvalidEvent(t, events)
 }
 
