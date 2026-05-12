@@ -57,6 +57,83 @@ func TestViewWriteEdit(t *testing.T) {
 	}
 }
 
+func TestReadFileRangeDefaults(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("zero\none\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	limitOnly, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": "a.txt",
+		"limit":     1,
+	}))
+	if err != nil || limitOnly.IsError {
+		t.Fatalf("limit-only read failed: err=%v res=%+v", err, limitOnly)
+	}
+	limitData := readFileData(t, limitOnly)
+	if got := rangeNumber(t, limitData, "start"); got != 0 {
+		t.Fatalf("limit-only start = %d, want 0", got)
+	}
+	if got := rangeNumber(t, limitData, "end"); got != 1 {
+		t.Fatalf("limit-only end = %d, want 1", got)
+	}
+	if content := readFileContent(t, limitData); content != "zero" {
+		t.Fatalf("limit-only content = %q, want zero", content)
+	}
+	if note, _ := limitData["note"].(string); !strings.Contains(note, "offset was not provided; defaulted to 0") {
+		t.Fatalf("missing offset default note in %#v", limitData["note"])
+	}
+
+	offsetOnly, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": "a.txt",
+		"offset":    1,
+	}))
+	if err != nil || offsetOnly.IsError {
+		t.Fatalf("offset-only read failed: err=%v res=%+v", err, offsetOnly)
+	}
+	offsetData := readFileData(t, offsetOnly)
+	if got := rangeNumber(t, offsetData, "start"); got != 1 {
+		t.Fatalf("offset-only start = %d, want 1", got)
+	}
+	if got := rangeNumber(t, offsetData, "end"); got != 4 {
+		t.Fatalf("offset-only end = %d, want 4", got)
+	}
+	if content := readFileContent(t, offsetData); content != "one\ntwo\nthree" {
+		t.Fatalf("offset-only content = %q, want remaining lines", content)
+	}
+	if note, _ := offsetData["note"].(string); !strings.Contains(note, "limit was not provided; defaulted to 2000 lines") {
+		t.Fatalf("missing limit default note in %#v", offsetData["note"])
+	}
+
+	fullRead, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": "a.txt",
+	}))
+	if err != nil || fullRead.IsError {
+		t.Fatalf("full read failed: err=%v res=%+v", err, fullRead)
+	}
+	fullData := readFileData(t, fullRead)
+	if _, ok := fullData["note"]; ok {
+		t.Fatalf("unexpected note for full read: %#v", fullData["note"])
+	}
+
+	scopedRead, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": "a.txt",
+		"offset":    1,
+		"limit":     1,
+	}))
+	if err != nil || scopedRead.IsError {
+		t.Fatalf("scoped read failed: err=%v res=%+v", err, scopedRead)
+	}
+	scopedData := readFileData(t, scopedRead)
+	if _, ok := scopedData["note"]; ok {
+		t.Fatalf("unexpected note for scoped read: %#v", scopedData["note"])
+	}
+}
+
 func TestWriteAndEditReturnDiffMetadata(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello\nworld\n"), 0o644); err != nil {
@@ -431,4 +508,43 @@ func TestShellRunCWDStaysInsideWorkspace(t *testing.T) {
 	if !escaped.IsError || !strings.Contains(escaped.Content, "path escapes workspace") {
 		t.Fatalf("expected escaped cwd to be rejected: %+v", escaped)
 	}
+}
+
+func readFileData(t *testing.T, res core.ToolResult) map[string]any {
+	t.Helper()
+	env, ok := core.ParseToolEnvelope(res.Content)
+	if !ok {
+		t.Fatalf("parse read_file envelope: %s", res.Content)
+	}
+	return env.Data
+}
+
+func rangeNumber(t *testing.T, data map[string]any, key string) int {
+	t.Helper()
+	payload, ok := data["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing payload in %#v", data)
+	}
+	rangeData, ok := payload["range"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing range in %#v", payload)
+	}
+	v, ok := rangeData[key].(float64)
+	if !ok {
+		t.Fatalf("missing range %s in %#v", key, rangeData)
+	}
+	return int(v)
+}
+
+func readFileContent(t *testing.T, data map[string]any) string {
+	t.Helper()
+	payload, ok := data["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing payload in %#v", data)
+	}
+	content, ok := payload["content"].(string)
+	if !ok {
+		t.Fatalf("missing content in %#v", payload)
+	}
+	return content
 }
