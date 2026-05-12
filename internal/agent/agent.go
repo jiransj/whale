@@ -227,6 +227,7 @@ type Agent struct {
 	workspaceRoot          string
 	extraSystemBlocks      []string
 	sessionRuntime         *memory.SessionRuntime
+	sessionsDir            string
 	budgetWarningUSD       float64
 	usageLogPath           string
 	budgetWarned80         sync.Map
@@ -319,6 +320,7 @@ func WithSessionMode(mode session.Mode) AgentOption {
 
 func WithSessionsDir(sessionsDir string) AgentOption {
 	return func(a *Agent) {
+		a.sessionsDir = strings.TrimSpace(sessionsDir)
 		a.sessionRuntime = memory.NewSessionRuntime(sessionsDir)
 	}
 }

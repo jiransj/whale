@@ -8,7 +8,7 @@ import (
 	"github.com/usewhale/whale/internal/core"
 )
 
-func (a *Agent) dispatchWithRecovery(ctx context.Context, sessionID string, call core.ToolCall, events chan<- AgentEvent) (core.ToolResult, bool) {
+func (a *Agent) dispatchWithRecovery(ctx context.Context, sessionID, assistantMessageID, model string, call core.ToolCall, events chan<- AgentEvent) (core.ToolResult, bool) {
 	attempt := 0
 	for {
 		attempt++
@@ -31,6 +31,9 @@ func (a *Agent) dispatchWithRecovery(ctx context.Context, sessionID string, call
 		}
 		if err != nil {
 			res = core.ToolResult{ToolCallID: call.ID, Name: call.Name, Content: err.Error(), IsError: true}
+		}
+		if code := toolInputInvalidCode(res); code != "" {
+			a.recordToolInputInvalid(sessionID, model, assistantMessageID, call, code)
 		}
 		class := classifyToolFailure(res, err)
 		if class == "" {
