@@ -107,10 +107,11 @@ func (c *Client) StreamResponse(ctx context.Context, history []core.Message, too
 func (c *Client) stream(ctx context.Context, history []core.Message, tools []core.Tool, out chan<- llm.ProviderEvent) error {
 	msgs := toDeepSeekMessages(history)
 	payload := map[string]any{
-		"model":    c.model,
-		"stream":   true,
-		"messages": msgs,
-		"thinking": map[string]any{"type": "disabled"},
+		"model":          c.model,
+		"stream":         true,
+		"stream_options": map[string]any{"include_usage": true},
+		"messages":       msgs,
+		"thinking":       map[string]any{"type": "disabled"},
 	}
 	if c.thinkingEnabled {
 		payload["thinking"] = map[string]any{"type": "enabled"}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	appcommands "github.com/usewhale/whale/internal/app/commands"
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/store"
+	"github.com/usewhale/whale/internal/telemetry"
 )
 
 func TestResolveInitialSessionID(t *testing.T) {
@@ -192,6 +194,154 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 	res, err = handleCommand("/skills", "cur", now)
 	if err != nil || !res.Handled || !res.ShowSkills {
 		t.Fatalf("unexpected /skills result: %+v err=%v", res, err)
+	}
+}
+
+func TestHandleLocalCommandStats(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	writeUsageRecord(t, filepath.Join(dir, "usage.jsonl"), telemetry.UsageRecord{
+		TS:               time.Date(2026, 5, 12, 10, 0, 0, 0, time.Local).UnixMilli(),
+		Session:          "s1",
+		Model:            "deepseek-v4-flash",
+		PromptTokens:     1000,
+		CompletionTokens: 200,
+		PromptCacheHit:   800,
+		PromptCacheMiss:  200,
+		CostUSD:          0.0123,
+	})
+	writeToolInputEvent(t, sessionsDir, "s1", telemetry.ToolInputEvent{
+		TS:         time.Date(2026, 5, 12, 10, 1, 0, 0, time.Local).UnixMilli(),
+		Session:    "s1",
+		Model:      "deepseek-v4-flash",
+		Tool:       "read_file",
+		Event:      "tool_input_repaired",
+		RepairKind: "markdown_autolink_path",
+		Path:       "file_path",
+	})
+	writeToolInputEvent(t, sessionsDir, "s1", telemetry.ToolInputEvent{
+		TS:        time.Date(2026, 5, 12, 10, 2, 0, 0, time.Local).UnixMilli(),
+		Session:   "s1",
+		Model:     "deepseek-v4-flash",
+		Tool:      "write",
+		Event:     "tool_input_invalid",
+		ErrorCode: "invalid_args",
+	})
+	a := &App{
+		cfg:         Config{DataDir: dir},
+		sessionsDir: sessionsDir,
+	}
+
+	handled, out, err := a.HandleLocalCommand("/stats")
+	if err != nil {
+		t.Fatalf("stats command: %v", err)
+	}
+	if !handled {
+		t.Fatal("expected /stats to be handled")
+	}
+	for _, want := range []string{
+		"Stats",
+		"Usage",
+		"- turns: 1",
+		"- tokens: 1.2K total",
+		"- estimated cost: $0.0123 total",
+		"- top model: deepseek-v4-flash · 1 turns",
+		"Tool input",
+		"- repaired: 1",
+		"- invalid: 1",
+		"- repair rate: 50.0%",
+		"- top repair: markdown_autolink_path · 1",
+		"- top invalid tool: write · 1",
+		"More: /stats usage, /stats tools, /stats recent, /stats all",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected stats to contain %q, got:\n%s", want, out)
+		}
+	}
+	for _, dontWant := range []string{
+		"Recent tool-input events",
+		"Invalid codes",
+		"Top tools",
+	} {
+		if strings.Contains(out, dontWant) {
+			t.Fatalf("expected overview stats to omit %q, got:\n%s", dontWant, out)
+		}
+	}
+	if strings.Contains(out, `"input"`) {
+		t.Fatalf("stats should not expose raw input fields:\n%s", out)
+	}
+
+	handled, out, err = a.HandleLocalCommand("/stats usage")
+	if err != nil || !handled {
+		t.Fatalf("stats usage command handled=%v err=%v", handled, err)
+	}
+	for _, want := range []string{
+		"- sessions: 1",
+		"deepseek-v4-flash: 1 turns",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected usage stats to contain %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Tool input") {
+		t.Fatalf("expected usage stats to omit tool input section:\n%s", out)
+	}
+
+	handled, out, err = a.HandleLocalCommand("/stats tools")
+	if err != nil || !handled {
+		t.Fatalf("stats tools command handled=%v err=%v", handled, err)
+	}
+	for _, want := range []string{
+		"Tool input",
+		"markdown_autolink_path: 1",
+		"invalid_args: 1",
+		"read_file: 1 repaired",
+		"write: 0 repaired · 1 invalid",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected tool stats to contain %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Recent tool-input events") {
+		t.Fatalf("expected tool stats to omit recent events:\n%s", out)
+	}
+
+	handled, out, err = a.HandleLocalCommand("/stats recent")
+	if err != nil || !handled {
+		t.Fatalf("stats recent command handled=%v err=%v", handled, err)
+	}
+	for _, want := range []string{
+		"Recent turns",
+		"Recent tool-input events",
+		"markdown_autolink_path · file_path",
+		"invalid_args",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected recent stats to contain %q, got:\n%s", want, out)
+		}
+	}
+
+	handled, out, err = a.HandleLocalCommand("/stats all")
+	if err != nil || !handled {
+		t.Fatalf("stats all command handled=%v err=%v", handled, err)
+	}
+	for _, want := range []string{
+		"Usage",
+		"Tool input",
+		"Recent turns",
+		"Recent tool-input events",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected all stats to contain %q, got:\n%s", want, out)
+		}
+	}
+
+	handled, _, err = a.HandleLocalCommand("/stats extra")
+	if !handled || err == nil || !strings.Contains(err.Error(), "usage: /stats [usage|tools|recent|all]") {
+		t.Fatalf("expected /stats usage error, handled=%v err=%v", handled, err)
 	}
 }
 
@@ -406,5 +556,31 @@ func writeAppSkill(t *testing.T, dir, name, desc, body string) {
 	content := "---\nname: " + name + "\ndescription: " + desc + "\n---\n\n" + body + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write skill: %v", err)
+	}
+}
+
+func writeUsageRecord(t *testing.T, path string, rec telemetry.UsageRecord) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir usage dir: %v", err)
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal usage record: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open usage log: %v", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		t.Fatalf("write usage log: %v", err)
+	}
+}
+
+func writeToolInputEvent(t *testing.T, sessionsDir, sessionID string, rec telemetry.ToolInputEvent) {
+	t.Helper()
+	if err := telemetry.AppendToolInputEvent(sessionsDir, rec, time.UnixMilli(rec.TS)); err != nil {
+		t.Fatalf("append tool input event for %s: %v", sessionID, err)
 	}
 }
