@@ -103,11 +103,13 @@ Whale includes DeepSeek-specific handling for:
 
 | Generic agent assumption | What DeepSeek can do | Whale's handling |
 |--------------------------|----------------------|------------------|
-| Tool-call JSON is stable | Payloads can be malformed, escaped, or mixed into reasoning | repair / scavenge paths |
+| Tool-call JSON is stable | Payloads can be malformed, escaped, or mixed into reasoning | schema-guided repair / scavenge paths |
 | Deep tool schemas survive intact | Some nested parameters may be dropped | flatter tool parameters |
 | Failed tools should always trigger replan | Some failures should pass through to the model | finer failure classification and recovery |
 | User cancellation is just another tool failure | Cancellation should not continue recovery or replanning | dedicated interrupt path |
 | Reasoning depth is prompt-only | DeepSeek exposes `reasoning_effort` | runtime effort control |
+
+Whale validates tool inputs against the schema first, then repairs common recoverable shape errors only on failing paths: `null` optional fields, stringified arrays, bare strings for array fields, markdown-autolink paths, and `read_file` calls that provide only offset or limit. Repair and invalid-input counts are visible in `/stats`.
 
 Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capability usable in a real terminal workflow.
 

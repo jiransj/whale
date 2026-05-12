@@ -104,11 +104,13 @@ Whale 针对 DeepSeek 做了这些适配：
 
 | 通用 Agent 常见假设 | DeepSeek 实际会发生 | Whale 的处理 |
 |---------------------|---------------------|--------------|
-| tool-call JSON 总是稳定 | payload 可能 malformed、被转义或混进 reasoning | repair / scavenge 路径 |
+| tool-call JSON 总是稳定 | payload 可能 malformed、被转义或混进 reasoning | schema-guided repair / scavenge 路径 |
 | 深层 tool schema 能稳定保留 | 部分深层嵌套参数可能丢失 | 工具参数尽量扁平化 |
 | 失败工具需要统一 replan | 有些失败应该原样反馈给模型 | 更细的失败分类和 recovery 策略 |
 | 用户取消就是普通工具失败 | 取消后不应该继续恢复或补计划 | 中断路径单独处理 |
 | reasoning 深度只靠 prompt | DeepSeek 暴露 `reasoning_effort` | runtime 里保留 effort 控制 |
+
+Whale 会先按 schema 校验工具参数，再只在失败路径上修复常见可恢复形状错误，比如 optional 字段传 `null`、数组被字符串化、数组字段传裸字符串、路径被模型写成 Markdown 链接，以及 `read_file` 只给 offset/limit 的情况。修复和无效输入统计可以在 `/stats` 里查看。
 
 Whale 的目标是让 DeepSeek 的价格优势、缓存优势和编码能力真正落到终端工作流里。
 
