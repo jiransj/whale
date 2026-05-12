@@ -133,6 +133,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 		}
 		if report.truncationsFixed > 0 {
 			for i := range report.repairedCalls {
+				a.recordToolInputRepair(sessionID, lastModel, assistant.ID, report.repairedCalls[i], "truncated_json")
 				events <- AgentEvent{
 					Type: AgentEventTypeToolArgsRepaired,
 					ToolArgsRepair: &ToolArgsRepair{
@@ -164,6 +165,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 		if spec, ok := a.tools.Spec(call.Name); ok {
 			if fixed, changed := core.RenestFlatInputForSpec(spec, call.Input); changed {
 				call.Input = fixed
+				a.recordToolInputRepair(sessionID, lastModel, assistant.ID, call, "renest_flat_input")
 				events <- AgentEvent{
 					Type: AgentEventTypeToolArgsRepaired,
 					ToolArgsRepair: &ToolArgsRepair{
@@ -343,7 +345,7 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 			continue
 		}
 
-		finalRes, ok := a.dispatchWithRecovery(ctx, sessionID, call, events)
+		finalRes, ok := a.dispatchWithRecovery(ctx, sessionID, assistant.ID, lastModel, call, events)
 		if err := ctx.Err(); err != nil {
 			return core.Message{}, nil, llm.Usage{}, "", false, err
 		}
