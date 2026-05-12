@@ -77,8 +77,12 @@ func Parse(line, currentSessionID string, now time.Time) (Result, error) {
 	if trimmed == "/init" {
 		return Result{Handled: true, SessionID: currentSessionID, InitMemory: true}, nil
 	}
-	if trimmed == "/skills" {
-		return Result{Handled: true, SessionID: currentSessionID, ShowSkills: true}, nil
+	if trimmed == "/skills" || strings.HasPrefix(trimmed, "/skills ") {
+		fields := strings.Fields(trimmed)
+		if len(fields) == 1 && fields[0] == "/skills" {
+			return Result{Handled: true, SessionID: currentSessionID, ShowSkills: true}, nil
+		}
+		return Result{}, fmt.Errorf("usage: /skills")
 	}
 	return Result{}, nil
 }

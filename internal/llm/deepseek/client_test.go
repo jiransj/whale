@@ -149,6 +149,18 @@ func TestStreamResponseParsesReasoningDelta(t *testing.T) {
 	}
 }
 
+func TestWithBaseURLOverridesEnvironment(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "test-key")
+	t.Setenv("DEEPSEEK_BASE_URL", "https://env.example")
+	c, err := New(WithBaseURL("https://config.example/"))
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if c.baseURL != "https://config.example" {
+		t.Fatalf("baseURL: want config override, got %q", c.baseURL)
+	}
+}
+
 func TestToDeepSeekMessagesRecoversMissingToolResults(t *testing.T) {
 	history := []core.Message{
 		{

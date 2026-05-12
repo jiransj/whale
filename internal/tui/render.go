@@ -52,6 +52,9 @@ func (m model) View() string {
 	if m.mode == modeChat && m.hasSlashSuggestions() {
 		bottomParts = append(bottomParts, m.renderSlashSuggestions())
 	}
+	if m.mode == modeChat && !m.hasSlashSuggestions() && m.hasSkillSuggestions() {
+		bottomParts = append(bottomParts, m.renderSkillSuggestions())
+	}
 	if m.mode == modeApproval {
 		if len(bottomParts) > 0 {
 			bottomParts = append(bottomParts, "")
@@ -60,6 +63,12 @@ func (m model) View() string {
 	}
 	if m.mode == modePlanImplementation {
 		bottomParts = append(bottomParts, m.renderPlanImplementationPicker())
+	}
+	if m.mode == modeSkillsMenu {
+		bottomParts = append(bottomParts, m.renderSkillsMenu())
+	}
+	if m.mode == modeSkillsManager {
+		bottomParts = append(bottomParts, m.renderSkillsManager())
 	}
 	if m.mode == modeSessionPicker {
 		rows := []string{"sessions (↑/↓ select, enter confirm, esc cancel):"}

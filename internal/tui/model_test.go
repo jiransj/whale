@@ -12,6 +12,7 @@ import (
 	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/app/service"
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/skills"
 	tuirender "github.com/usewhale/whale/internal/tui/render"
 )
 
@@ -441,6 +442,245 @@ func TestSlashSuggestionEscClearsSuggestionsWithoutMutatingInput(t *testing.T) {
 	}
 	if len(m.slash.matches) != 0 || m.slash.selected != 0 {
 		t.Fatalf("expected esc to clear slash suggestions, got matches=%v selected=%d", m.slash.matches, m.slash.selected)
+	}
+}
+
+func TestSkillSuggestionsShownForDollarInput(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.skills.all = []skillSuggestion{
+		{Name: "code-review", Description: "Review local changes", When: "Use when reviewing code"},
+		{Name: "release", Description: "Prepare a release"},
+	}
+	m.input.SetValue("$rev")
+	m.updateSlashMatches()
+	if len(m.skills.matches) != 1 || m.skills.matches[0].Name != "code-review" {
+		t.Fatalf("expected code-review skill match, got %+v", m.skills.matches)
+	}
+	if m.hasSlashSuggestions() {
+		t.Fatalf("expected slash suggestions to stay hidden for skill input: %+v", m.slash.matches)
+	}
+}
+
+func TestSkillSuggestionEnterInsertsMention(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.skills.all = []skillSuggestion{{Name: "code-review", Description: "Review local changes", SkillFilePath: "/tmp/code-review/SKILL.md"}}
+	m.input.SetValue("$co")
+	m.updateSlashMatches()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if got := m.input.Value(); got != "$code-review " {
+		t.Fatalf("expected selected skill inserted, got %q", got)
+	}
+	if m.skillBinding == nil || m.skillBinding.Name != "code-review" || m.skillBinding.SkillFilePath != "/tmp/code-review/SKILL.md" {
+		t.Fatalf("expected skill binding for selected mention, got %+v", m.skillBinding)
+	}
+	if len(*intents) != 0 {
+		t.Fatalf("expected no dispatch when inserting skill mention, got %+v", *intents)
+	}
+	if len(m.skills.matches) != 0 || m.skills.selected != 0 {
+		t.Fatalf("expected skill suggestions cleared, got matches=%v selected=%d", m.skills.matches, m.skills.selected)
+	}
+}
+
+func TestSkillSuggestionDownNavigationPreservesSelection(t *testing.T) {
+	m, _ := newModelWithDispatchSpy()
+	m.skills.all = []skillSuggestion{
+		{Name: "code-review", Description: "Review local changes"},
+		{Name: "git-worktree", Description: "Create an isolated worktree"},
+		{Name: "grill-me", Description: "Interview the user relentlessly"},
+		{Name: "skill-creator", Description: "Create or update skills"},
+	}
+	m.input.SetValue("$")
+	m.updateSlashMatches()
+	if len(m.skills.matches) != 4 {
+		t.Fatalf("expected four skill matches, got %+v", m.skills.matches)
+	}
+
+	for i := 0; i < 3; i++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(model)
+	}
+	if got := m.skills.selected; got != 3 {
+		t.Fatalf("expected selected index 3 after three down presses, got %d", got)
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if got := m.input.Value(); got != "$skill-creator " {
+		t.Fatalf("expected selected skill inserted, got %q", got)
+	}
+}
+
+func TestSkillSuggestionSubmitIncludesBinding(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.skills.all = []skillSuggestion{{Name: "code-review", Description: "Review local changes", SkillFilePath: "/tmp/code-review/SKILL.md"}}
+	m.input.SetValue("$co")
+	m.updateSlashMatches()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	m.input.SetValue("$code-review review this diff")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected one submit intent, got %+v", *intents)
+	}
+	got := (*intents)[0]
+	if got.Kind != service.IntentSubmit || got.Input != "$code-review review this diff" {
+		t.Fatalf("unexpected submit intent: %+v", got)
+	}
+	if got.SkillBinding == nil || got.SkillBinding.Name != "code-review" || got.SkillBinding.SkillFilePath != "/tmp/code-review/SKILL.md" {
+		t.Fatalf("expected submit skill binding, got %+v", got.SkillBinding)
+	}
+}
+
+func TestSkillSuggestionSubmitDropsStaleBindingAfterNameEdit(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.skills.all = []skillSuggestion{{Name: "code-review", Description: "Review local changes", SkillFilePath: "/tmp/code-review/SKILL.md"}}
+	m.input.SetValue("$co")
+	m.updateSlashMatches()
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	m.input.SetValue("$find-skills")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected one submit intent, got %+v", *intents)
+	}
+	if got := (*intents)[0]; got.SkillBinding != nil {
+		t.Fatalf("expected stale binding to be dropped, got %+v", got.SkillBinding)
+	}
+}
+
+func TestSkillSuggestionsHiddenForSlashAndBusy(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.skills.all = []skillSuggestion{{Name: "code-review", Description: "Review local changes"}}
+	m.input.SetValue("/")
+	m.updateSlashMatches()
+	if len(m.skills.matches) != 0 {
+		t.Fatalf("expected skill suggestions hidden for slash input, got %+v", m.skills.matches)
+	}
+	m.input.SetValue("$co")
+	m.busy = true
+	m.updateSlashMatches()
+	if len(m.skills.matches) != 0 {
+		t.Fatalf("expected skill suggestions hidden while busy, got %+v", m.skills.matches)
+	}
+}
+
+func TestSkillSuggestionsHiddenAfterInsertedMentionWithSpace(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.skills.all = []skillSuggestion{{Name: "code-review", Description: "Review local changes"}}
+	m.input.SetValue("$code-review ")
+	m.updateSlashMatches()
+	if len(m.skills.matches) != 0 {
+		t.Fatalf("expected skill suggestions hidden after mention insert, got %+v", m.skills.matches)
+	}
+}
+
+func TestSkillsManagerRendersSearchesAndToggles(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.handleServiceEvent(service.Event{
+		Kind: service.EventSkillsManager,
+		Skills: []skills.SkillView{
+			{Name: "code-review", Description: "Review local changes", Status: skills.AvailabilityReady},
+			{Name: "legacy-review", Reason: "Disabled in config", Status: skills.AvailabilityDisabled},
+		},
+	})
+	if m.mode != modeSkillsManager {
+		t.Fatalf("expected skills manager mode, got %v", m.mode)
+	}
+	rendered := m.renderSkillsManager()
+	for _, want := range []string{"Enable/Disable Skills", "[x] code-review", "[ ] legacy-review", "Space/Enter toggle"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected skills manager render to contain %q, got:\n%s", want, rendered)
+		}
+	}
+
+	for _, r := range "legacy" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = next.(model)
+	}
+	if len(m.skillsManager.matches) != 1 {
+		t.Fatalf("expected one filtered skill, got matches=%v", m.skillsManager.matches)
+	}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected one toggle intent, got %+v", *intents)
+	}
+	if got := (*intents)[0]; got.Kind != service.IntentSetSkillEnabled || got.SkillName != "legacy-review" || !got.SkillEnabled {
+		t.Fatalf("unexpected toggle intent: %+v", got)
+	}
+	idx := m.skillsManager.matches[m.skillsManager.selected]
+	if !m.skillsManager.all[idx].Enabled {
+		t.Fatalf("expected selected skill to be optimistically enabled: %+v", m.skillsManager.all[idx])
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = next.(model)
+	if m.mode != modeChat {
+		t.Fatalf("expected ctrl+c to close skills manager, got mode %v", m.mode)
+	}
+}
+
+func TestSkillsMenuListsAndOpensManager(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.handleServiceEvent(service.Event{Kind: service.EventSkillsMenu})
+	if m.mode != modeSkillsMenu {
+		t.Fatalf("expected skills menu mode, got %v", m.mode)
+	}
+	rendered := m.renderSkillsMenu()
+	for _, want := range []string{"Skills", "List skills", "Enable/Disable Skills", "press $"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected skills menu render to contain %q, got:\n%s", want, rendered)
+		}
+	}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected one manager request intent, got %+v", *intents)
+	}
+	if got := (*intents)[0]; got.Kind != service.IntentRequestSkillsManage {
+		t.Fatalf("unexpected intent: %+v", got)
+	}
+}
+
+func TestSkillsMenuListActionOpensDollarPicker(t *testing.T) {
+	m, _ := newModelWithDispatchSpy()
+	m.skills.all = []skillSuggestion{{Name: "code-review", Description: "Review local changes"}}
+	m.handleServiceEvent(service.Event{Kind: service.EventSkillsMenu})
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if m.mode != modeChat {
+		t.Fatalf("expected chat mode after list action, got %v", m.mode)
+	}
+	if got := m.input.Value(); got != "$" {
+		t.Fatalf("expected input to contain dollar picker trigger, got %q", got)
+	}
+	if len(m.skills.matches) != 1 || m.skills.matches[0].Name != "code-review" {
+		t.Fatalf("expected skill picker matches, got %+v", m.skills.matches)
+	}
+}
+
+func TestSkillLoadedEventUpdatesStatusAndLogOnly(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.handleServiceEvent(service.Event{Kind: service.EventSkillLoaded, Text: "loaded skill: code-review"})
+
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("skill loaded event should not add chat entries, got %d", got)
+	}
+	if m.status != "loaded skill: code-review" {
+		t.Fatalf("expected skill loaded status, got %q", m.status)
+	}
+	if len(m.logs) != 1 {
+		t.Fatalf("expected one log entry, got %+v", m.logs)
+	}
+	if got := m.logs[0]; got.Kind != "skill_loaded" || got.Source != "skills" || got.Summary != "loaded skill: code-review" {
+		t.Fatalf("unexpected skill loaded log: %+v", got)
 	}
 }
 

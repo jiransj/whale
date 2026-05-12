@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/usewhale/whale/internal/agent"
-	"github.com/usewhale/whale/internal/llm/deepseek"
 	"github.com/usewhale/whale/internal/policy"
 	"github.com/usewhale/whale/internal/session"
 )
@@ -33,15 +32,13 @@ func (a *App) RunStopHook(lastAssistantText string, turn int) string {
 
 func (a *App) ensureAgent() (*agent.Agent, error) {
 	if a.a == nil {
-		opts := []deepseek.Option{}
-		if a.apiKey != "" {
-			opts = append(opts, deepseek.WithAPIKey(a.apiKey))
-		}
-		if strings.TrimSpace(a.model) != "" {
-			opts = append(opts, deepseek.WithModel(a.model))
-		}
-		opts = append(opts, deepseek.WithReasoningEffort(a.reasoningEffort), deepseek.WithThinking(a.thinkingEnabled))
-		provider, err := deepseek.New(opts...)
+		provider, err := newDeepSeekProvider(providerOptions{
+			APIKey:          a.apiKey,
+			BaseURL:         a.cfg.APIBaseURL,
+			Model:           a.model,
+			ReasoningEffort: a.reasoningEffort,
+			ThinkingEnabled: a.thinkingEnabled,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -54,6 +51,7 @@ func (a *App) ensureAgent() (*agent.Agent, error) {
 			agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: a.approvalMode, AllowPrefixes: a.allowPrefixes, DenyPrefixes: a.denyPrefixes}),
 			agent.WithHooks(a.hooks, a.workspaceRoot),
 			agent.WithProjectMemory(a.cfg.MemoryEnabled, a.cfg.MemoryMaxChars, parseCSVList(a.cfg.MemoryFileOrder), a.workspaceRoot),
+			agent.WithDisabledSkills(a.cfg.SkillsDisabled),
 			agent.WithApprovalFunc(func(req policy.ApprovalRequest) policy.ApprovalDecision {
 				a.approvalMu.Lock()
 				defer a.approvalMu.Unlock()
