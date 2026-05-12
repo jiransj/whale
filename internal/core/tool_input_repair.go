@@ -1,0 +1,353 @@
+package core
+
+import (
+	"encoding/json"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+const (
+	ToolInputRepairNullOptionalOmitted = "null_optional_omitted"
+	ToolInputRepairStringifiedArray    = "stringified_array"
+	ToolInputRepairBareStringToArray   = "bare_string_to_array"
+	ToolInputRepairEmptyObjectToArray  = "empty_object_to_array"
+)
+
+type ToolInputRepair struct {
+	Kind       string
+	Path       string
+	BeforeType string
+	AfterType  string
+}
+
+type toolInputIssue struct {
+	path       string
+	expected   string
+	schema     map[string]any
+	required   bool
+	knownField bool
+	parent     map[string]any
+	key        string
+}
+
+// RepairToolInputForSpec applies narrowly scoped, schema-guided repairs to
+// common tool-call argument shape mistakes. Valid inputs are returned unchanged.
+func RepairToolInputForSpec(spec ToolSpec, raw string) (string, []ToolInputRepair) {
+	if strings.TrimSpace(raw) == "" || spec.Parameters == nil {
+		return raw, nil
+	}
+	var in map[string]any
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		return raw, nil
+	}
+	issues := collectToolInputIssues(spec.Parameters, in, "", true)
+	if len(issues) == 0 {
+		return raw, nil
+	}
+	repairs := make([]ToolInputRepair, 0, len(issues))
+	for _, issue := range issues {
+		repair, ok := applyToolInputIssueRepair(issue)
+		if ok {
+			repairs = append(repairs, repair)
+		}
+	}
+	if len(repairs) == 0 {
+		return raw, nil
+	}
+	if issues := collectToolInputIssues(spec.Parameters, in, "", true); len(issues) > 0 {
+		return raw, nil
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		return raw, nil
+	}
+	return string(b), repairs
+}
+
+func collectToolInputIssues(schema map[string]any, value any, path string, required bool) []toolInputIssue {
+	expected := schemaType(schema)
+	if expected == "" {
+		if _, ok := schema["properties"].(map[string]any); ok {
+			expected = "object"
+		}
+	}
+	if value == nil {
+		if typeAllowsNull(schema) {
+			return nil
+		}
+		return []toolInputIssue{{
+			path:       path,
+			expected:   expected,
+			schema:     schema,
+			required:   required,
+			knownField: path != "",
+		}}
+	}
+	switch expected {
+	case "":
+		return nil
+	case "object":
+		obj, ok := value.(map[string]any)
+		if !ok {
+			return []toolInputIssue{{
+				path:       path,
+				expected:   expected,
+				schema:     schema,
+				required:   required,
+				knownField: path != "",
+			}}
+		}
+		return collectObjectToolInputIssues(schema, obj, path)
+	case "array":
+		arr, ok := value.([]any)
+		if !ok {
+			return []toolInputIssue{{
+				path:       path,
+				expected:   expected,
+				schema:     schema,
+				required:   required,
+				knownField: path != "",
+			}}
+		}
+		var out []toolInputIssue
+		if min, ok := schemaMinItems(schema); ok && len(arr) < min {
+			out = append(out, toolInputIssue{
+				path:       path,
+				expected:   "array",
+				schema:     schema,
+				required:   required,
+				knownField: path != "",
+			})
+		}
+		itemSchema, _ := schema["items"].(map[string]any)
+		if itemSchema == nil {
+			return out
+		}
+		for i, item := range arr {
+			itemPath := path + "[" + strconv.Itoa(i) + "]"
+			out = append(out, collectToolInputIssues(itemSchema, item, itemPath, true)...)
+		}
+		return out
+	case "string":
+		if _, ok := value.(string); ok {
+			return nil
+		}
+	case "integer":
+		if isJSONInteger(value) {
+			return nil
+		}
+	case "number":
+		if _, ok := value.(float64); ok {
+			return nil
+		}
+	case "boolean":
+		if _, ok := value.(bool); ok {
+			return nil
+		}
+	default:
+		return nil
+	}
+	return []toolInputIssue{{
+		path:       path,
+		expected:   expected,
+		schema:     schema,
+		required:   required,
+		knownField: path != "",
+	}}
+}
+
+func collectObjectToolInputIssues(schema map[string]any, obj map[string]any, path string) []toolInputIssue {
+	props, _ := schema["properties"].(map[string]any)
+	reqSet := requiredSet(schema["required"])
+	var out []toolInputIssue
+	keys := make([]string, 0, len(props))
+	for key := range props {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		childSchema, ok := props[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		value, present := obj[key]
+		childPath := joinToolInputPath(path, key)
+		if !present {
+			if reqSet[key] {
+				out = append(out, toolInputIssue{
+					path:       childPath,
+					expected:   schemaType(childSchema),
+					schema:     childSchema,
+					required:   true,
+					knownField: true,
+					parent:     obj,
+					key:        key,
+				})
+			}
+			continue
+		}
+		issues := collectToolInputIssues(childSchema, value, childPath, reqSet[key])
+		for i := range issues {
+			issues[i].knownField = true
+			if issues[i].parent == nil {
+				issues[i].parent = obj
+				issues[i].key = key
+			}
+		}
+		out = append(out, issues...)
+	}
+	if ap, ok := schema["additionalProperties"].(bool); ok && !ap {
+		for key := range obj {
+			if _, ok := props[key]; ok {
+				continue
+			}
+			out = append(out, toolInputIssue{
+				path:       joinToolInputPath(path, key),
+				expected:   "none",
+				required:   false,
+				knownField: false,
+				parent:     obj,
+				key:        key,
+			})
+		}
+	}
+	return out
+}
+
+func applyToolInputIssueRepair(issue toolInputIssue) (ToolInputRepair, bool) {
+	if !issue.knownField || issue.parent == nil || issue.key == "" {
+		return ToolInputRepair{}, false
+	}
+	value, present := issue.parent[issue.key]
+	if !present {
+		return ToolInputRepair{}, false
+	}
+	if value == nil && !issue.required {
+		delete(issue.parent, issue.key)
+		return ToolInputRepair{
+			Kind:       ToolInputRepairNullOptionalOmitted,
+			Path:       issue.path,
+			BeforeType: "null",
+			AfterType:  "omitted",
+		}, true
+	}
+	if issue.expected != "array" {
+		return ToolInputRepair{}, false
+	}
+	switch v := value.(type) {
+	case string:
+		var arr []any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &arr); err == nil {
+			issue.parent[issue.key] = arr
+			return ToolInputRepair{
+				Kind:       ToolInputRepairStringifiedArray,
+				Path:       issue.path,
+				BeforeType: "string",
+				AfterType:  "array",
+			}, true
+		}
+		if schemaArrayItemsType(issue.schema) != "string" {
+			return ToolInputRepair{}, false
+		}
+		issue.parent[issue.key] = []any{v}
+		return ToolInputRepair{
+			Kind:       ToolInputRepairBareStringToArray,
+			Path:       issue.path,
+			BeforeType: "string",
+			AfterType:  "array",
+		}, true
+	case map[string]any:
+		if len(v) != 0 {
+			return ToolInputRepair{}, false
+		}
+		issue.parent[issue.key] = []any{}
+		return ToolInputRepair{
+			Kind:       ToolInputRepairEmptyObjectToArray,
+			Path:       issue.path,
+			BeforeType: "object",
+			AfterType:  "array",
+		}, true
+	default:
+		return ToolInputRepair{}, false
+	}
+}
+
+func schemaType(schema map[string]any) string {
+	switch v := schema["type"].(type) {
+	case string:
+		return v
+	case []any:
+		for _, it := range v {
+			if s, ok := it.(string); ok && s != "null" {
+				return s
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s != "null" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func typeAllowsNull(schema map[string]any) bool {
+	switch v := schema["type"].(type) {
+	case string:
+		return v == "null"
+	case []any:
+		for _, it := range v {
+			if s, ok := it.(string); ok && s == "null" {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s == "null" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func schemaArrayItemsType(schema map[string]any) string {
+	items, _ := schema["items"].(map[string]any)
+	if items == nil {
+		return ""
+	}
+	return schemaType(items)
+}
+
+func schemaMinItems(schema map[string]any) (int, bool) {
+	switch v := schema["minItems"].(type) {
+	case int:
+		return v, true
+	case float64:
+		if v >= 0 && math.Trunc(v) == v {
+			return int(v), true
+		}
+	}
+	return 0, false
+}
+
+func isJSONInteger(value any) bool {
+	switch v := value.(type) {
+	case float64:
+		return math.Trunc(v) == v
+	case int:
+		return true
+	default:
+		return false
+	}
+}
+
+func joinToolInputPath(parent, key string) string {
+	if parent == "" {
+		return key
+	}
+	return parent + "." + key
+}

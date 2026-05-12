@@ -174,6 +174,19 @@ func (a *Agent) streamAndHandle(ctx context.Context, sessionID string, history [
 					},
 				}
 			}
+			if fixed, repairs := core.RepairToolInputForSpec(spec, call.Input); len(repairs) > 0 {
+				call.Input = fixed
+				for _, repair := range repairs {
+					a.recordToolInputRepairDetail(sessionID, lastModel, assistant.ID, call, repair)
+				}
+				events <- AgentEvent{
+					Type: AgentEventTypeToolArgsRepaired,
+					ToolArgsRepair: &ToolArgsRepair{
+						ToolCallIndex: i,
+						ToolName:      call.Name,
+					},
+				}
+			}
 		}
 		if !a.hooks.Empty() {
 			var toolArgs any
