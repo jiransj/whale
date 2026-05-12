@@ -14,6 +14,10 @@ const (
 )
 
 func (a *Agent) recordToolInputRepair(sessionID, model, assistantMessageID string, call core.ToolCall, repairKind string) {
+	a.recordToolInputRepairDetail(sessionID, model, assistantMessageID, call, core.ToolInputRepair{Kind: repairKind})
+}
+
+func (a *Agent) recordToolInputRepairDetail(sessionID, model, assistantMessageID string, call core.ToolCall, repair core.ToolInputRepair) {
 	a.recordToolInputEvent(telemetry.ToolInputEvent{
 		Session:            sessionID,
 		Model:              model,
@@ -21,7 +25,10 @@ func (a *Agent) recordToolInputRepair(sessionID, model, assistantMessageID strin
 		ToolCallID:         call.ID,
 		Tool:               call.Name,
 		Event:              toolInputEventRepaired,
-		RepairKind:         repairKind,
+		RepairKind:         repair.Kind,
+		Path:               repair.Path,
+		BeforeType:         repair.BeforeType,
+		AfterType:          repair.AfterType,
 	})
 }
 
