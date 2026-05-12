@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"math"
 	"testing"
 
 	"github.com/usewhale/whale/internal/llm"
@@ -14,11 +15,11 @@ func TestEstimateTurnUSD_FlashVsPro(t *testing.T) {
 	}
 	flash := EstimateTurnUSD("deepseek-v4-flash", u)
 	pro := EstimateTurnUSD("deepseek-v4-pro", u)
-	if flash <= 0 {
-		t.Fatalf("expected flash cost > 0, got %f", flash)
+	if math.Abs(flash-0.15428) > 0.0000001 {
+		t.Fatalf("unexpected flash cost: %f", flash)
 	}
-	if pro <= flash {
-		t.Fatalf("expected pro cost > flash cost, pro=%f flash=%f", pro, flash)
+	if math.Abs(pro-0.4788625) > 0.0000001 {
+		t.Fatalf("unexpected pro cost: %f", pro)
 	}
 }
 

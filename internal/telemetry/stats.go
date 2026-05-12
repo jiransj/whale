@@ -14,8 +14,11 @@ type Pricing struct {
 }
 
 var defaultPricing = map[string]Pricing{
-	defaults.DefaultModel: {InputMissUSDPerMTok: 0.27, InputHitUSDPerMTok: 0.027, OutputUSDPerMTok: 1.10},
-	defaults.ProModel:     {InputMissUSDPerMTok: 2.00, InputHitUSDPerMTok: 0.20, OutputUSDPerMTok: 8.00},
+	// Source: https://api-docs.deepseek.com/quick_start/pricing
+	// Checked 2026-05-12. DeepSeek v4 pro prices below use the current 75%
+	// discount, which DeepSeek says runs through 2026-05-31 15:59 UTC.
+	defaults.DefaultModel: {InputMissUSDPerMTok: 0.14, InputHitUSDPerMTok: 0.0028, OutputUSDPerMTok: 0.28},
+	defaults.ProModel:     {InputMissUSDPerMTok: 0.435, InputHitUSDPerMTok: 0.003625, OutputUSDPerMTok: 0.87},
 }
 
 func pricingForModel(model string) Pricing {

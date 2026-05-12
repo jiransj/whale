@@ -87,8 +87,22 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 }
 
 func (a *App) HandleLocalCommand(line string) (handled bool, output string, err error) {
-	if strings.TrimSpace(line) == "/mcp" {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "/mcp" {
 		return true, a.buildMCPStatus(), nil
+	}
+	if trimmed == "/stats" {
+		return true, a.buildStats(), nil
+	}
+	if strings.HasPrefix(trimmed, "/stats ") {
+		fields := strings.Fields(trimmed)
+		if len(fields) == 2 {
+			switch fields[1] {
+			case "usage", "tools", "repair", "recent", "all":
+				return true, a.buildStatsView(fields[1]), nil
+			}
+		}
+		return true, "", errors.New("usage: /stats [usage|tools|recent|all]")
 	}
 	if strings.HasPrefix(line, "/compact") {
 		fields := strings.Fields(line)
