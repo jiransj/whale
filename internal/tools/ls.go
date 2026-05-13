@@ -17,7 +17,7 @@ func (b *Toolset) listDir(_ context.Context, call core.ToolCall) (core.ToolResul
 	if err := decodeInput(call.Input, &in); err != nil {
 		return marshalToolError(call, "invalid_args", err.Error()), nil
 	}
-	abs, err := b.safePath(in.Path)
+	abs, err := b.safeReadPath(in.Path)
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}

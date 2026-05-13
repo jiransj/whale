@@ -38,7 +38,7 @@ func (b *Toolset) searchFiles(_ context.Context, call core.ToolCall) (core.ToolR
 	if in.Limit > 2000 {
 		in.Limit = 2000
 	}
-	abs, err := b.safePath(in.Path)
+	abs, err := b.safeReadPath(in.Path)
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}
@@ -56,11 +56,7 @@ func (b *Toolset) searchFiles(_ context.Context, call core.ToolCall) (core.ToolR
 			}
 			return nil
 		}
-		rel, err := filepath.Rel(b.root, path)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
+		rel := b.displayPath(path)
 		if strings.Contains(strings.ToLower(rel), pat) || strings.Contains(strings.ToLower(d.Name()), pat) {
 			total++
 			if len(matches) < in.Limit {

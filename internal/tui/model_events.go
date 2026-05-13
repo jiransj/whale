@@ -15,6 +15,7 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 	switch ev.Kind {
 	case service.EventAssistantDelta:
 		m.append("assistant", ev.Text)
+		m.recordAssistantDelta(ev.Text)
 		m.addLog(logEntry{Kind: "assistant_delta", Source: "assistant", Summary: ev.Text, Raw: ev.Text})
 		if strings.TrimSpace(ev.Text) != "" {
 			m.sawAssistantThisTurn = true
@@ -143,6 +144,29 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		m.mode = modePermissionsPicker
 		m.permissionsPicker.choices = ev.ApprovalChoices
 		m.permissionsPicker.index = indexOf(ev.ApprovalChoices, ev.CurrentApproval)
+	case service.EventSkillLoaded:
+		m.addLog(logEntry{Kind: "skill_loaded", Source: "skills", Summary: ev.Text, Raw: ev.Text})
+		m.status = ev.Text
+	case service.EventSkillsMenu:
+		m.stopBusy()
+		m.stopping = false
+		m.mode = modeSkillsMenu
+		m.skillsMenu.selected = 0
+		m.slash.matches = nil
+		m.slash.selected = 0
+		m.skills.matches = nil
+		m.skills.selected = 0
+		m.status = "skills"
+	case service.EventSkillsManager:
+		m.stopBusy()
+		m.stopping = false
+		m.mode = modeSkillsManager
+		m.slash.matches = nil
+		m.slash.selected = 0
+		m.skills.matches = nil
+		m.skills.selected = 0
+		m.setSkillsManagerItems(ev.Skills)
+		m.status = "skills"
 	case service.EventClearScreen:
 		m.assembler.Reset()
 		m.resetTranscriptWithHeader()
@@ -168,13 +192,36 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 	return eventCmd, false, false
 }
 
+func (m *model) handleServiceEvents(events []service.Event) (tea.Cmd, bool, bool) {
+	cmds := make([]tea.Cmd, 0, len(events))
+	for _, ev := range events {
+		cmd, quit, direct := m.handleServiceEvent(ev)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		if quit || direct {
+			return tea.Sequence(cmds...), quit, direct
+		}
+	}
+	return tea.Sequence(cmds...), false, false
+}
+
 func (m *model) handleTurnDone(ev service.Event) tea.Cmd {
 	wasBusy := m.busy
 	wasStopping := m.stopping
+	wasFrozen := m.viewportFrozen
 	m.stopBusy()
 	m.stopping = false
+	reconciledAssistant := false
+	if isAgentTurnDone(ev) {
+		reconciledAssistant = m.reconcileFinalAssistant(ev.LastResponse)
+	}
 	m.markNoFinalAnswerIfNeeded()
-	m.commitLiveTranscript(false)
+	m.commitLiveTranscript(reconciledAssistant && !wasFrozen)
+	if wasFrozen {
+		m.unfreezeChatViewport()
+		m.refreshViewportContentFollow(false)
+	}
 	m.addLog(logEntry{Kind: "turn_done", Source: "assistant", Summary: truncateLine(ev.LastResponse, 120), Raw: ev.LastResponse})
 	m.status = "ready"
 	queuedTurnStarted := false
@@ -183,7 +230,7 @@ func (m *model) handleTurnDone(ev service.Event) tea.Cmd {
 	if wasStopping {
 		queuedRestored = m.restoreQueuedPromptsToComposer()
 	} else if next, ok := m.popQueuedPrompt(); ok {
-		eventCmd = m.submitPrompt(next.Text)
+		eventCmd = m.submitPromptWithBinding(next.Text, next.SkillBinding)
 		queuedTurnStarted = true
 	}
 	if !queuedTurnStarted && !queuedRestored && wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {
@@ -199,4 +246,14 @@ func (m *model) resetTurnVisibility() {
 	m.sawAssistantThisTurn = false
 	m.sawReasoningThisTurn = false
 	m.sawTerminalToolOutcomeThisTurn = false
+	m.visibleAssistantThisTurn = ""
+	m.turnTranscriptStart = len(m.transcript)
+}
+
+func isAgentTurnDone(ev service.Event) bool {
+	if ev.Metadata == nil {
+		return false
+	}
+	agentTurn, ok := ev.Metadata[service.EventMetadataAgentTurn].(bool)
+	return ok && agentTurn
 }

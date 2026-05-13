@@ -16,9 +16,19 @@ func (m *model) flushNativeScrollbackCmd() tea.Cmd {
 	if m.nativeScrollbackPrinted == len(m.transcript) {
 		return nil
 	}
+	if !m.shouldFlushNativeScrollback() {
+		return nil
+	}
 	messages := append([]tuirender.UIMessage(nil), m.transcript[m.nativeScrollbackPrinted:]...)
 	m.nativeScrollbackPrinted = len(m.transcript)
 	return nativeScrollbackPrintCmd(messages, m.chatRenderWidth())
+}
+
+func (m *model) shouldFlushNativeScrollback() bool {
+	if m.page == pageChat && (m.viewportFrozen || !m.followTail) {
+		return false
+	}
+	return true
 }
 
 func nativeScrollbackPrintCmd(messages []tuirender.UIMessage, width int) tea.Cmd {

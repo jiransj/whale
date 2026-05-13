@@ -26,6 +26,8 @@ const (
 	modeModelPicker
 	modePermissionsPicker
 	modePlanImplementation
+	modeSkillsMenu
+	modeSkillsManager
 )
 
 type page int
@@ -37,31 +39,34 @@ const (
 )
 
 type model struct {
-	svc        *service.Service
-	dispatch   func(service.Intent)
-	input      composer.Composer
-	viewport   viewport.Model
-	assembler  *tuirender.Assembler
-	transcript []tuirender.UIMessage
-	logs       []logEntry
-	diffs      []diffEntry
-	width      int
-	height     int
-	mode       mode
-	page       page
-	status     string
-	busy       bool
-	busySince  time.Time
-	stopping   bool
-	sidebar    bool
-	model      string
-	effort     string
-	thinking   string
-	chatMode   string
-	product    string
-	version    string
-	cwd        string
-	approval   struct {
+	svc               *service.Service
+	dispatch          func(service.Intent)
+	input             composer.Composer
+	viewport          viewport.Model
+	assembler         *tuirender.Assembler
+	transcript        []tuirender.UIMessage
+	logs              []logEntry
+	diffs             []diffEntry
+	width             int
+	height            int
+	followTail        bool
+	viewportFrozen    bool
+	frozenChatContent string
+	mode              mode
+	page              page
+	status            string
+	busy              bool
+	busySince         time.Time
+	stopping          bool
+	sidebar           bool
+	model             string
+	effort            string
+	thinking          string
+	chatMode          string
+	product           string
+	version           string
+	cwd               string
+	approval          struct {
 		toolCallID string
 		toolName   string
 		reason     string
@@ -90,6 +95,21 @@ type model struct {
 		matches  []string
 		selected int
 	}
+	skills struct {
+		all      []skillSuggestion
+		matches  []skillSuggestion
+		selected int
+	}
+	skillBinding *app.SkillBinding
+	skillsMenu   struct {
+		selected int
+	}
+	skillsManager struct {
+		all      []skillManagerItem
+		matches  []int
+		selected int
+		query    string
+	}
 	modelPicker struct {
 		stage     int // 0 model, 1 effort, 2 thinking
 		models    []string
@@ -110,6 +130,8 @@ type model struct {
 	sawAssistantThisTurn           bool
 	sawReasoningThisTurn           bool
 	sawTerminalToolOutcomeThisTurn bool
+	visibleAssistantThisTurn       string
+	turnTranscriptStart            int
 	quitArmedUntil                 time.Time
 	promptHistory                  []string
 	historyIndex                   int
@@ -118,10 +140,12 @@ type model struct {
 	inHistoryNav                   bool
 	queuedPrompts                  []queuedPrompt
 	nativeScrollbackPrinted        int
+	pendingMouseCSIFragment        bool
 }
 
 type queuedPrompt struct {
-	Text string
+	Text         string
+	SkillBinding *app.SkillBinding
 }
 
 type paletteAction struct {
@@ -141,11 +165,34 @@ type diffEntry struct {
 	Line   string
 }
 
+type skillSuggestion struct {
+	Name          string
+	Description   string
+	When          string
+	SkillFilePath string
+	Status        string
+	Reason        string
+}
+
+type skillManagerItem struct {
+	Name                string
+	Description         string
+	OriginalDescription string
+	Status              string
+	Reason              string
+	Source              string
+	Enabled             bool
+	Toggleable          bool
+}
+
 type svcMsg service.Event
+type svcBatchMsg []service.Event
 
 type errMsg struct{ err error }
 type quitTimeoutMsg struct{}
 type busyTickMsg struct{}
+
+const serviceDeltaFrame = 100 * time.Millisecond
 
 func newModel(svc *service.Service, modelName, effort, thinking string) model {
 	filter := textinput.New()
@@ -168,6 +215,7 @@ func newModel(svc *service.Service, modelName, effort, thinking string) model {
 		viewport:       vp,
 		assembler:      tuirender.NewAssembler(),
 		status:         "ready",
+		followTail:     true,
 		page:           pageChat,
 		sidebar:        false,
 		logFilterInput: filter,
@@ -198,7 +246,43 @@ func (m *model) dispatchIntent(in service.Intent) {
 func waitEventCmd(svc *service.Service) tea.Cmd {
 	return func() tea.Msg {
 		ev := <-svc.Events()
-		return svcMsg(ev)
+		if !shouldBatchServiceEvent(ev) {
+			return svcMsg(ev)
+		}
+		events := appendBatchedServiceEvent(nil, ev)
+		timer := time.NewTimer(serviceDeltaFrame)
+		defer timer.Stop()
+		for {
+			select {
+			case next := <-svc.Events():
+				events = appendBatchedServiceEvent(events, next)
+				if !shouldBatchServiceEvent(next) {
+					return svcBatchMsg(events)
+				}
+			case <-timer.C:
+				return svcBatchMsg(events)
+			}
+		}
+	}
+}
+
+func appendBatchedServiceEvent(events []service.Event, ev service.Event) []service.Event {
+	if shouldBatchServiceEvent(ev) && len(events) > 0 {
+		last := &events[len(events)-1]
+		if last.Kind == ev.Kind {
+			last.Text += ev.Text
+			return events
+		}
+	}
+	return append(events, ev)
+}
+
+func shouldBatchServiceEvent(ev service.Event) bool {
+	switch ev.Kind {
+	case service.EventAssistantDelta, service.EventReasoningDelta, service.EventPlanDelta:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -207,7 +291,7 @@ func armQuitCmd(d time.Duration) tea.Cmd {
 }
 
 func busyTickCmd() tea.Cmd {
-	return tea.Tick(120*time.Millisecond, func(time.Time) tea.Msg { return busyTickMsg{} })
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return busyTickMsg{} })
 }
 
 // clearScreenCmd clears the visible terminal and scrollback buffer,
@@ -234,7 +318,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewportContent()
 		return m, nil
 	case svcMsg:
-		eventCmd, quit, direct := m.handleServiceEvent(service.Event(msg))
+		eventCmd, quit, direct := m.handleServiceEvents([]service.Event{service.Event(msg)})
+		if quit {
+			return m, tea.Quit
+		}
+		if direct {
+			return m, eventCmd
+		}
+		return m, tea.Sequence(eventCmd, m.flushNativeScrollbackCmd(), waitEventCmd(m.svc))
+	case svcBatchMsg:
+		eventCmd, quit, direct := m.handleServiceEvents([]service.Event(msg))
 		if quit {
 			return m, tea.Quit
 		}
@@ -259,9 +352,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewportContent()
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
+			if m.page == pageChat && m.busy {
+				m.freezeChatViewport()
+			}
 			m.viewport.LineUp(3)
+			if m.page == pageChat {
+				m.followTail = false
+			}
 		case tea.MouseButtonWheelDown:
 			m.viewport.LineDown(3)
+			if m.page == pageChat {
+				m.followTail = m.viewport.AtBottom()
+				if m.followTail {
+					return m, m.resumeChatTail()
+				}
+			}
 		}
 		return m, nil
 	case tea.KeyMsg:

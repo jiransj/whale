@@ -14,6 +14,10 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	ctx := context.Background()
 	svc, err := service.New(ctx, cfg, start)
 	if err != nil {
+		if app.IsCrossWorkspaceResumeError(err) {
+			fmt.Println(err.Error())
+			return nil
+		}
 		return err
 	}
 	defer svc.Close()
@@ -23,7 +27,10 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	if !svc.ThinkingEnabled() {
 		thinking = "off"
 	}
-	p := tea.NewProgram(newModel(svc, modelName, effort, thinking))
+	p := tea.NewProgram(
+		newModel(svc, modelName, effort, thinking),
+		tea.WithMouseCellMotion(),
+	)
 	_, err = p.Run()
 	if err == nil {
 		fmt.Printf("To resume this session, run: whale resume %s\n", svc.SessionID())

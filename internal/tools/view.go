@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/usewhale/whale/internal/core"
@@ -13,13 +12,13 @@ import (
 func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResult, error) {
 	var in struct {
 		FilePath string `json:"file_path"`
-		Offset   int    `json:"offset"`
-		Limit    int    `json:"limit"`
+		Offset   *int   `json:"offset"`
+		Limit    *int   `json:"limit"`
 	}
 	if err := decodeInput(call.Input, &in); err != nil {
 		return marshalToolError(call, "invalid_args", err.Error()), nil
 	}
-	abs, err := b.safePath(in.FilePath)
+	abs, err := b.safeReadPath(in.FilePath)
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}
@@ -36,7 +35,22 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		lines = lines[:len(lines)-1]
 	}
 	total := len(lines)
-	start := in.Offset
+	start := 0
+	if in.Offset != nil {
+		start = *in.Offset
+	}
+	limit := 0
+	if in.Limit != nil {
+		limit = *in.Limit
+	}
+	note := ""
+	if in.Offset == nil && in.Limit != nil {
+		note = "offset was not provided; defaulted to 0. To read a different range, retry with both offset and limit."
+	}
+	if in.Offset != nil && in.Limit == nil {
+		limit = 2000
+		note = "limit was not provided; defaulted to 2000 lines. To read more or fewer lines, retry with both offset and limit."
+	}
 	if start < 0 {
 		start = 0
 	}
@@ -44,8 +58,8 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		start = total
 	}
 	end := total
-	if in.Limit > 0 && start+in.Limit < total {
-		end = start + in.Limit
+	if limit > 0 && start+limit < total {
+		end = start + limit
 	}
 	selected := lines[start:end]
 	truncatedLines := 0
@@ -56,8 +70,8 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 			truncatedLines++
 		}
 	}
-	rel := filepath.ToSlash(strings.TrimPrefix(abs, b.root+string(filepath.Separator)))
-	return marshalToolResult(call, map[string]any{
+	rel := b.displayPath(abs)
+	result := map[string]any{
 		"status": "ok",
 		"metrics": map[string]any{
 			"total_lines":          total,
@@ -75,5 +89,9 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 			"content":         strings.Join(selected, "\n"),
 		},
 		"summary": rel + ":" + fmt.Sprintf("%d-%d/%d", start, end, total),
-	})
+	}
+	if note != "" {
+		result["note"] = note
+	}
+	return marshalToolResult(call, result)
 }

@@ -28,14 +28,14 @@ func (b *Toolset) searchContent(_ context.Context, call core.ToolCall) (core.Too
 	if strings.TrimSpace(in.Pattern) == "" {
 		return marshalToolError(call, "invalid_args", "pattern is required"), nil
 	}
-	abs, err := b.safePath(in.Path)
+	abs, err := b.safeReadPath(in.Path)
 	if err != nil {
 		return marshalToolError(call, "permission_denied", err.Error()), nil
 	}
 
-	matches, byFile, searchErr := searchWithRipgrep(in.Pattern, abs, in.Include, in.LiteralText, b.root)
+	matches, byFile, searchErr := searchWithRipgrep(in.Pattern, abs, in.Include, in.LiteralText, b.displayPath)
 	if searchErr != nil {
-		matches, byFile, searchErr = searchWithGo(in.Pattern, abs, in.Include, in.LiteralText, b.root)
+		matches, byFile, searchErr = searchWithGo(in.Pattern, abs, in.Include, in.LiteralText, b.displayPath)
 		if searchErr != nil {
 			return marshalToolError(call, "exec_failed", searchErr.Error()), nil
 		}
@@ -79,7 +79,7 @@ type matchRow struct {
 
 // searchWithRipgrep tries to use ripgrep (rg) for fast searching.
 // Returns an error if rg is not available or fails.
-func searchWithRipgrep(pattern, path, include string, literal bool, root string) ([]matchRow, map[string]int, error) {
+func searchWithRipgrep(pattern, path, include string, literal bool, displayPath func(string) string) ([]matchRow, map[string]int, error) {
 	if _, err := exec.LookPath("rg"); err != nil {
 		return nil, nil, fmt.Errorf("rg not found: %w", err)
 	}
@@ -117,9 +117,9 @@ func searchWithRipgrep(pattern, path, include string, literal bool, root string)
 		rawLine, _ := textObj["text"].(string)
 		num, _ := data["line_number"].(float64)
 
-		rel := rawPath
-		if rp, rerr := filepath.Rel(root, rawPath); rerr == nil {
-			rel = filepath.ToSlash(rp)
+		rel := filepath.ToSlash(rawPath)
+		if displayPath != nil {
+			rel = displayPath(rawPath)
 		}
 		row := matchRow{
 			File:       rel,
@@ -147,7 +147,7 @@ func searchWithRipgrep(pattern, path, include string, literal bool, root string)
 
 // searchWithGo is a pure-Go fallback when ripgrep is not available.
 // It walks the directory tree and searches file contents with Go's regexp.
-func searchWithGo(pattern, path, include string, literal bool, root string) ([]matchRow, map[string]int, error) {
+func searchWithGo(pattern, path, include string, literal bool, displayPath func(string) string) ([]matchRow, map[string]int, error) {
 	searchPattern := pattern
 	if literal {
 		searchPattern = regexp.QuoteMeta(pattern)
@@ -192,7 +192,7 @@ func searchWithGo(pattern, path, include string, literal bool, root string) ([]m
 			return nil
 		}
 
-		fileMatches, err := grepFile(filePath, re, root)
+		fileMatches, err := grepFile(filePath, re, displayPath)
 		if err != nil {
 			return nil
 		}
@@ -213,7 +213,7 @@ func searchWithGo(pattern, path, include string, literal bool, root string) ([]m
 }
 
 // grepFile searches a single file for regex matches, returning match rows.
-func grepFile(filePath string, re *regexp.Regexp, root string) ([]matchRow, error) {
+func grepFile(filePath string, re *regexp.Regexp, displayPath func(string) string) ([]matchRow, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -230,9 +230,9 @@ func grepFile(filePath string, re *regexp.Regexp, root string) ([]matchRow, erro
 		if len(locs) == 0 {
 			continue
 		}
-		rel := filePath
-		if rp, rerr := filepath.Rel(root, filePath); rerr == nil {
-			rel = filepath.ToSlash(rp)
+		rel := filepath.ToSlash(filePath)
+		if displayPath != nil {
+			rel = displayPath(filePath)
 		}
 		row := matchRow{
 			File:       rel,

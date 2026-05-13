@@ -20,6 +20,10 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	start.UserInputFunc = promptUserInputCLI
 	coreApp, err := app.New(ctx, cfg, start)
 	if err != nil {
+		if app.IsCrossWorkspaceResumeError(err) {
+			fmt.Println(err.Error())
+			return nil
+		}
 		return err
 	}
 	defer coreApp.Close()
@@ -67,12 +71,12 @@ func Run(cfg app.Config, start app.StartOptions) error {
 			if !scanner.Scan() {
 				break
 			}
-			msg, err := coreApp.ApplyResumeChoice(scanner.Text())
+			res, err := coreApp.ApplyResumeChoice(scanner.Text())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				continue
 			}
-			fmt.Println(msg)
+			fmt.Println(res.Message)
 			continue
 		}
 
@@ -184,11 +188,11 @@ func promptResumeChoice(scanner *bufio.Scanner, app *app.App) error {
 	if !scanner.Scan() {
 		return scanner.Err()
 	}
-	msg, err := app.ApplyResumeChoice(scanner.Text())
+	res, err := app.ApplyResumeChoice(scanner.Text())
 	if err != nil {
 		return err
 	}
-	fmt.Println(msg)
+	fmt.Println(res.Message)
 	return nil
 }
 

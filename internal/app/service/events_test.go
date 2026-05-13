@@ -12,6 +12,7 @@ import (
 	"github.com/usewhale/whale/internal/agent"
 	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/session"
 )
 
 func TestCriticalEventsDeliverAfterDeltaBackpressure(t *testing.T) {
@@ -185,6 +186,134 @@ func TestResumeMenuStartupWithNoSessionsHydratesFallbackSession(t *testing.T) {
 	}
 }
 
+func TestResumeMenuCrossWorkspaceSelectionDoesNotHydrate(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	writeSessionFile(t, dir, "sess-1", "hello from elsewhere")
+	if err := session.SaveSessionMeta(filepath.Join(dir, "sessions"), "sess-1", session.SessionMeta{Workspace: other}); err != nil {
+		t.Fatalf("save session meta: %v", err)
+	}
+	cfg := app.DefaultConfig()
+	cfg.DataDir = dir
+
+	svc, err := New(t.Context(), cfg, app.StartOptions{ResumeMenu: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+
+	for {
+		ev := nextServiceEvent(t, svc)
+		switch ev.Kind {
+		case EventSessionHydrated:
+			t.Fatal("session hydrated before cross-workspace selection")
+		case EventSessionsListed:
+			svc.Dispatch(Intent{Kind: IntentSelectSession, SessionInput: "1"})
+		case EventInfo:
+			if strings.Contains(ev.Text, "This conversation is from a different directory.") {
+				for {
+					select {
+					case queued := <-svc.Events():
+						if queued.Kind == EventSessionHydrated {
+							t.Fatalf("did not expect hydration after cross-workspace message: %+v", queued)
+						}
+					default:
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSkillsCommandOpensMenuAndToggleUpdatesSuggestions(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+	work := t.TempDir()
+	t.Chdir(work)
+	writeServiceSkill(t, filepath.Join(work, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.")
+
+	cfg := app.DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	svc, err := New(t.Context(), cfg, app.StartOptions{NewSession: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+	waitForServiceEvent(t, svc, EventSessionHydrated)
+
+	svc.Dispatch(Intent{Kind: IntentSubmit, Input: "/skills"})
+	evMenu := waitForServiceEvent(t, svc, EventSkillsMenu)
+	if evMenu.Kind != EventSkillsMenu {
+		t.Fatalf("expected skills menu event, got %+v", evMenu)
+	}
+	svc.Dispatch(Intent{Kind: IntentRequestSkillsManage})
+	ev := waitForServiceEvent(t, svc, EventSkillsManager)
+	if len(ev.Skills) != 1 || ev.Skills[0].Name != "test-skill" {
+		t.Fatalf("unexpected skills manager event: %+v", ev.Skills)
+	}
+	if len(svc.SkillSuggestions()) != 1 {
+		t.Fatalf("expected skill suggestion before disabling, got %+v", svc.SkillSuggestions())
+	}
+
+	svc.Dispatch(Intent{Kind: IntentSetSkillEnabled, SkillName: "test-skill", SkillEnabled: false})
+	ev = waitForServiceEvent(t, svc, EventSkillsManager)
+	if len(ev.Skills) != 1 || ev.Skills[0].Name != "test-skill" || ev.Skills[0].Status != "disabled" {
+		t.Fatalf("expected disabled skill manager event, got %+v", ev.Skills)
+	}
+	if got := svc.SkillSuggestions(); len(got) != 0 {
+		t.Fatalf("expected disabled skill to disappear from suggestions, got %+v", got)
+	}
+
+	svc.Dispatch(Intent{Kind: IntentSetSkillEnabled, SkillName: "test-skill", SkillEnabled: true})
+	ev = waitForServiceEvent(t, svc, EventSkillsManager)
+	if len(ev.Skills) != 1 || ev.Skills[0].Name != "test-skill" || ev.Skills[0].Status != "ready" {
+		t.Fatalf("expected ready skill manager event, got %+v", ev.Skills)
+	}
+	if got := svc.SkillSuggestions(); len(got) != 1 || got[0].Name != "test-skill" {
+		t.Fatalf("expected enabled skill suggestion, got %+v", got)
+	}
+}
+
+func TestSkillMentionEmitsLoadedEventNotInfo(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	work := t.TempDir()
+	t.Chdir(work)
+	writeServiceSkill(t, filepath.Join(work, ".whale", "skills", "test-skill"), "test-skill", "Workspace skill.")
+
+	cfg := app.DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	svc, err := New(t.Context(), cfg, app.StartOptions{NewSession: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+	waitForServiceEvent(t, svc, EventSessionHydrated)
+
+	svc.Dispatch(Intent{Kind: IntentSubmit, Input: "$test-skill review this"})
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-svc.Events():
+			if ev.Kind == EventInfo && strings.Contains(ev.Text, "loaded skill: test-skill") {
+				t.Fatalf("skill load should not be emitted as info: %+v", ev)
+			}
+			if ev.Kind == EventSkillLoaded {
+				if ev.Text != "loaded skill: test-skill" {
+					t.Fatalf("unexpected skill loaded text: %q", ev.Text)
+				}
+				waitForServiceEvent(t, svc, EventTurnDone)
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for skill loaded event")
+		}
+	}
+}
+
 func TestShouldSuppressCancelledTurnErrorOnlyForCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wrapped := fmt.Errorf("request failed: %w", context.Canceled)
@@ -208,6 +337,22 @@ func nextServiceEvent(t *testing.T, s *Service) Event {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for service event")
 		return Event{}
+	}
+}
+
+func waitForServiceEvent(t *testing.T, s *Service, kind EventKind) Event {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-s.Events():
+			if ev.Kind == kind {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for service event %s", kind)
+			return Event{}
+		}
 	}
 }
 
@@ -242,6 +387,17 @@ func writeSessionFile(t *testing.T, dataDir, id, text string) {
 	line := fmt.Sprintf("{\"role\":\"user\",\"text\":%q}\n", text)
 	if err := os.WriteFile(filepath.Join(sessionsDir, id+".jsonl"), []byte(line), 0o600); err != nil {
 		t.Fatalf("write session: %v", err)
+	}
+}
+
+func writeServiceSkill(t *testing.T, dir, name, desc string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir skill dir: %v", err)
+	}
+	content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n# %s\n", name, desc, name)
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write skill: %v", err)
 	}
 }
 

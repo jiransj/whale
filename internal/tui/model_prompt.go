@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/app/service"
 	tuirender "github.com/usewhale/whale/internal/tui/render"
 )
@@ -24,6 +25,10 @@ func (m *model) stopBusy() {
 }
 
 func (m *model) submitPrompt(value string) tea.Cmd {
+	return m.submitPromptWithBinding(value, m.currentSkillBinding(value))
+}
+
+func (m *model) submitPromptWithBinding(value string, binding *app.SkillBinding) tea.Cmd {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
@@ -31,12 +36,14 @@ func (m *model) submitPrompt(value string) tea.Cmd {
 	m.recordPromptHistory(value)
 	m.resetHistoryNavigation()
 	m.appendTranscript("you", tuirender.KindText, visibleSubmittedText(value))
+	m.beginTurnTranscript()
 	m.input.SetValue("")
+	m.skillBinding = nil
 	m.slash.matches = nil
 	m.slash.selected = 0
 	m.startBusy()
 	m.status = "running"
-	m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value})
+	m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value, SkillBinding: binding})
 	m.refreshViewportContentFollow(true)
 	return busyTickCmd()
 }
@@ -46,8 +53,9 @@ func (m *model) enqueuePrompt(value string) bool {
 	if value == "" {
 		return false
 	}
-	m.queuedPrompts = append(m.queuedPrompts, queuedPrompt{Text: value})
+	m.queuedPrompts = append(m.queuedPrompts, queuedPrompt{Text: value, SkillBinding: m.currentSkillBinding(value)})
 	m.input.SetValue("")
+	m.skillBinding = nil
 	m.resetHistoryNavigation()
 	m.slash.matches = nil
 	m.slash.selected = 0
@@ -80,6 +88,7 @@ func (m *model) restoreQueuedPromptsToComposer() bool {
 		parts = append(parts, current)
 	}
 	m.queuedPrompts = nil
+	m.skillBinding = nil
 	m.input.SetValue(strings.Join(parts, "\n"))
 	m.resetHistoryNavigation()
 	m.updateSlashMatches()

@@ -14,7 +14,7 @@ import (
 func (s *Service) Dispatch(in Intent) {
 	switch in.Kind {
 	case IntentSubmit:
-		go s.handleSubmit(in.Input, in.HiddenInput)
+		go s.handleSubmit(in.Input, in.HiddenInput, in.SkillBinding)
 	case IntentAllowTool:
 		s.resolveApproval(in.ToolCallID, policy.ApprovalAllow)
 	case IntentAllowToolForSession:
@@ -30,13 +30,15 @@ func (s *Service) Dispatch(in Intent) {
 	case IntentRequestSessions:
 		s.emitSessionChoices()
 	case IntentSelectSession:
-		msg, err := s.app.ApplyResumeChoice(in.SessionInput)
+		res, err := s.app.ApplyResumeChoice(in.SessionInput)
 		if err != nil {
 			s.emit(Event{Kind: EventError, Text: err.Error()})
 			return
 		}
-		s.emit(Event{Kind: EventInfo, Text: msg})
-		s.emitSessionHydrated()
+		s.emit(Event{Kind: EventInfo, Text: res.Message})
+		if res.Resumed {
+			s.emitSessionHydrated()
+		}
 	case IntentShutdown:
 		s.cancelMu.Lock()
 		if s.cancel != nil {
@@ -82,10 +84,18 @@ func (s *Service) Dispatch(in Intent) {
 		}
 		s.emit(Event{Kind: EventInfo, Text: out})
 		go s.runTurn("Implement the plan.", false)
+	case IntentRequestSkillsManage:
+		s.emit(Event{Kind: EventSkillsManager, Skills: s.SkillsForManager()})
+	case IntentSetSkillEnabled:
+		if _, err := s.app.SetSkillEnabled(in.SkillName, in.SkillEnabled); err != nil {
+			s.emit(Event{Kind: EventError, Text: err.Error()})
+			return
+		}
+		s.emit(Event{Kind: EventSkillsManager, Skills: s.SkillsForManager()})
 	}
 }
 
-func (s *Service) handleSubmit(line string, hiddenInput bool) {
+func (s *Service) handleSubmit(line string, hiddenInput bool, skillBinding *app.SkillBinding) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
@@ -110,6 +120,10 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 			ApprovalChoices: []string{"Ask first", "Auto approve"},
 			CurrentApproval: approvalModeDisplay(s.app.ApprovalMode()),
 		})
+		return
+	}
+	if line == "/skills" {
+		s.emit(Event{Kind: EventSkillsMenu})
 		return
 	}
 	if prompt, ok := appcommands.PlanPromptFromSlash(line); ok {
@@ -190,7 +204,7 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 		s.emit(Event{Kind: EventTurnDone})
 		return
 	}
-	skillMention, skillOut, skillSynthetic, err := s.app.BuildSkillMentionSyntheticPrompt(line)
+	skillMention, skillOut, skillSynthetic, err := s.app.BuildSkillMentionSyntheticPromptWithBinding(line, skillBinding)
 	if err != nil {
 		s.emit(Event{Kind: EventError, Text: err.Error()})
 		s.emit(Event{Kind: EventTurnDone})
@@ -205,7 +219,7 @@ func (s *Service) handleSubmit(line string, hiddenInput bool) {
 	}
 	if skillMention {
 		if skillOut != "" {
-			s.emit(Event{Kind: EventInfo, Text: skillOut})
+			s.emit(Event{Kind: EventSkillLoaded, Text: skillOut})
 		}
 		go s.runInjectedTurn(line, skillSynthetic)
 		return

@@ -7,6 +7,7 @@ import (
 	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/policy"
+	"github.com/usewhale/whale/internal/skills"
 )
 
 type IntentKind string
@@ -25,6 +26,8 @@ const (
 	IntentSetApprovalMode     IntentKind = "set_approval_mode"
 	IntentToggleMode          IntentKind = "toggle_mode"
 	IntentImplementPlan       IntentKind = "implement_plan"
+	IntentRequestSkillsManage IntentKind = "request_skills_manage"
+	IntentSetSkillEnabled     IntentKind = "set_skill_enabled"
 )
 
 type Intent struct {
@@ -38,9 +41,14 @@ type Intent struct {
 	Effort       string
 	Thinking     string
 	ApprovalMode string
+	SkillName    string
+	SkillEnabled bool
+	SkillBinding *app.SkillBinding
 }
 
 type EventKind string
+
+const EventMetadataAgentTurn = "agent_turn"
 
 const (
 	EventInfo              EventKind = "info"
@@ -63,6 +71,9 @@ const (
 	EventTurnDone          EventKind = "turn_done"
 	EventModelPicker       EventKind = "model_picker"
 	EventPermissionsPicker EventKind = "permissions_picker"
+	EventSkillsMenu        EventKind = "skills_menu"
+	EventSkillsManager     EventKind = "skills_manager"
+	EventSkillLoaded       EventKind = "skill_loaded"
 	EventExitRequested     EventKind = "exit_requested"
 	EventClearScreen       EventKind = "clear_screen"
 	EventSessionHydrated   EventKind = "session_hydrated"
@@ -89,6 +100,7 @@ type Event struct {
 	CurrentThinking string
 	ApprovalChoices []string
 	CurrentApproval string
+	Skills          []skills.SkillView
 	SessionID       string
 	Messages        []core.Message
 }
@@ -155,6 +167,19 @@ func (s *Service) WorkspaceRoot() string {
 func (s *Service) Model() string           { return s.app.Model() }
 func (s *Service) ReasoningEffort() string { return s.app.ReasoningEffort() }
 func (s *Service) ThinkingEnabled() bool   { return s.app.ThinkingEnabled() }
+func (s *Service) SkillSuggestions() []skills.SkillView {
+	if s == nil || s.app == nil {
+		return nil
+	}
+	return s.app.SkillSuggestions()
+}
+
+func (s *Service) SkillsForManager() []skills.SkillView {
+	if s == nil || s.app == nil {
+		return nil
+	}
+	return s.app.SkillReport().All()
+}
 
 func (s *Service) Close() error {
 	if s == nil || s.app == nil {

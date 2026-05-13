@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +13,12 @@ import (
 	tuirender "github.com/usewhale/whale/internal/tui/render"
 )
 
+var mouseCSIFragmentPattern = regexp.MustCompile(`^(?:\[?<\d+;\d+;\d+[Mm])+$`)
+
 func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
+	if m.discardMouseCSIFragment(msg) {
+		return nil, false, true
+	}
 	if !m.quitArmedUntil.IsZero() && time.Now().After(m.quitArmedUntil) {
 		m.quitArmedUntil = time.Time{}
 		if m.status == "Press Ctrl+C again to quit" {
@@ -45,6 +51,10 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 		return m.handlePermissionsPickerKey(msg), false, true
 	case modePlanImplementation:
 		return m.handlePlanImplementationKey(msg), false, true
+	case modeSkillsMenu:
+		return m.handleSkillsMenuKey(msg), false, true
+	case modeSkillsManager:
+		return m.handleSkillsManagerKey(msg), false, true
 	}
 	cmd, quit, handled := m.handleGlobalKey(msg)
 	if handled {
@@ -57,7 +67,7 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "shift+tab", "backtab":
-		if !m.busy && !m.hasSlashSuggestions() {
+		if !m.busy && !m.hasSlashSuggestions() && !m.hasSkillSuggestions() {
 			m.startBusy()
 			m.status = "switching mode"
 			m.dispatchIntent(service.Intent{Kind: service.IntentToggleMode})
@@ -67,6 +77,12 @@ func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		if m.hasSlashSuggestions() {
 			if m.slash.selected > 0 {
 				m.slash.selected--
+			}
+			return nil, true
+		}
+		if m.hasSkillSuggestions() {
+			if m.skills.selected > 0 {
+				m.skills.selected--
 			}
 			return nil, true
 		}
@@ -80,6 +96,12 @@ func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			}
 			return nil, true
 		}
+		if m.hasSkillSuggestions() {
+			if m.skills.selected < len(m.skills.matches)-1 {
+				m.skills.selected++
+			}
+			return nil, true
+		}
 		if m.shouldHandleHistoryNavigation() && m.historyNext() {
 			return nil, true
 		}
@@ -87,8 +109,12 @@ func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		if m.hasSlashSuggestions() {
 			if cmd := safeChoice(m.slash.matches, m.slash.selected); cmd != "" {
 				m.input.SetValue(cmd)
+				m.skillBinding = nil
 				m.updateSlashMatches()
 			}
+			return nil, true
+		}
+		if m.insertSelectedSkill() {
 			return nil, true
 		}
 	case "esc":
@@ -109,9 +135,13 @@ func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			m.slash.selected = 0
 			return nil, true
 		}
+		if m.hasSkillSuggestions() {
+			m.skills.matches = nil
+			m.skills.selected = 0
+			return nil, true
+		}
 	case "pgup", "pgdown", "ctrl+d", "home", "end":
-		m.handleViewportScrollKey(msg.String())
-		return nil, true
+		return m.handleViewportScrollKey(msg.String()), true
 	}
 	return nil, false
 }
@@ -290,6 +320,7 @@ func (m *model) handlePlanImplementationKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		if m.planImplementation.index == 0 {
 			m.appendTranscript("you", tuirender.KindText, "Implement the plan.")
+			m.beginTurnTranscript()
 			m.startBusy()
 			m.status = "running"
 			m.chatMode = "agent"
@@ -308,8 +339,11 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 	case "ctrl+c":
 		if strings.TrimSpace(m.input.Value()) != "" {
 			m.input.Reset()
+			m.skillBinding = nil
 			m.resetHistoryNavigation()
 			m.updateSlashMatches()
+			m.skills.matches = nil
+			m.skills.selected = 0
 			m.status = "input cleared"
 			return nil, false, true
 		}
@@ -332,10 +366,12 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 		if m.hasSlashSuggestions() {
 			if cmd := safeChoice(m.slash.matches, m.slash.selected); cmd != "" {
 				m.input.SetValue(cmd)
+				m.skillBinding = nil
 				m.updateSlashMatches()
 				if m.shouldAutoRunSlash(cmd) {
 					m.appendTranscript("you", tuirender.KindText, cmd)
 					m.input.SetValue("")
+					m.skillBinding = nil
 					m.slash.matches = nil
 					m.slash.selected = 0
 					m.startBusy()
@@ -347,6 +383,9 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 			}
 			return nil, false, true
 		}
+		if m.insertSelectedSkill() {
+			return nil, false, true
+		}
 		if m.page == pageLogs && m.logFilterInput.Focused() {
 			m.logFilter = strings.TrimSpace(m.logFilterInput.Value())
 			m.logFilterInput.Blur()
@@ -354,6 +393,7 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 		}
 		if raw := m.input.Value(); strings.HasSuffix(raw, "\\") {
 			m.input.SetValue(strings.TrimSuffix(raw, "\\") + "\n")
+			m.skillBinding = nil
 			m.resetHistoryNavigation()
 			m.updateSlashMatches()
 			return nil, false, true
@@ -389,6 +429,29 @@ func (m *model) handleComposerKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+func (m *model) discardMouseCSIFragment(msg tea.KeyMsg) bool {
+	if msg.Type != tea.KeyRunes || msg.Paste {
+		m.pendingMouseCSIFragment = false
+		return false
+	}
+	text := string(msg.Runes)
+	if msg.Alt && text == "[" {
+		m.pendingMouseCSIFragment = true
+		return true
+	}
+	if mouseCSIFragmentPattern.MatchString(text) {
+		m.pendingMouseCSIFragment = false
+		return true
+	}
+	if m.pendingMouseCSIFragment {
+		m.pendingMouseCSIFragment = false
+		if strings.HasPrefix(text, "<") && mouseCSIFragmentPattern.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) applyPalette() {

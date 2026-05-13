@@ -11,6 +11,8 @@ func (m *model) resetTranscriptWithHeader() {
 	m.nativeScrollbackPrinted = 0
 	m.appendTranscript("info", tuirender.KindText, buildHeaderBanner(m.model, m.effort, m.cwd, m.version))
 	m.nativeScrollbackPrinted = len(m.transcript)
+	m.turnTranscriptStart = len(m.transcript)
+	m.visibleAssistantThisTurn = ""
 }
 
 func (m *model) appendTranscript(role string, kind tuirender.MessageKind, text string) {

@@ -51,7 +51,8 @@ Ask mode is active.
 	}
 	systemBlocks = append(systemBlocks, renderToolSpecsBlock(a.tools.Specs()))
 	if strings.TrimSpace(a.workspaceRoot) != "" {
-		if rendered := skills.RenderAvailableSkills(skills.Discover(skills.DefaultRoots(a.workspaceRoot))); rendered != "" {
+		discovered := skills.Filter(skills.Discover(skills.DefaultRoots(a.workspaceRoot)), a.disabledSkills)
+		if rendered := skills.RenderAvailableSkills(discovered); rendered != "" {
 			systemBlocks = append(systemBlocks, rendered)
 		}
 	}

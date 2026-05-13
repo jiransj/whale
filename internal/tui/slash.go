@@ -36,6 +36,7 @@ func safeChoice(xs []string, idx int) string {
 }
 
 func (m *model) updateSlashMatches() {
+	defer m.updateSkillMatches()
 	if m.mode != modeChat {
 		return
 	}

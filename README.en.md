@@ -103,11 +103,13 @@ Whale includes DeepSeek-specific handling for:
 
 | Generic agent assumption | What DeepSeek can do | Whale's handling |
 |--------------------------|----------------------|------------------|
-| Tool-call JSON is stable | Payloads can be malformed, escaped, or mixed into reasoning | repair / scavenge paths |
+| Tool-call JSON is stable | Payloads can be malformed, escaped, or mixed into reasoning | schema-guided repair / scavenge paths |
 | Deep tool schemas survive intact | Some nested parameters may be dropped | flatter tool parameters |
 | Failed tools should always trigger replan | Some failures should pass through to the model | finer failure classification and recovery |
 | User cancellation is just another tool failure | Cancellation should not continue recovery or replanning | dedicated interrupt path |
 | Reasoning depth is prompt-only | DeepSeek exposes `reasoning_effort` | runtime effort control |
+
+Whale validates tool inputs against the schema first, then repairs common recoverable shape errors only on failing paths: `null` optional fields, stringified arrays, bare strings for array fields, markdown-autolink paths, and `read_file` calls that provide only offset or limit. Repair and invalid-input counts are visible in `/stats`.
 
 Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capability usable in a real terminal workflow.
 
@@ -145,7 +147,7 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 | `/status` | Show current session, mode, model, and config status |
 | `/compact` | Compact the current conversation context |
 | `/init` | Generate AGENTS.md for the current repository |
-| `/skills` | List local skills |
+| `/skills` | Open the Skills menu to list, insert, or enable/disable local skills |
 | `/mcp` | Show MCP server status |
 
 ## MCP
@@ -157,6 +159,8 @@ See [docs/mcp.md](docs/mcp.md) for setup and supported features.
 ## Skills
 
 Whale supports local Agent Skills for reusable workflows, team conventions, or tool-specific guidance.
+
+In the TUI, type `$` to search and insert a `$skill-name`. You can also run `/skills`: `List skills` opens the same `$` picker and inserts the selected skill into the composer, while `Enable/Disable Skills` opens a searchable toggle manager.
 
 See [docs/skills.md](docs/skills.md) for details.
 

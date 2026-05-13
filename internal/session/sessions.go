@@ -18,6 +18,8 @@ type SessionSummary struct {
 	Conversation string
 }
 
+const toolInputEventsSuffix = ".tool_input_events.jsonl"
+
 func ListSessions(sessionsDir string, limit int) ([]SessionSummary, error) {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -28,7 +30,7 @@ func ListSessions(sessionsDir string, limit int) ([]SessionSummary, error) {
 	}
 	out := make([]SessionSummary, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() || !isSessionJSONLName(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -123,6 +125,10 @@ func singleLine(text string) string {
 func FindSessionPathByID(sessionsDir, sessionID string) string {
 	id := sanitizeSessionID(sessionID)
 	return filepath.Join(sessionsDir, id+".jsonl")
+}
+
+func isSessionJSONLName(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, toolInputEventsSuffix)
 }
 
 func sanitizeSessionID(v string) string {

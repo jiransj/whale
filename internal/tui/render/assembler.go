@@ -34,6 +34,21 @@ func (a *Assembler) Reset() {
 	a.toolEntryByID = map[string]int{}
 }
 
+func (a *Assembler) RemoveAssistantMessages() {
+	if a == nil || len(a.messages) == 0 {
+		return
+	}
+	out := a.messages[:0]
+	for _, msg := range a.messages {
+		if msg.Role == "assistant" && msg.Kind == KindText {
+			continue
+		}
+		out = append(out, msg)
+	}
+	a.messages = out
+	a.rebuildToolEntryIndex()
+}
+
 func (a *Assembler) Snapshot() []UIMessage {
 	out := make([]UIMessage, len(a.messages))
 	copy(out, a.messages)
@@ -190,6 +205,15 @@ func (a *Assembler) BackfillToolCall(toolCallID, replacement string) {
 		return
 	}
 	a.messages[idx].Text = replacement
+}
+
+func (a *Assembler) rebuildToolEntryIndex() {
+	a.toolEntryByID = map[string]int{}
+	for i, msg := range a.messages {
+		if msg.ID != "" && msg.Kind == KindToolCall {
+			a.toolEntryByID[msg.ID] = i
+		}
+	}
 }
 
 func canCoalesce(role string, last UIMessage) bool {

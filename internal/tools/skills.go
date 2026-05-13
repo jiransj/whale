@@ -22,9 +22,20 @@ func (b *Toolset) loadSkill(_ context.Context, call core.ToolCall) (core.ToolRes
 		return marshalToolError(call, "invalid_args", "skill name must be alphanumeric with hyphens"), nil
 	}
 	roots := skills.DefaultRoots(b.root)
+	report := skills.BuildReport(roots, skills.ReportOptions{DisabledNames: b.skillDisabled, WorkspaceRoot: b.root})
+	for _, view := range report.Disabled {
+		if view.Name == name {
+			return marshalToolError(call, "disabled", "skill disabled: "+name), nil
+		}
+	}
+	for _, view := range report.Problems {
+		if view.Name == name {
+			return marshalToolError(call, "unavailable", fmt.Sprintf("skill unavailable: %s: %s", name, view.Reason)), nil
+		}
+	}
 	skill, _, ok := skills.Find(roots, name)
 	if !ok {
-		available := skills.Discover(roots)
+		available := report.Selectable()
 		names := make([]string, 0, len(available))
 		for _, s := range available {
 			names = append(names, s.Name)
@@ -35,15 +46,18 @@ func (b *Toolset) loadSkill(_ context.Context, call core.ToolCall) (core.ToolRes
 		}
 		return marshalToolError(call, "not_found", msg), nil
 	}
+	missing := skills.MissingRequirements(skill, skills.ReportOptions{DisabledNames: b.skillDisabled, WorkspaceRoot: b.root})
 	content, trunc := truncateTextSmart(skill.Instructions, maxToolTextChars)
 	payload := map[string]any{
 		"name":         skill.Name,
 		"description":  skill.Description,
+		"when":         skill.When,
 		"path":         skill.Path,
 		"skill_file":   skill.SkillFilePath,
 		"instructions": content,
 		"arguments":    strings.TrimSpace(in.Arguments),
 		"truncation":   trunc,
+		"setup_status": skills.FormatMissingRequirements(missing),
 		"read_only":    true,
 		"execution":    "not_executed",
 		"usage_hint":   "Follow these instructions for the current task. This tool only loads skill instructions; it does not execute scripts or modify files.",

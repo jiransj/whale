@@ -26,6 +26,8 @@ type approvalsFile struct {
 	Approvals []string `json:"approvals"`
 }
 
+const toolInputEventsSuffix = ".tool_input_events.jsonl"
+
 func NewJSONLStore(sessionsDir string) (*JSONLStore, error) {
 	if sessionsDir == "" {
 		return nil, fmt.Errorf("sessionsDir is required")
@@ -71,7 +73,7 @@ func MostRecentSessionID(sessionsDir string) (string, error) {
 	}
 	cands := make([]candidate, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() || !isSessionJSONLName(e.Name()) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".jsonl")
@@ -237,6 +239,10 @@ func (s *JSONLStore) rewriteSessionLocked(sessionID string, msgs []core.Message)
 
 func (s *JSONLStore) sessionPath(sessionID string) string {
 	return filepath.Join(s.sessionsDir, sanitizeSessionID(sessionID)+".jsonl")
+}
+
+func isSessionJSONLName(name string) bool {
+	return strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, toolInputEventsSuffix)
 }
 
 func (s *JSONLStore) approvalsPath(sessionID string) string {
