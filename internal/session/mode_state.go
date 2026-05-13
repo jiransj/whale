@@ -36,7 +36,7 @@ func ParseMode(raw string) (Mode, error) {
 }
 
 func modeStatePath(sessionsDir, sessionID string) string {
-	return filepath.Join(sessionsDir, sanitizeSessionID(sessionID)+".state.json")
+	return filepath.Join(sessionsDir, SanitizeSessionID(sessionID)+".state.json")
 }
 
 func LoadModeState(sessionsDir, sessionID string) (ModeState, error) {

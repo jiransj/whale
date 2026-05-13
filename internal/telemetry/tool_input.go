@@ -2,22 +2,31 @@ package telemetry
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/usewhale/whale/internal/session"
 )
 
 const ToolInputEventsSuffix = ".tool_input_events.jsonl"
 
 type ToolInputEvent struct {
-	TS                 int64  `json:"ts"`
 	Session            string `json:"session"`
+	Event              string `json:"event"`
+	ToolCallID         string `json:"tool_call_id,omitempty"`
+	ToolName           string `json:"tool_name,omitempty"`
+	InputRaw           string `json:"input_raw,omitempty"`
+	InputRunes         int    `json:"input_runes,omitempty"`
+	CreatedAt          time.Time `json:"created_at,omitempty"`
+	TS                 int64 `json:"ts,omitempty"`
+
+	// Fields used by tool_input_telemetry.go for repair/invalid tracking
 	Model              string `json:"model,omitempty"`
 	AssistantMessageID string `json:"assistant_message_id,omitempty"`
-	ToolCallID         string `json:"tool_call_id,omitempty"`
 	Tool               string `json:"tool,omitempty"`
-	Event              string `json:"event"`
 	RepairKind         string `json:"repair_kind,omitempty"`
 	Path               string `json:"path,omitempty"`
 	BeforeType         string `json:"before_type,omitempty"`
@@ -26,7 +35,7 @@ type ToolInputEvent struct {
 }
 
 func ToolInputEventsPath(sessionsDir, sessionID string) string {
-	return filepath.Join(strings.TrimSpace(sessionsDir), sanitizeSessionID(sessionID)+ToolInputEventsSuffix)
+	return filepath.Join(strings.TrimSpace(sessionsDir), session.SanitizeSessionID(sessionID)+ToolInputEventsSuffix)
 }
 
 func AppendToolInputEvent(sessionsDir string, rec ToolInputEvent, now time.Time) error {
@@ -34,32 +43,20 @@ func AppendToolInputEvent(sessionsDir string, rec ToolInputEvent, now time.Time)
 	if sessionsDir == "" || strings.TrimSpace(rec.Session) == "" || strings.TrimSpace(rec.Event) == "" {
 		return nil
 	}
-	if rec.TS == 0 {
-		rec.TS = now.UnixMilli()
+	rec.CreatedAt = now
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("marshal tool input event: %w", err)
 	}
 	path := ToolInputEventsPath(sessionsDir, rec.Session)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return fmt.Errorf("mkdir tool input events dir: %w", err)
 	}
-	b, err := json.Marshal(rec)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
+		return fmt.Errorf("open tool input events: %w", err)
 	}
 	defer f.Close()
 	_, err = f.Write(append(b, '\n'))
 	return err
-}
-
-func sanitizeSessionID(v string) string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return "default"
-	}
-	v = strings.ReplaceAll(v, "/", "_")
-	v = strings.ReplaceAll(v, "\\", "_")
-	return v
 }

@@ -30,7 +30,7 @@ type SessionMeta struct {
 }
 
 func metaStatePath(sessionsDir, sessionID string) string {
-	return filepath.Join(sessionsDir, sanitizeSessionID(sessionID)+".meta.json")
+	return filepath.Join(sessionsDir, SanitizeSessionID(sessionID)+".meta.json")
 }
 
 func LoadSessionMeta(sessionsDir, sessionID string) (SessionMeta, error) {

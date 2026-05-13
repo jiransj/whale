@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/session"
 )
 
 type JSONLStore struct {
@@ -42,9 +44,15 @@ func NewJSONLStore(sessionsDir string) (*JSONLStore, error) {
 }
 
 func DefaultDataDir() string {
-	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
-		return filepath.Join(home, ".whale")
+	if runtime.GOOS != "windows" {
+		// On Unix, $HOME is the standard home directory variable.
+		if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+			return filepath.Join(home, ".whale")
+		}
 	}
+	// On Windows, skip $HOME (may be set by Git Bash etc. to a Unix-style
+	// path like /c/Users/name that filepath.Join cannot resolve correctly
+	// on Windows). Use UserHomeDir which is the reliable Windows approach.
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ".whale"
@@ -238,7 +246,7 @@ func (s *JSONLStore) rewriteSessionLocked(sessionID string, msgs []core.Message)
 }
 
 func (s *JSONLStore) sessionPath(sessionID string) string {
-	return filepath.Join(s.sessionsDir, sanitizeSessionID(sessionID)+".jsonl")
+	return filepath.Join(s.sessionsDir, session.SanitizeSessionID(sessionID)+".jsonl")
 }
 
 func isSessionJSONLName(name string) bool {
@@ -246,7 +254,7 @@ func isSessionJSONLName(name string) bool {
 }
 
 func (s *JSONLStore) approvalsPath(sessionID string) string {
-	return filepath.Join(s.sessionsDir, sanitizeSessionID(sessionID)+".approvals.json")
+	return filepath.Join(s.sessionsDir, session.SanitizeSessionID(sessionID)+".approvals.json")
 }
 
 func (s *JSONLStore) GetApprovals(_ context.Context, sessionID string) (map[string]bool, error) {
@@ -306,26 +314,10 @@ func (s *JSONLStore) RewriteSession(_ context.Context, sessionID string, msgs []
 	return s.rewriteSessionLocked(sessionID, msgs)
 }
 
+// sanitizeSessionID is deprecated; use session.SanitizeSessionID instead.
+// Kept for backward compatibility with any external callers.
 func sanitizeSessionID(v string) string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return "default"
-	}
-	v = strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z':
-			return r
-		case r >= 'A' && r <= 'Z':
-			return r
-		case r >= '0' && r <= '9':
-			return r
-		case r == '-' || r == '_':
-			return r
-		default:
-			return '_'
-		}
-	}, v)
-	return v
+	return session.SanitizeSessionID(v)
 }
 
 func parseMessageSeq(id string) int {

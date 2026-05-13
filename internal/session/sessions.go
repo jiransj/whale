@@ -123,7 +123,7 @@ func singleLine(text string) string {
 }
 
 func FindSessionPathByID(sessionsDir, sessionID string) string {
-	id := sanitizeSessionID(sessionID)
+	id := SanitizeSessionID(sessionID)
 	return filepath.Join(sessionsDir, id+".jsonl")
 }
 
@@ -131,12 +131,29 @@ func isSessionJSONLName(name string) bool {
 	return strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, toolInputEventsSuffix)
 }
 
-func sanitizeSessionID(v string) string {
+// SanitizeSessionID normalizes a session ID to a safe filesystem name.
+// Non-alphanumeric characters are replaced with underscores to prevent
+// directory traversal or invalid filesystem characters.
+// This is the canonical version; see also store/sanitizeSessionID which
+// must use identical logic.
+func SanitizeSessionID(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return "default"
 	}
-	v = strings.ReplaceAll(v, "/", "_")
-	v = strings.ReplaceAll(v, "\\", "_")
+	v = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		case r == '-' || r == '_':
+			return r
+		default:
+			return '_'
+		}
+	}, v)
 	return v
 }
