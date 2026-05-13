@@ -54,12 +54,20 @@ func New() Composer {
 }
 
 func (c Composer) Value() string {
-	return c.expandPendingPastes(c.rawValue())
+	v := c.expandPendingPastes(c.rawValue())
+	// Normalize Windows \r\n and lone \r to \n as a safety net for
+	// pasted text that bypassed HandlePaste (e.g. Windows terminals
+	// without bracketed paste support).
+	v = strings.ReplaceAll(v, "\r\n", "\n")
+	v = strings.ReplaceAll(v, "\r", "\n")
+	return v
 }
 
 func (c *Composer) SetValue(value string) {
 	c.ensureInitialized()
 	c.pendingPastes = nil
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
 	c.textarea.SetValue(c.collapseLargeValue(value))
 	c.moveToEnd()
 	c.reflow()
@@ -105,6 +113,15 @@ func (c *Composer) HandlePaste(value string) {
 
 func (c *Composer) Update(msg tea.Msg) tea.Cmd {
 	c.ensureInitialized()
+	// On Windows, pasted text may arrive without the Paste flag and with
+	// \r characters as individual key events. Normalize \r to \n before
+	// the textarea processes them so multi-line pastes display correctly.
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && !keyMsg.Paste && len(keyMsg.Runes) > 0 {
+		if hasCR := containsCR(keyMsg.Runes); hasCR {
+			keyMsg.Runes = normalizeCR(keyMsg.Runes)
+			msg = keyMsg
+		}
+	}
 	wasAtEnd := c.AtEnd()
 	prevHeight := c.textarea.Height()
 	var cmd tea.Cmd
@@ -115,6 +132,35 @@ func (c *Composer) Update(msg tea.Msg) tea.Cmd {
 		c.realignViewportAtEnd()
 	}
 	return cmd
+}
+
+// containsCR returns true if the rune slice contains a carriage return.
+func containsCR(runes []rune) bool {
+	for _, r := range runes {
+		if r == '\r' {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeCR converts \r\n to \n and lone \r to \n.
+func normalizeCR(runes []rune) []rune {
+	result := make([]rune, 0, len(runes))
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '\r' {
+			// Skip \n that follows \r in a \r\n pair to avoid double newline
+			if i+1 < len(runes) && runes[i+1] == '\n' {
+				result = append(result, '\n')
+				i++
+			} else {
+				result = append(result, '\n')
+			}
+		} else {
+			result = append(result, runes[i])
+		}
+	}
+	return result
 }
 
 func (c *Composer) HandleKey(msg tea.KeyMsg) bool {

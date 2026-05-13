@@ -20,10 +20,6 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	start.UserInputFunc = promptUserInputCLI
 	coreApp, err := app.New(ctx, cfg, start)
 	if err != nil {
-		if app.IsCrossWorkspaceResumeError(err) {
-			fmt.Println(err.Error())
-			return nil
-		}
 		return err
 	}
 	defer coreApp.Close()
@@ -32,9 +28,8 @@ func Run(cfg app.Config, start app.StartOptions) error {
 		fmt.Println(line)
 	}
 
-	scanner := bufio.NewScanner(os.Stdin)
 	if start.ResumeMenu {
-		if err := promptResumeChoice(scanner, coreApp); err != nil {
+		if err := promptResumeChoice(coreApp); err != nil {
 			return err
 		}
 	}
@@ -44,13 +39,31 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	defer signal.Stop(sigCh)
 	var turnCancelMu sync.Mutex
 	var turnCancel context.CancelFunc
+	reader := bufio.NewReader(os.Stdin)
 
 	for {
 		fmt.Print("> ")
-		if !scanner.Scan() {
+		raw, err := reader.ReadString('\n')
+		if err != nil {
 			break
 		}
-		line := strings.TrimSpace(scanner.Text())
+		raw = strings.TrimRight(raw, "\r\n")
+		if raw == "" {
+			continue
+		}
+		// On Windows, pasted multi-line text may arrive as a single stdin block.
+		// Read all buffered lines and join them as one prompt instead of
+		// treating each line as a separate turn.
+		lines := []string{raw}
+		for reader.Buffered() > 0 {
+			nextRaw, err := reader.ReadString('\n')
+			if err != nil {
+				break
+			}
+			lines = append(lines, strings.TrimRight(nextRaw, "\r\n"))
+		}
+		line := strings.Join(lines, "\n")
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
@@ -67,16 +80,23 @@ func Run(cfg app.Config, start app.StartOptions) error {
 			for _, c := range choices {
 				fmt.Println(c)
 			}
-			fmt.Print("resume> choose number or session id (blank to cancel): ")
-			if !scanner.Scan() {
-				break
+			{
+				fmt.Print("resume> choose number or session id (blank to cancel): ")
+				resumeRaw, resumeErr := reader.ReadString('\n')
+				if resumeErr != nil {
+					break
+				}
+				resumeRaw = strings.TrimSpace(resumeRaw)
+				if resumeRaw == "" {
+					continue
+				}
+				msg, err := coreApp.ApplyResumeChoice(resumeRaw)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "error: %v\n", err)
+					continue
+				}
+				fmt.Println(msg)
 			}
-			res, err := coreApp.ApplyResumeChoice(scanner.Text())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				continue
-			}
-			fmt.Println(res.Message)
 			continue
 		}
 
@@ -169,10 +189,11 @@ func Run(cfg app.Config, start app.StartOptions) error {
 			fmt.Println(hookOut)
 		}
 	}
-	return scanner.Err()
+	return nil
 }
 
-func promptResumeChoice(scanner *bufio.Scanner, app *app.App) error {
+func promptResumeChoice(app *app.App) error {
+	scanner := bufio.NewScanner(os.Stdin)
 	choices, err := app.ListResumeChoices(20)
 	if err != nil {
 		return err
@@ -188,11 +209,11 @@ func promptResumeChoice(scanner *bufio.Scanner, app *app.App) error {
 	if !scanner.Scan() {
 		return scanner.Err()
 	}
-	res, err := app.ApplyResumeChoice(scanner.Text())
+	msg, err := app.ApplyResumeChoice(scanner.Text())
 	if err != nil {
 		return err
 	}
-	fmt.Println(res.Message)
+	fmt.Println(msg)
 	return nil
 }
 

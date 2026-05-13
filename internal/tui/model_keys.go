@@ -33,6 +33,15 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 		m.refreshViewportContent()
 		return nil, false, true
 	}
+	// Windows fallback: terminals without bracketed paste (e.g. cmd.exe) send
+	// pasted text as regular KeyMsg with multiple runes and no Paste flag.
+	if m.mode == modeChat && !msg.Paste && len(msg.Runes) > 1 {
+		m.input.HandlePaste(string(msg.Runes))
+		m.resetHistoryNavigation()
+		m.updateSlashMatches()
+		m.refreshViewportContent()
+		return nil, false, true
+	}
 	if m.mode == modeChat {
 		if cmd, handled := m.handleChatModeKey(msg); handled {
 			return cmd, false, true
