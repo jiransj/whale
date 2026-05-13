@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +13,12 @@ import (
 	tuirender "github.com/usewhale/whale/internal/tui/render"
 )
 
+var mouseCSIFragmentPattern = regexp.MustCompile(`^(?:\[?<\d+;\d+;\d+[Mm])+$`)
+
 func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
+	if m.discardMouseCSIFragment(msg) {
+		return nil, false, true
+	}
 	if !m.quitArmedUntil.IsZero() && time.Now().After(m.quitArmedUntil) {
 		m.quitArmedUntil = time.Time{}
 		if m.status == "Press Ctrl+C again to quit" {
@@ -135,8 +141,7 @@ func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 			return nil, true
 		}
 	case "pgup", "pgdown", "ctrl+d", "home", "end":
-		m.handleViewportScrollKey(msg.String())
-		return nil, true
+		return m.handleViewportScrollKey(msg.String()), true
 	}
 	return nil, false
 }
@@ -315,6 +320,7 @@ func (m *model) handlePlanImplementationKey(msg tea.KeyMsg) tea.Cmd {
 	case "enter":
 		if m.planImplementation.index == 0 {
 			m.appendTranscript("you", tuirender.KindText, "Implement the plan.")
+			m.beginTurnTranscript()
 			m.startBusy()
 			m.status = "running"
 			m.chatMode = "agent"
@@ -423,6 +429,29 @@ func (m *model) handleComposerKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
+}
+
+func (m *model) discardMouseCSIFragment(msg tea.KeyMsg) bool {
+	if msg.Type != tea.KeyRunes || msg.Paste {
+		m.pendingMouseCSIFragment = false
+		return false
+	}
+	text := string(msg.Runes)
+	if msg.Alt && text == "[" {
+		m.pendingMouseCSIFragment = true
+		return true
+	}
+	if mouseCSIFragmentPattern.MatchString(text) {
+		m.pendingMouseCSIFragment = false
+		return true
+	}
+	if m.pendingMouseCSIFragment {
+		m.pendingMouseCSIFragment = false
+		if strings.HasPrefix(text, "<") && mouseCSIFragmentPattern.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) applyPalette() {

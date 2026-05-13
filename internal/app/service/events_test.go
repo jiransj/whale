@@ -12,6 +12,7 @@ import (
 	"github.com/usewhale/whale/internal/agent"
 	"github.com/usewhale/whale/internal/app"
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/session"
 )
 
 func TestCriticalEventsDeliverAfterDeltaBackpressure(t *testing.T) {
@@ -181,6 +182,46 @@ func TestResumeMenuStartupWithNoSessionsHydratesFallbackSession(t *testing.T) {
 				t.Fatal("expected no saved sessions notice before hydration")
 			}
 			return
+		}
+	}
+}
+
+func TestResumeMenuCrossWorkspaceSelectionDoesNotHydrate(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	writeSessionFile(t, dir, "sess-1", "hello from elsewhere")
+	if err := session.SaveSessionMeta(filepath.Join(dir, "sessions"), "sess-1", session.SessionMeta{Workspace: other}); err != nil {
+		t.Fatalf("save session meta: %v", err)
+	}
+	cfg := app.DefaultConfig()
+	cfg.DataDir = dir
+
+	svc, err := New(t.Context(), cfg, app.StartOptions{ResumeMenu: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+
+	for {
+		ev := nextServiceEvent(t, svc)
+		switch ev.Kind {
+		case EventSessionHydrated:
+			t.Fatal("session hydrated before cross-workspace selection")
+		case EventSessionsListed:
+			svc.Dispatch(Intent{Kind: IntentSelectSession, SessionInput: "1"})
+		case EventInfo:
+			if strings.Contains(ev.Text, "This conversation is from a different directory.") {
+				for {
+					select {
+					case queued := <-svc.Events():
+						if queued.Kind == EventSessionHydrated {
+							t.Fatalf("did not expect hydration after cross-workspace message: %+v", queued)
+						}
+					default:
+						return
+					}
+				}
+			}
 		}
 	}
 }

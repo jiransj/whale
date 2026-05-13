@@ -127,13 +127,20 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	sessionID := ""
 	if sid := strings.TrimSpace(start.SessionID); sid != "" {
 		sessionID = sid
-	} else if start.NewSession {
+	} else if start.NewSession || start.ResumeMenu {
 		sessionID = newSessionID(time.Now())
 	} else {
 		var err error
 		sessionID, err = resolveInitialSessionID(sessionsDir)
 		if err != nil {
 			return nil, fmt.Errorf("resolve session failed: %w", err)
+		}
+	}
+	if !start.NewSession && !start.ResumeMenu {
+		if msg, blocked, err := CheckResumeWorkspace(sessionsDir, sessionID, workspaceRoot); err != nil {
+			return nil, err
+		} else if blocked {
+			return nil, &CrossWorkspaceResumeError{Message: msg}
 		}
 	}
 	approvalMode, err := policy.ParseApprovalMode(cfg.ApprovalMode)

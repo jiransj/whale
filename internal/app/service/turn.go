@@ -124,7 +124,11 @@ func (s *Service) runTurnWith(start func(context.Context) (<-chan agent.AgentEve
 	if out := s.app.RunStopHook(last, 0); out != "" {
 		s.emit(Event{Kind: EventInfo, Text: out})
 	}
-	s.emit(Event{Kind: EventTurnDone, LastResponse: last})
+	s.emit(Event{
+		Kind:         EventTurnDone,
+		LastResponse: last,
+		Metadata:     map[string]any{EventMetadataAgentTurn: true},
+	})
 }
 
 func shouldSuppressCancelledTurnError(ctx context.Context, err error) bool {

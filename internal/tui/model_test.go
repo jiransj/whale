@@ -25,6 +25,10 @@ func newModelWithDispatchSpy() (model, *[]service.Intent) {
 	return m, &intents
 }
 
+func agentTurnMetadata() map[string]any {
+	return map[string]any{service.EventMetadataAgentTurn: true}
+}
+
 func selectSlashCommand(t *testing.T, m *model, want string) {
 	t.Helper()
 	for i, cmd := range m.slash.matches {
@@ -252,6 +256,60 @@ func TestPickerEventsClearBusyState(t *testing.T) {
 	}
 }
 
+func TestSessionPickerEnterDispatchesSelectedSession(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind: service.EventSessionsListed,
+		Choices: []string{
+			"recent sessions:",
+			"   #   Updated   Branch                    Conversation",
+			"   1) 1m ago    main                     first",
+			"   2) 2m ago    feature                  second",
+		},
+	}))
+	m = next.(model)
+	if m.mode != modeSessionPicker {
+		t.Fatalf("expected session picker mode, got %v", m.mode)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	if len(*intents) != 1 {
+		t.Fatalf("expected one intent, got %+v", *intents)
+	}
+	got := (*intents)[0]
+	if got.Kind != service.IntentSelectSession || got.SessionInput != "2" {
+		t.Fatalf("unexpected intent: %+v", got)
+	}
+	if m.mode != modeChat {
+		t.Fatalf("expected chat mode after selection, got %v", m.mode)
+	}
+}
+
+func TestCrossWorkspaceResumeInfoRendersInTUI(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 100
+	m.height = 24
+	msg := strings.Join([]string{
+		"This conversation is from a different directory.",
+		"",
+		"To resume, run:",
+		"  cd '/tmp/other workspace' && '/usr/local/bin/whale' resume sess-1",
+	}, "\n")
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventInfo, Text: msg}))
+	m = next.(model)
+	view := m.View()
+	if !strings.Contains(view, "This conversation is from a different directory.") ||
+		!strings.Contains(view, "To resume, run:") ||
+		!strings.Contains(view, "resume sess-1") {
+		t.Fatalf("expected cross-workspace resume message in TUI:\n%s", view)
+	}
+}
+
 func TestTurnDoneReasoningOnlyCommitsFallback(t *testing.T) {
 	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 80, height: 24, busy: true}
 	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventReasoningDelta, Text: "I should answer."}))
@@ -266,6 +324,75 @@ func TestTurnDoneReasoningOnlyCommitsFallback(t *testing.T) {
 	}
 	if m.sawReasoningThisTurn || m.sawAssistantThisTurn {
 		t.Fatal("expected turn tracking flags to reset")
+	}
+}
+
+func TestTurnDoneReconcilesDroppedAssistantDeltaFromLastResponse(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 80, height: 8, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind: service.EventAssistantDelta,
+		Text: "visible answer head\n",
+	}))
+	m = next.(model)
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "visible answer head\nmissing latest tail",
+		Metadata:     agentTurnMetadata(),
+	}))
+	m = next.(model)
+
+	got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	if !strings.Contains(got, "missing latest tail") {
+		t.Fatalf("expected turn completion to reconcile dropped assistant delta from LastResponse:\n%s", got)
+	}
+}
+
+func TestTurnDoneRecoversAssistantWhenAllDeltasDropped(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.appendTranscript("you", tuirender.KindText, "prompt")
+	m.beginTurnTranscript()
+	m.busy = true
+
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "final answer only present in LastResponse",
+		Metadata:     agentTurnMetadata(),
+	}))
+	m = next.(model)
+
+	got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	if !strings.Contains(got, "final answer only present in LastResponse") {
+		t.Fatalf("expected turn completion to recover assistant text from LastResponse:\n%s", got)
+	}
+	if strings.Contains(got, "No final answer was produced") {
+		t.Fatalf("did not expect no-final-answer fallback after LastResponse recovery:\n%s", got)
+	}
+}
+
+func TestReplacingCurrentTurnAssistantRewindsNativeScrollback(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+	m.appendTranscript("you", tuirender.KindText, "prompt")
+	m.beginTurnTranscript()
+	m.appendTranscript("assistant", tuirender.KindText, "partial visible answer")
+	m.appendTranscript("result_ok", tuirender.KindToolResult, "✓")
+	m.visibleAssistantThisTurn = "partial visible answer"
+	m.sawAssistantThisTurn = true
+	m.nativeScrollbackPrinted = len(m.transcript)
+
+	reconciled := m.reconcileFinalAssistant("corrected final answer")
+	m.commitLiveTranscript(reconciled)
+
+	cmd := m.flushNativeScrollbackCmd()
+	if cmd == nil {
+		t.Fatal("expected rewritten transcript to produce corrected native scrollback output")
+	}
+	if got := fmt.Sprintf("%#v", cmd()); !strings.Contains(got, "corrected final answer") {
+		t.Fatalf("expected corrected final answer in native scrollback output, got %s", got)
 	}
 }
 
@@ -1304,6 +1431,302 @@ func TestChatViewportMouseWheelScrollsTranscript(t *testing.T) {
 	}
 }
 
+func TestMouseCSIFragmentsDoNotEnterComposer(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("[<65;54;25M[<65;54;25M")})
+	m = next.(model)
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected mouse CSI fragments not to enter composer, got %q", got)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
+	m = next.(model)
+	if got := m.input.Value(); got != "hello" {
+		t.Fatalf("expected normal input to still enter composer, got %q", got)
+	}
+}
+
+func TestSplitMouseCSIFragmentDoesNotEnterComposer(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 8
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("["), Alt: true})
+	m = next.(model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("<65;54;25M")})
+	m = next.(model)
+
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected split mouse CSI fragment not to enter composer, got %q", got)
+	}
+}
+
+func TestChatViewportFreezesLiveOutputWhenScrolledDuringBusy(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 40; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.beginTurnTranscript()
+	m.startBusy()
+	m.append("assistant", "live-head\n")
+	m.refreshViewportContentFollow(true)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	if !m.viewportFrozen {
+		t.Fatal("expected PageUp during busy output to freeze chat viewport")
+	}
+	if m.followTail {
+		t.Fatal("expected PageUp to disable tail following")
+	}
+	frozenView := m.viewport.View()
+
+	for i := 0; i < 30; i++ {
+		m.append("assistant", fmt.Sprintf("live-tail-%02d\n", i))
+	}
+	if got := m.viewport.View(); got != frozenView {
+		t.Fatalf("expected live deltas not to redraw scrolled viewport while frozen\nbefore:\n%s\n\nafter:\n%s", frozenView, got)
+	}
+	if strings.Contains(m.viewport.View(), "live-tail-29") {
+		t.Fatalf("expected hidden live tail not to cover frozen viewport:\n%s", m.viewport.View())
+	}
+}
+
+func TestChatViewportFrozenBatchDeltasDoNotRedrawScrolledView(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 40; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.beginTurnTranscript()
+	m.startBusy()
+	m.append("assistant", "live-head\n")
+	m.refreshViewportContentFollow(true)
+
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	m = next.(model)
+	if !m.viewportFrozen {
+		t.Fatal("expected wheel up during busy output to freeze chat viewport")
+	}
+	frozenView := m.viewport.View()
+
+	events := make([]service.Event, 0, 20)
+	for i := 0; i < 20; i++ {
+		events = append(events, service.Event{Kind: service.EventAssistantDelta, Text: fmt.Sprintf("batched-tail-%02d\n", i)})
+	}
+	next, _ = m.Update(svcBatchMsg(events))
+	m = next.(model)
+	if got := m.viewport.View(); got != frozenView {
+		t.Fatalf("expected batched live deltas not to redraw scrolled viewport while frozen\nbefore:\n%s\n\nafter:\n%s", frozenView, got)
+	}
+	if strings.Contains(m.View(), "batched-tail-19") {
+		t.Fatalf("expected hidden batched tail not to cover frozen viewport:\n%s", m.View())
+	}
+}
+
+func TestAppendBatchedServiceEventMergesAdjacentDeltas(t *testing.T) {
+	events := []service.Event{}
+	events = appendBatchedServiceEvent(events, service.Event{Kind: service.EventAssistantDelta, Text: "a"})
+	events = appendBatchedServiceEvent(events, service.Event{Kind: service.EventAssistantDelta, Text: "b"})
+	events = appendBatchedServiceEvent(events, service.Event{Kind: service.EventReasoningDelta, Text: "c"})
+	events = appendBatchedServiceEvent(events, service.Event{Kind: service.EventReasoningDelta, Text: "d"})
+	events = appendBatchedServiceEvent(events, service.Event{Kind: service.EventTurnDone, Text: "done"})
+
+	if len(events) != 3 {
+		t.Fatalf("expected adjacent deltas to merge into 3 events, got %d: %+v", len(events), events)
+	}
+	if events[0].Kind != service.EventAssistantDelta || events[0].Text != "ab" {
+		t.Fatalf("unexpected merged assistant delta: %+v", events[0])
+	}
+	if events[1].Kind != service.EventReasoningDelta || events[1].Text != "cd" {
+		t.Fatalf("unexpected merged reasoning delta: %+v", events[1])
+	}
+	if events[2].Kind != service.EventTurnDone {
+		t.Fatalf("expected non-delta event to remain separate, got %+v", events[2])
+	}
+}
+
+func TestChatViewportBusyFollowTailUsesTailRenderWindow(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 200; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.beginTurnTranscript()
+	m.startBusy()
+	m.append("assistant", "live-head\n")
+	m.refreshViewportContentFollow(false)
+
+	if lines := m.viewport.TotalLineCount(); lines > chatTailRenderLineFloor {
+		t.Fatalf("expected busy tail-follow render to keep a bounded line window, got %d lines", lines)
+	}
+	view := m.View()
+	if strings.Contains(view, "entry-000") {
+		t.Fatalf("expected old transcript lines to be outside the busy tail render window:\n%s", view)
+	}
+	if !strings.Contains(view, "live-head") {
+		t.Fatalf("expected live output to remain visible in tail render window:\n%s", view)
+	}
+}
+
+func TestChatViewportWheelUpRestoresFullRenderWindowDuringBusy(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 200; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.beginTurnTranscript()
+	m.startBusy()
+	m.append("assistant", "live-head\n")
+	m.refreshViewportContentFollow(false)
+	tailLines := m.viewport.TotalLineCount()
+
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	m = next.(model)
+	if !m.viewportFrozen {
+		t.Fatal("expected wheel up during busy output to freeze chat viewport")
+	}
+	if fullLines := m.viewport.TotalLineCount(); fullLines <= tailLines {
+		t.Fatalf("expected wheel up to restore full scrollable content, tail=%d full=%d", tailLines, fullLines)
+	}
+	if m.followTail {
+		t.Fatal("expected wheel up to disable tail following")
+	}
+}
+
+func TestChatViewportEndUnfreezesLiveOutputAndReturnsToTail(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 40; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.beginTurnTranscript()
+	m.startBusy()
+	m.append("assistant", "live-head\n")
+	m.refreshViewportContentFollow(true)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	for i := 0; i < 30; i++ {
+		m.append("assistant", fmt.Sprintf("live-tail-%02d\n", i))
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m = next.(model)
+	if m.viewportFrozen {
+		t.Fatal("expected End to unfreeze chat viewport")
+	}
+	if !m.followTail {
+		t.Fatal("expected End to re-enable tail following")
+	}
+	view := m.View()
+	if !strings.Contains(view, "live-tail-29") {
+		t.Fatalf("expected End to reveal latest live tail:\n%s", view)
+	}
+}
+
+func TestChatViewportTurnDoneUnfreezesScrolledLiveOutput(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 40; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.beginTurnTranscript()
+	m.startBusy()
+	m.append("assistant", "live-head\n")
+	m.refreshViewportContentFollow(true)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	m.append("assistant", "live-tail-after-scroll\n")
+
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "done"}))
+	m = next.(model)
+	if m.viewportFrozen {
+		t.Fatal("expected turn completion to unfreeze chat viewport")
+	}
+	got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	if !strings.Contains(got, "live-tail-after-scroll") {
+		t.Fatalf("expected frozen live output to be committed on turn done:\n%s", got)
+	}
+}
+
+func TestChatViewportResizeKeepsTailWhenFollowing(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 18
+	m.transcript = nil
+	for i := 0; i < 50; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	if !m.followTail || !m.viewport.AtBottom() {
+		t.Fatalf("expected chat to start following tail, follow=%v bottom=%v", m.followTail, m.viewport.AtBottom())
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
+	m = next.(model)
+	view := m.View()
+	if !strings.Contains(view, "entry-49") {
+		t.Fatalf("expected resized following view to show tail:\n%s", view)
+	}
+	if strings.Contains(view, "entry-00") {
+		t.Fatalf("expected resized following view to stay at tail, got top entry:\n%s", view)
+	}
+}
+
+func TestChatViewportResizePreservesUserScrollPosition(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 18
+	m.transcript = nil
+	for i := 0; i < 50; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+
+	m.handleViewportScrollKey("home")
+	if m.followTail {
+		t.Fatal("expected Home to disable tail following")
+	}
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
+	m = next.(model)
+	view := m.View()
+	if !strings.Contains(view, "entry-00") {
+		t.Fatalf("expected resized scrolled-up view to preserve top position:\n%s", view)
+	}
+	if strings.Contains(view, "entry-49") {
+		t.Fatalf("expected resized scrolled-up view not to jump to tail:\n%s", view)
+	}
+
+	m.handleViewportScrollKey("end")
+	if !m.followTail {
+		t.Fatal("expected End to re-enable tail following")
+	}
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+	m = next.(model)
+	view = m.View()
+	if !strings.Contains(view, "entry-49") {
+		t.Fatalf("expected resized view to follow tail after End:\n%s", view)
+	}
+}
+
 func TestNativeScrollbackSkipsHeaderAndPrintsNewTranscriptOnce(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80
@@ -1327,6 +1750,81 @@ func TestNativeScrollbackSkipsHeaderAndPrintsNewTranscriptOnce(t *testing.T) {
 	}
 	if cmd := m.flushNativeScrollbackCmd(); cmd != nil {
 		t.Fatal("expected transcript entry not to be printed twice")
+	}
+}
+
+func TestNativeScrollbackWaitsWhileChatIsScrolledUp(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	printed := m.nativeScrollbackPrinted
+
+	m.appendTranscript("assistant", tuirender.KindText, "pending native scrollback")
+	m.followTail = false
+
+	if cmd := m.flushNativeScrollbackCmd(); cmd != nil {
+		t.Fatal("expected scrolled-up chat viewport not to print native scrollback")
+	}
+	if m.nativeScrollbackPrinted != printed {
+		t.Fatalf("expected native scrollback cursor to remain at %d, got %d", printed, m.nativeScrollbackPrinted)
+	}
+
+	cmd := m.handleViewportScrollKey("end")
+	if cmd == nil {
+		t.Fatal("expected returning to tail to flush delayed native scrollback")
+	}
+	if got := fmt.Sprintf("%#v", cmd()); !strings.Contains(got, "pending native scrollback") {
+		t.Fatalf("expected delayed native scrollback output, got %s", got)
+	}
+	if cmd := m.flushNativeScrollbackCmd(); cmd != nil {
+		t.Fatal("expected delayed native scrollback not to be printed twice")
+	}
+}
+
+func TestMouseWheelDownFlushesDeferredNativeScrollbackAtTail(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.appendTranscript("assistant", tuirender.KindText, "pending wheel scrollback")
+	m.refreshViewportContentFollow(true)
+	m.followTail = false
+
+	next, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("expected mouse wheel down at tail to flush delayed native scrollback")
+	}
+	if got := fmt.Sprintf("%#v", cmd()); !strings.Contains(got, "pending wheel scrollback") {
+		t.Fatalf("expected delayed native scrollback output, got %s", got)
+	}
+	if !m.followTail {
+		t.Fatal("expected mouse wheel down at tail to resume tail following")
+	}
+}
+
+func TestNativeScrollbackWaitsWhileChatViewportFrozen(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	printed := m.nativeScrollbackPrinted
+
+	m.appendTranscript("assistant", tuirender.KindText, "pending frozen scrollback")
+	m.viewportFrozen = true
+
+	if cmd := m.flushNativeScrollbackCmd(); cmd != nil {
+		t.Fatal("expected frozen chat viewport not to print native scrollback")
+	}
+	if m.nativeScrollbackPrinted != printed {
+		t.Fatalf("expected native scrollback cursor to remain at %d, got %d", printed, m.nativeScrollbackPrinted)
+	}
+
+	m.unfreezeChatViewport()
+	cmd := m.flushNativeScrollbackCmd()
+	if cmd == nil {
+		t.Fatal("expected native scrollback to flush after unfreezing at tail")
+	}
+	if got := fmt.Sprintf("%#v", cmd()); !strings.Contains(got, "pending frozen scrollback") {
+		t.Fatalf("expected delayed native scrollback output, got %s", got)
 	}
 }
 

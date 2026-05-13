@@ -48,6 +48,8 @@ type Intent struct {
 
 type EventKind string
 
+const EventMetadataAgentTurn = "agent_turn"
+
 const (
 	EventInfo              EventKind = "info"
 	EventError             EventKind = "error"

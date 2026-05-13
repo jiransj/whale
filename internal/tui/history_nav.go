@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func (m *model) shouldHandleHistoryNavigation() bool {
 	if len(m.promptHistory) == 0 {
@@ -77,21 +81,53 @@ func (m *model) recordPromptHistory(value string) {
 	m.promptHistory = append(m.promptHistory, value)
 }
 
-func (m *model) handleViewportScrollKey(key string) {
+func (m *model) handleViewportScrollKey(key string) tea.Cmd {
 	m.refreshViewportContent()
 	switch key {
 	case "pgup":
+		if m.busy {
+			m.freezeChatViewport()
+		}
 		m.viewport.ViewUp()
+		m.followTail = false
 	case "pgdown":
 		m.viewport.ViewDown()
+		m.followTail = m.viewport.AtBottom()
+		if m.followTail {
+			return m.resumeChatTail()
+		}
 	case "ctrl+u":
+		if m.busy {
+			m.freezeChatViewport()
+		}
 		m.viewport.HalfViewUp()
+		m.followTail = false
 	case "ctrl+d":
 		m.viewport.HalfViewDown()
+		m.followTail = m.viewport.AtBottom()
+		if m.followTail {
+			return m.resumeChatTail()
+		}
 	case "home":
+		if m.busy {
+			m.freezeChatViewport()
+		}
 		m.viewport.GotoTop()
+		m.followTail = false
 	case "end":
-		m.viewport.GotoBottom()
+		return m.resumeChatTail()
 	}
+	return nil
+}
 
+func (m *model) resumeChatTail() tea.Cmd {
+	if m.page != pageChat {
+		m.viewport.GotoBottom()
+		return nil
+	}
+	m.unfreezeChatViewport()
+	m.viewport.GotoBottom()
+	m.followTail = true
+	m.refreshViewportContentFollow(true)
+	return m.flushNativeScrollbackCmd()
 }

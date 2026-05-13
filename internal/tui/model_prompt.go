@@ -36,6 +36,7 @@ func (m *model) submitPromptWithBinding(value string, binding *app.SkillBinding)
 	m.recordPromptHistory(value)
 	m.resetHistoryNavigation()
 	m.appendTranscript("you", tuirender.KindText, visibleSubmittedText(value))
+	m.beginTurnTranscript()
 	m.input.SetValue("")
 	m.skillBinding = nil
 	m.slash.matches = nil

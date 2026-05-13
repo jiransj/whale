@@ -30,13 +30,15 @@ func (s *Service) Dispatch(in Intent) {
 	case IntentRequestSessions:
 		s.emitSessionChoices()
 	case IntentSelectSession:
-		msg, err := s.app.ApplyResumeChoice(in.SessionInput)
+		res, err := s.app.ApplyResumeChoice(in.SessionInput)
 		if err != nil {
 			s.emit(Event{Kind: EventError, Text: err.Error()})
 			return
 		}
-		s.emit(Event{Kind: EventInfo, Text: msg})
-		s.emitSessionHydrated()
+		s.emit(Event{Kind: EventInfo, Text: res.Message})
+		if res.Resumed {
+			s.emitSessionHydrated()
+		}
 	case IntentShutdown:
 		s.cancelMu.Lock()
 		if s.cancel != nil {
