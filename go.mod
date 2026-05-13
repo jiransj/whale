@@ -15,6 +15,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/spf13/cobra v1.10.1
 	github.com/yuin/goldmark v1.7.8
+	golang.org/x/text v0.23.0
 )
 
 require (
@@ -49,5 +50,4 @@ require (
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
 )

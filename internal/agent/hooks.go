@@ -12,8 +12,11 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 
 	"github.com/usewhale/whale/internal/core"
 )
@@ -384,9 +387,34 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 
 func hookShell(command string) (string, []string) {
 	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/c", command}
+		// Switch cmd.exe to UTF-8 code page before executing the command.
+		// Without this, Chinese characters in paths or command output get
+		// garbled because cmd.exe defaults to GBK (code page 936) on
+		// Chinese Windows, while Go strings are UTF-8.
+		return "cmd", []string{"/c", "chcp 65001 >nul && " + command}
 	}
 	return "sh", []string{"-lc", command}
+}
+
+// decodeHookWindowsOutput converts cmd.exe hook output to valid UTF-8.
+// Even with chcp 65001, some commands may still produce legacy encoding
+// output (e.g. when the command itself ignores code page settings).
+func decodeHookWindowsOutput(raw []byte) string {
+	if runtime.GOOS != "windows" {
+		return string(raw)
+	}
+	if utf8.Valid(raw) {
+		return string(raw)
+	}
+	decoded, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), raw)
+	if err == nil && utf8.Valid(decoded) {
+		return string(decoded)
+	}
+	decoded, _, err = transform.Bytes(simplifiedchinese.HZGB2312.NewDecoder(), raw)
+	if err == nil && utf8.Valid(decoded) {
+		return string(decoded)
+	}
+	return string(raw)
 }
 
 func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResult {
@@ -399,6 +427,9 @@ func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResu
 
 	bin, args := hookShell(in.Command)
 	cmd := exec.CommandContext(ctx, bin, args...)
+	// On Windows, configure process tree killing so that timeout/cancel
+	// kills the entire command tree, not just cmd.exe itself.
+	configureHookCommand(cmd)
 	if in.CWD != "" {
 		cmd.Dir = in.CWD
 	}
@@ -427,12 +458,44 @@ func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResu
 	if ctx.Err() == context.DeadlineExceeded {
 		timedOut = true
 	}
+	// Decode hook output from legacy encoding (GBK on Chinese Windows)
+	// when UTF-8 validity fails.
+	stdoutStr := decodeHookWindowsOutput(outBuf.buf.Bytes())
+	stderrStr := decodeHookWindowsOutput(errBuf.buf.Bytes())
 	return HookSpawnResult{
 		ExitCode:  exitCode,
-		Stdout:    outBuf.buf.String(),
-		Stderr:    errBuf.buf.String(),
+		Stdout:    stdoutStr,
+		Stderr:    stderrStr,
 		TimedOut:  timedOut,
 		SpawnErr:  spawnErr,
 		Truncated: outBuf.truncated || errBuf.truncated,
 	}
+}
+
+// configureHookCommand sets up process-group-level cancellation for hooks.
+// On Windows this uses taskkill /F /T to kill the entire process tree.
+func configureHookCommand(cmd *exec.Cmd) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	cmd.Cancel = func() error {
+		return killHookProcessTree(cmd)
+	}
+	cmd.WaitDelay = 2 * time.Second
+}
+
+// killHookProcessTree forcefully terminates the entire cmd.exe process tree
+// on Windows. Without this, timeout/cancel only kills cmd.exe itself, leaving
+// child processes (e.g. long-running scripts, git commands) as orphans.
+func killHookProcessTree(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return os.ErrProcessDone
+	}
+	pid := cmd.Process.Pid
+	if pid <= 0 {
+		return os.ErrProcessDone
+	}
+	killCmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
+	_ = killCmd.Run()
+	return cmd.Process.Kill()
 }

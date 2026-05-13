@@ -9,13 +9,21 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 
 	"github.com/usewhale/whale/internal/core"
 )
 
 func shellCommand(command string) (string, []string) {
 	if runtime.GOOS == "windows" {
-		return "cmd", []string{"/c", command}
+		// Switch cmd.exe to UTF-8 code page before executing the command.
+		// Without this, Chinese characters in paths or command output get
+		// garbled because cmd.exe defaults to GBK (code page 936) on
+		// Chinese Windows, while Go strings are UTF-8.
+		return "cmd", []string{"/c", "chcp 65001 >nul && " + command}
 	}
 	return "/bin/sh", []string{"-lc", command}
 }
@@ -83,8 +91,11 @@ func (b *Toolset) shellRun(ctx context.Context, call core.ToolCall) (core.ToolRe
 	err = cmd.Run()
 	durationMS := time.Since(start).Milliseconds()
 
-	stdoutRaw := stdoutBuf.String()
-	stderrRaw := stderrBuf.String()
+	// Decode cmd.exe output: even with chcp 65001, some commands may still
+	// produce legacy encoding output (e.g. when the command itself ignores
+	// code page settings).
+	stdoutRaw := decodeWindowsOutput(stdoutBuf.Bytes())
+	stderrRaw := decodeWindowsOutput(stderrBuf.Bytes())
 	stdout, stdoutTr := truncateTextSmart(stdoutRaw, maxToolTextChars)
 	stderr, stderrTr := truncateTextSmart(stderrRaw, maxToolTextChars)
 
@@ -250,4 +261,29 @@ func (b *Toolset) resolveShellCWD(raw string) (abs string, rel string, err error
 		return abs, ".", nil
 	}
 	return abs, filepath.ToSlash(rel), nil
+}
+
+// decodeWindowsOutput converts cmd.exe output to valid UTF-8.
+// On Windows with chcp 65001, output should already be UTF-8,
+// but this provides a safety net for non-UTF-8 code pages (e.g. GBK).
+func decodeWindowsOutput(raw []byte) string {
+	if runtime.GOOS != "windows" {
+		return string(raw)
+	}
+	// First try: already valid UTF-8 (most common with chcp 65001)
+	if utf8.Valid(raw) {
+		return string(raw)
+	}
+	// Second try: decode as GBK (common Chinese Windows code page 936)
+	decoded, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), raw)
+	if err == nil && utf8.Valid(decoded) {
+		return string(decoded)
+	}
+	// Third try: decode as HZ-GB2312 (less common but possible)
+	decoded, _, err = transform.Bytes(simplifiedchinese.HZGB2312.NewDecoder(), raw)
+	if err == nil && utf8.Valid(decoded) {
+		return string(decoded)
+	}
+	// Fallback: return raw bytes as string; some chars may be garbled
+	return string(raw)
 }
