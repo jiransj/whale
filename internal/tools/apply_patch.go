@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -150,7 +151,10 @@ func (b *Toolset) planPatch(ops []patchOp) ([]patchFilePlan, error) {
 			}
 			exists = false
 		}
-		st := &patchFileState{path: path, abs: abs, before: string(raw), after: string(raw), exists: exists}
+		// Normalize CRLF→LF so that hunk context from readFile output (LF-only)
+		// matches file content on Windows where files typically use CRLF.
+		normalized := string(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")))
+		st := &patchFileState{path: path, abs: abs, before: normalized, after: normalized, exists: exists}
 		states[path] = st
 		order = append(order, path)
 		return st, nil

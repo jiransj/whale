@@ -30,6 +30,14 @@ func (b *Toolset) readFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		return marshalToolError(call, "read_failed", err.Error()), nil
 	}
 	text := string(data)
+	// Strip UTF-8 BOM (0xEF 0xBB 0xBF) that some Windows editors add.
+	text = strings.TrimPrefix(text, "\uFEFF")
+	// Normalize Windows \r\n to \n so that edit/search operations work
+	// correctly. Without this, trailing \r on each line causes
+	// strings.Contains mismatches when LLM uses read_file output as
+	// edit search text.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "")
 	lines := strings.Split(text, "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]

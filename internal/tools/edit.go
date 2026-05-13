@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -32,6 +33,16 @@ func (b *Toolset) editFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		}
 		return marshalToolError(call, "read_failed", err.Error()), nil
 	}
+	// Strip UTF-8 BOM (0xEF 0xBB 0xBF) that some Windows editors add.
+	// Without this, read_file output includes a visible \uFEFF character at
+	// the start of the first line, but LLMs often omit this invisible char
+	// when constructing the search string, causing "search text not found".
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	// Normalize CRLF→LF so that search text from readFile output (which is LF-only)
+	// matches file content on Windows where files typically use CRLF.
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	// Handle standalone \r (Classic Mac style) for consistency with read_file.
+	data = bytes.ReplaceAll(data, []byte("\r"), []byte{})
 	before := string(data)
 	if in.Search == "" {
 		return marshalToolError(call, "invalid_args", "search is required"), nil
@@ -50,6 +61,9 @@ func (b *Toolset) editFile(_ context.Context, call core.ToolCall) (core.ToolResu
 	if err := os.WriteFile(abs, []byte(after), 0o644); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
 	}
+	// Note: after is LF-only. On Windows, Go's WriteFile writes bytes as-is.
+	// This ensures consistent line endings across edit operations,
+	// matching the LF-only output that read_file displays.
 	metadata := fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: after}})
 	return marshalToolResultWithMetadata(call, map[string]any{
 		"file_path":    in.FilePath,
@@ -78,6 +92,12 @@ func (b *Toolset) previewEditFile(_ context.Context, call core.ToolCall) (map[st
 	if err != nil {
 		return nil, err
 	}
+	// Strip UTF-8 BOM for preview matching consistency with read_file.
+	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	// Normalize CRLF→LF for preview matching consistency
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	// Handle standalone \r for consistency with read_file.
+	data = bytes.ReplaceAll(data, []byte("\r"), []byte{})
 	before := string(data)
 	if in.Search == "" {
 		return nil, os.ErrInvalid
