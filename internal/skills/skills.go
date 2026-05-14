@@ -206,7 +206,18 @@ func DiscoverWithStates(roots []string) ([]*Skill, []*SkillState) {
 			states = append(states, &SkillState{Path: root, State: StateError, Err: err})
 			continue
 		}
-		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		walkRoot := root
+		// WalkDir does not follow a symlinked root, but we still keep skill paths
+		// anchored at the original root so picker bindings and display paths stay stable.
+		if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			resolved, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				states = append(states, &SkillState{Path: root, State: StateError, Err: err})
+				continue
+			}
+			walkRoot = resolved
+		}
+		err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				states = append(states, &SkillState{Path: path, State: StateError, Err: err})
 				return nil
@@ -214,7 +225,13 @@ func DiscoverWithStates(roots []string) ([]*Skill, []*SkillState) {
 			if d.IsDir() || d.Name() != SkillFileName {
 				return nil
 			}
-			abs, err := filepath.Abs(path)
+			skillPath := path
+			if walkRoot != root {
+				if rel, err := filepath.Rel(walkRoot, path); err == nil {
+					skillPath = filepath.Join(root, rel)
+				}
+			}
+			abs, err := filepath.Abs(skillPath)
 			if err != nil {
 				states = append(states, &SkillState{Path: path, State: StateError, Err: err})
 				return nil

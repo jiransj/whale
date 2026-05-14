@@ -187,6 +187,29 @@ func TestDefaultRootsIncludesWorkspaceBeforeHome(t *testing.T) {
 	}
 }
 
+func TestDiscoverFollowsSymlinkedAgentsSkillsRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := t.TempDir()
+	claudeSkills := filepath.Join(home, ".claude", "skills")
+	writeSkill(t, filepath.Join(claudeSkills, "symlinked-skill"), "symlinked-skill", "Symlinked skill.", "# Symlinked")
+	agentsDir := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatalf("mkdir .agents: %v", err)
+	}
+	if err := os.Symlink(claudeSkills, filepath.Join(agentsDir, "skills")); err != nil {
+		t.Fatalf("symlink .agents/skills: %v", err)
+	}
+
+	discovered := Discover(DefaultRoots(workspace))
+	if names := skillNames(discovered); strings.Join(names, ",") != "symlinked-skill" {
+		t.Fatalf("expected symlinked ~/.agents/skills root to be discovered, got %v", names)
+	}
+	if got, want := discovered[0].SkillFilePath, filepath.Join(home, ".agents", "skills", "symlinked-skill", SkillFileName); got != want {
+		t.Fatalf("skill file path = %q, want %q", got, want)
+	}
+}
+
 func TestRenderAvailableSkillsDoesNotIncludeInstructions(t *testing.T) {
 	t.Parallel()
 
