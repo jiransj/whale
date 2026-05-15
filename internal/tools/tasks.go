@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/usewhale/whale/internal/shell"
 )
 
 type shellTask struct {
@@ -83,15 +85,25 @@ func (r *shellTaskRegistry) get(id string) (*shellTask, bool) {
 }
 
 func runShellBackground(ctx context.Context, dir, command string, task *shellTask) {
-	bin, args := shellCommand(command)
-	cmd := exec.CommandContext(ctx, bin, args...)
-	configureShellCommand(cmd)
+	spec, err := shell.Resolve(command)
+	if err != nil {
+		task.mu.Lock()
+		defer task.mu.Unlock()
+		now := time.Now()
+		task.finishedAt = &now
+		task.stderr = err.Error()
+		task.status = "failed"
+		task.exitCode = nil
+		return
+	}
+	cmd := exec.CommandContext(ctx, spec.Bin, spec.Args...)
+	shell.ConfigureCommand(cmd)
 	cmd.Dir = dir
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
-	err := cmd.Run()
+	err = cmd.Run()
 
 	task.mu.Lock()
 	defer task.mu.Unlock()

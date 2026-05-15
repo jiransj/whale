@@ -1,6 +1,6 @@
 //go:build unix
 
-package tools
+package shell
 
 import (
 	"errors"
@@ -10,15 +10,16 @@ import (
 	"time"
 )
 
-func configureShellCommand(cmd *exec.Cmd) {
+// ConfigureCommand applies platform process settings for shell commands.
+func ConfigureCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
-		return killShellCommandGroup(cmd)
+		return killCommandGroup(cmd)
 	}
 	cmd.WaitDelay = 2 * time.Second
 }
 
-func killShellCommandGroup(cmd *exec.Cmd) error {
+func killCommandGroup(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return os.ErrProcessDone
 	}

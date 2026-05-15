@@ -31,7 +31,7 @@ func summarizeToolResultForChat(toolName, raw string) (string, string) {
 			successBySignal = true
 		}
 	}
-	if env.status != "" && env.status != "ok" && env.status != "running" && env.status != "done" && env.status != "completed" && env.status != "success" {
+	if env.status != "" && env.status != "ok" && env.status != "running" && env.status != "done" && env.status != "completed" && env.status != "success" && env.status != "exited" {
 		successBySignal = false
 	}
 

@@ -27,3 +27,23 @@ jobs:
 
       - name: Run tests
         run: make test
+
+  windows-shell:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Windows shell resolver tests
+        run: go test ./internal/shell -count=1
+
+      - name: Run Windows shell integration tests
+        run: |
+          go test ./internal/tools -run TestWindowsShell -count=1
+          go test ./internal/agent -run TestWindowsHook -count=1

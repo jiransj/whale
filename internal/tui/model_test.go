@@ -2380,6 +2380,18 @@ func TestSummarizeToolResultForChat_ShellRunSuccessShowsOutputSummary(t *testing
 	}
 }
 
+func TestSummarizeToolResultForChat_ShellWaitExitedShowsSuccess(t *testing.T) {
+	raw := `{"success":true,"code":"ok","data":{"status":"exited","metrics":{"exit_code":0},"payload":{"command":"sleep 1; echo whale-background-smoke","stdout":"whale-background-smoke\n","stderr":"","done":true}}}`
+	role, got := summarizeToolResultForChat("shell_wait", raw)
+	if role != "result_ok" {
+		t.Fatalf("expected result_ok role, got %q: %s", role, got)
+	}
+	want := "✓\nwhale-background-smoke"
+	if got != want {
+		t.Fatalf("unexpected summary text:\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
 func TestShellRunTranscriptKeepsStatusAndOutputSeparate(t *testing.T) {
 	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30}
 	next, _ := m.Update(svcMsg(service.Event{
