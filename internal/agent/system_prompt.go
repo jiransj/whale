@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"runtime"
 	"sort"
 	"strings"
 
@@ -9,6 +8,7 @@ import (
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/memory"
 	"github.com/usewhale/whale/internal/session"
+	"github.com/usewhale/whale/internal/shell"
 	"github.com/usewhale/whale/internal/skills"
 )
 
@@ -45,9 +45,7 @@ Ask mode is active.
 	`))
 	}
 	systemBlocks = append(systemBlocks, renderDelegationPolicyBlock())
-	if strings.TrimSpace(a.workspaceRoot) != "" {
-		systemBlocks = append(systemBlocks, renderRuntimeEnvironmentBlock(runtime.GOOS, a.workspaceRoot))
-	}
+	systemBlocks = append(systemBlocks, renderRuntimeBlock(a.workspaceRoot, shell.DescribeRuntime()))
 	systemBlocks = append(systemBlocks, renderToolSpecsBlock(a.tools.Specs()))
 	if strings.TrimSpace(a.workspaceRoot) != "" {
 		discovered := skills.Filter(skills.Discover(skills.DefaultRoots(a.workspaceRoot)), a.disabledSkills)
@@ -66,22 +64,28 @@ Ask mode is active.
 	return systemBlocks
 }
 
-func renderRuntimeEnvironmentBlock(goos, workspaceRoot string) string {
+func renderRuntimeBlock(workspaceRoot string, rt shell.RuntimeDescription) string {
 	var b strings.Builder
-	b.WriteString("Runtime environment.\n\n")
-	b.WriteString("- OS: ")
-	b.WriteString(strings.TrimSpace(goos))
-	b.WriteString("\n")
-	b.WriteString("- Current Whale workspace root: ")
-	b.WriteString(strings.TrimSpace(workspaceRoot))
-	b.WriteString("\n")
-	b.WriteString("- shell_run commands run from the workspace root by default. Do not assume a synthetic path such as /workspace; use relative paths or the shell_run cwd parameter for subdirectories.\n")
-	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
-		b.WriteString("- On Windows, shell_run prefers pwsh when available, then falls back to ComSpec or cmd.exe.")
-	} else {
-		b.WriteString("- On Unix-like systems, shell_run uses /bin/sh.")
+	b.WriteString("Current Whale runtime:\n")
+	if strings.TrimSpace(workspaceRoot) != "" {
+		b.WriteString("- Current Whale workspace root: ")
+		b.WriteString(workspaceRoot)
+		b.WriteString("\n")
 	}
-	return b.String()
+	if strings.TrimSpace(rt.GOOS) != "" {
+		b.WriteString("- OS: ")
+		b.WriteString(strings.TrimSpace(rt.GOOS))
+		b.WriteString("\n")
+	}
+	b.WriteString("- Shell: ")
+	b.WriteString(rt.ShellSummary())
+	b.WriteString("\n")
+	b.WriteString("Shell commands run from the current Whale workspace by default. Do not assume a synthetic path such as /workspace; use relative paths or the shell_run cwd parameter for subdirectories.")
+	if guidance := rt.CommandGuidance(); strings.TrimSpace(guidance) != "" {
+		b.WriteString("\n")
+		b.WriteString(strings.TrimSpace(guidance))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func renderDelegationPolicyBlock() string {

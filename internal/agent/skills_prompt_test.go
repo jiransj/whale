@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/shell"
 )
 
 func TestImmutableSystemPromptIncludesSkillIndexOnly(t *testing.T) {
@@ -57,6 +58,50 @@ func TestImmutableSystemPromptIncludesDelegationPolicyBeforeToolSpecs(t *testing
 	for _, want := range []string{"Use parallel_reason for 2-8 independent", "Use spawn_subagent for one bounded read-only", "Use a single agent for direct questions", "Do not load a skill first unless the user explicitly names one"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("delegation policy missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestImmutableSystemPromptIncludesRuntimeContext(t *testing.T) {
+	a := &Agent{
+		tools:                core.NewToolRegistry(nil),
+		workspaceRoot:        "/repo",
+		projectMemoryEnabled: false,
+	}
+	blocks := a.buildImmutableSystemBlocks()
+	joined := strings.Join(blocks, "\n\n")
+	for _, want := range []string{
+		"Current Whale runtime:",
+		"Current Whale workspace root: /repo",
+		"- OS:",
+		"- Shell:",
+		"Shell commands run from the current Whale workspace by default.",
+		"Do not assume a synthetic path such as /workspace",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("system prompt missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestRenderRuntimeBlockDescribesPowerShellSyntax(t *testing.T) {
+	block := renderRuntimeBlock(`C:\repo`, shell.RuntimeDescription{
+		GOOS: "windows",
+		Spec: shell.Spec{Kind: shell.KindPowerShell, DisplayName: "PowerShell"},
+	})
+	for _, want := range []string{
+		"Current Whale runtime:",
+		`Current Whale workspace root: C:\repo`,
+		"- OS: windows",
+		"- Shell: PowerShell (PowerShell -NoLogo -NoProfile -NonInteractive -Command)",
+		"Use PowerShell syntax",
+		"Get-ChildItem",
+		"Select-String",
+		"$env:TEMP",
+		"Avoid POSIX-only assumptions",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("runtime block missing %q:\n%s", want, block)
 		}
 	}
 }
