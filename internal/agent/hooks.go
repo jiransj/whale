@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/shell"
 )
 
 type HookEvent string
@@ -389,7 +390,11 @@ func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResu
 	}
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-lc", in.Command)
+	spec, err := shell.Resolve(in.Command)
+	if err != nil {
+		return HookSpawnResult{ExitCode: -1, SpawnErr: err}
+	}
+	cmd := exec.CommandContext(ctx, spec.Bin, spec.Args...)
 	if in.CWD != "" {
 		cmd.Dir = in.CWD
 	}
@@ -400,7 +405,7 @@ func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResu
 	cmd.Stdout = outBuf
 	cmd.Stderr = errBuf
 
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := 0
 	spawnErr := error(nil)
 	timedOut := false
