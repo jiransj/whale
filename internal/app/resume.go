@@ -199,9 +199,6 @@ func (a *App) ApplyResumeChoice(choice string) (ResumeApplyResult, error) {
 		return ResumeApplyResult{}, err
 	}
 	a.currentMode = modeState.Mode
-	if _, err := session.PatchSessionMeta(a.sessionsDir, a.sessionID, session.SessionMeta{Workspace: a.workspaceRoot, Branch: a.branch}); err != nil {
-		return ResumeApplyResult{}, err
-	}
 	out := fmt.Sprintf("resumed session: %s\nmode: %s", a.sessionID, a.currentMode)
 	if ust, err := session.LoadUserInputState(a.sessionsDir, a.sessionID); err == nil && ust.Pending {
 		out += fmt.Sprintf("\npending user input: tool_call=%s questions=%d", ust.ToolCallID, len(ust.Questions))

@@ -2,6 +2,7 @@
 - Root-level CLI flags shared by `whale`, `whale exec`, and `whale resume` should be declared in `internal/ui/cli/cmd/root.go` via `bindPersistentFlags`.
 - CLI startup config flows through `prepareCLIConfig`, which calls `app.LoadAndApplyConfig`; one-time command-line overrides should hook into that shared path instead of being re-parsed in subcommands.
 - For CLI flags that may be explicitly passed with a default-valued result such as `--thinking=false`, re-apply the override after `LoadAndApplyConfig` using `flagChanged(cmd, name)` so config-file values do not win accidentally.
+- Resuming an existing session should keep persisted session meta untouched until a new turn is written; startup-time CLI overrides belong in runtime state, not in `*.meta.json`.
 - The Go test suite can be affected by ambient `DEEPSEEK_API_KEY`; unset it when running `make test` if credential fallback tests fail unexpectedly.
 
 ## 2026-05-15 18:03 - US-001
@@ -31,4 +32,18 @@
   - `root.PersistentFlags().Set(...)` 会同时更新 flag 值和 `Changed` 状态，适合直接驱动 `prepareCLIConfig` 的单元测试。
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - 当前代码库还没有独立的 CLI lint 目标，Ralph 迭代里的质量门主要依赖 `make fmt-check`、`make vet`、`make test` 和 `make build`。
+---
+## 2026-05-15 18:45 - US-003
+- 调整 resume 初始化语义：恢复已有 session 时不再在启动阶段改写 `session meta`，CLI 的 `thinking/effort` 覆盖只进入当前进程运行态，并在后续新 turn 中自然生效。
+- 新增回归测试，覆盖 `resume` 不重写已有 meta、`New(..., SessionID)` 仍会应用本次运行的 `thinking/effort`、以及 `root -> exec` 共享配置路径会把覆盖值带到 provider 请求而不改变 text 输出格式。
+- 更改的文件：`internal/app/app.go`、`internal/app/resume.go`、`internal/app/resume_test.go`、`internal/ui/cli/cmd/commands_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - `app.New` 适合只在新 session 或 resume picker 占位 session 上初始化 `Workspace/Branch`；已有 session 的持久化 meta 应该留给真实 turn 写入路径维护。
+  - 验证 `exec` 的一次性推理覆盖是否真正落到 provider，请直接在 CLI 测试里捕获 `/chat/completions` 请求体，比只断言内存配置更稳。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - `ApplyResumeChoice` 和 `New(..., SessionID)` 是两条不同的 resume 入口；只修其中一处会留下另一条提前改写 meta 的回归缺口。
+  - 旧测试里默认把 legacy session 的空 `Workspace` 当成“恢复时应立刻补写”，这与“resume 只影响后续新模型调用”的语义冲突，修改行为时要同步收紧断言。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - `runExec` 不会输出 startup lines，适合用 HTTP stub 精确检查本次 provider payload，同时验证 text/json 输出契约未被 CLI 覆盖参数影响。
 ---

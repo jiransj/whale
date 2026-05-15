@@ -39,7 +39,7 @@
       ],
       "priority": 2,
       "passes": true,
-      "notes": "复用 app.Config.ThinkingEnabled、app.Config.ReasoningEffort 和 prepareCLIConfig 的一次性覆盖模式；不得新增配置字段。",
+      "notes": "",
       "retryCount": 0,
       "blocked": false
     },
@@ -59,7 +59,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "不新增会话 meta 字段记录本次 CLI 覆盖值；恢复会话只影响后续新模型调用。",
       "retryCount": 0,
       "blocked": false

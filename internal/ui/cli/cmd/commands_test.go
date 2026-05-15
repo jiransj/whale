@@ -418,6 +418,73 @@ func TestRunExecJSONOutput(t *testing.T) {
 	}
 }
 
+func TestRootExecAppliesThinkingAndEffortOverridesWithoutChangingTextOutput(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "sk-1234567890abcdef1234")
+	requests := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		requests <- payload
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%q},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n", "hello from exec")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+	t.Setenv("DEEPSEEK_BASE_URL", srv.URL)
+
+	dir := t.TempDir()
+	workspace := t.TempDir()
+	thinking := false
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dir), app.FileConfig{
+		ReasoningEffort: "high",
+		ThinkingEnabled: &thinking,
+	}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dir
+	root := newRootCmd(opts)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"exec", "--thinking=true", "--effort=max", "hi"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("root exec: %v", err)
+	}
+	if got := out.String(); got != "hello from exec\n" {
+		t.Fatalf("stdout = %q", got)
+	}
+
+	var payload map[string]any
+	select {
+	case payload = <-requests:
+	default:
+		t.Fatal("expected exec request payload")
+	}
+	thinkingPayload, ok := payload["thinking"].(map[string]any)
+	if !ok || thinkingPayload["type"] != "enabled" {
+		t.Fatalf("thinking payload = %#v, want enabled", payload["thinking"])
+	}
+	if got := payload["reasoning_effort"]; got != "max" {
+		t.Fatalf("reasoning_effort = %#v, want max", got)
+	}
+}
+
 func TestPrepareCLIConfigMarksExplicitDefaultModel(t *testing.T) {
 	opts := &cliOptions{cfg: app.DefaultConfig()}
 	cmd := &cobra.Command{Use: "test"}

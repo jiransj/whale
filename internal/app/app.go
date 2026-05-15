@@ -185,8 +185,10 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		}
 	}
 	branch := session.DetectGitBranch(workspaceRoot)
-	if _, err := session.PatchSessionMeta(sessionsDir, sessionID, session.SessionMeta{Workspace: workspaceRoot, Branch: branch}); err != nil {
-		return nil, fmt.Errorf("patch session meta failed: %w", err)
+	if start.NewSession || start.ResumeMenu {
+		if _, err := session.PatchSessionMeta(sessionsDir, sessionID, session.SessionMeta{Workspace: workspaceRoot, Branch: branch}); err != nil {
+			return nil, fmt.Errorf("patch session meta failed: %w", err)
+		}
 	}
 
 	model := firstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel)
