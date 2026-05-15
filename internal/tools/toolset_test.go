@@ -57,6 +57,100 @@ func TestViewWriteEdit(t *testing.T) {
 	}
 }
 
+func TestReadFileNormalizesCRLFContent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("zero\r\none\r\ntwo\r\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	res, err := ts.readFile(context.Background(), tc("read_file", map[string]any{
+		"file_path": "a.txt",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("read_file failed: err=%v res=%+v", err, res)
+	}
+	data := readFileData(t, res)
+	if content := readFileContent(t, data); content != "zero\none\ntwo" {
+		t.Fatalf("content = %q, want normalized LF content", content)
+	}
+	if strings.Contains(readFileContent(t, data), "\r") {
+		t.Fatalf("content still contains CR: %q", readFileContent(t, data))
+	}
+}
+
+func TestEditFileMatchesLFSearchAndPreservesCRLF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("alpha\r\nbeta\r\ngamma\r\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	res, err := ts.editFile(context.Background(), tc("edit", map[string]any{
+		"file_path": "a.txt",
+		"search":    "alpha\nbeta",
+		"replace":   "alpha\nwhale",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("edit failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "alpha\r\nwhale\r\ngamma\r\n" {
+		t.Fatalf("content = %q, want CRLF preserved", string(got))
+	}
+}
+
+func TestApplyPatchMatchesLFHunksAndPreservesCRLF(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("alpha\r\nbeta\r\ngamma\r\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		" alpha",
+		"-beta",
+		"+whale",
+		" gamma",
+		"*** End Patch",
+	}, "\n")
+
+	preview, err := ts.previewApplyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil {
+		t.Fatalf("preview patch: %v", err)
+	}
+	if diff := firstMetadataDiff(t, preview); !strings.Contains(diff, "-beta") || !strings.Contains(diff, "+whale") {
+		t.Fatalf("unexpected preview diff:\n%s", diff)
+	}
+	res, err := ts.applyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil || res.IsError {
+		t.Fatalf("apply patch failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "alpha\r\nwhale\r\ngamma\r\n" {
+		t.Fatalf("content = %q, want CRLF preserved", string(got))
+	}
+}
+
 func TestReadFileRangeDefaults(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("zero\none\ntwo\nthree\n"), 0o644); err != nil {

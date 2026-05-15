@@ -31,11 +31,12 @@ type patchOp struct {
 }
 
 type patchFilePlan struct {
-	path   string
-	abs    string
-	before string
-	after  string
-	remove bool
+	path        string
+	abs         string
+	before      string
+	after       string
+	lineEndings lineEndingStyle
+	remove      bool
 }
 
 func (b *Toolset) applyPatch(_ context.Context, call core.ToolCall) (core.ToolResult, error) {
@@ -69,7 +70,7 @@ func (b *Toolset) applyPatch(_ context.Context, call core.ToolCall) (core.ToolRe
 		if err := os.MkdirAll(filepath.Dir(plan.abs), 0o755); err != nil {
 			return marshalToolError(call, "patch_apply_failed", err.Error()), nil
 		}
-		if err := os.WriteFile(plan.abs, []byte(plan.after), 0o644); err != nil {
+		if err := os.WriteFile(plan.abs, []byte(restoreLineEndings(plan.after, plan.lineEndings)), 0o644); err != nil {
 			return marshalToolError(call, "patch_apply_failed", err.Error()), nil
 		}
 	}
@@ -123,12 +124,13 @@ func patchPlanChanges(plans []patchFilePlan) []fileChangePreview {
 }
 
 type patchFileState struct {
-	path   string
-	abs    string
-	before string
-	after  string
-	exists bool
-	remove bool
+	path        string
+	abs         string
+	before      string
+	after       string
+	lineEndings lineEndingStyle
+	exists      bool
+	remove      bool
 }
 
 func (b *Toolset) planPatch(ops []patchOp) ([]patchFilePlan, error) {
@@ -150,7 +152,8 @@ func (b *Toolset) planPatch(ops []patchOp) ([]patchFilePlan, error) {
 			}
 			exists = false
 		}
-		st := &patchFileState{path: path, abs: abs, before: string(raw), after: string(raw), exists: exists}
+		before, lineEndings := normalizeLineEndings(string(raw))
+		st := &patchFileState{path: path, abs: abs, before: before, after: before, lineEndings: lineEndings, exists: exists}
 		states[path] = st
 		order = append(order, path)
 		return st, nil
@@ -194,7 +197,7 @@ func (b *Toolset) planPatch(ops []patchOp) ([]patchFilePlan, error) {
 		if st.before == st.after && !st.remove {
 			continue
 		}
-		plans = append(plans, patchFilePlan{path: st.path, abs: st.abs, before: st.before, after: st.after, remove: st.remove})
+		plans = append(plans, patchFilePlan{path: st.path, abs: st.abs, before: st.before, after: st.after, lineEndings: st.lineEndings, remove: st.remove})
 	}
 	return plans, nil
 }
@@ -220,7 +223,7 @@ func applyPatchHunks(path, content string, hunks []patchHunk) (string, error) {
 }
 
 func parseBeginPatch(patch string) ([]patchOp, error) {
-	lines := strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n")
+	lines := strings.Split(normalizeLineEndingText(patch), "\n")
 	i := 0
 	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
 		i++
