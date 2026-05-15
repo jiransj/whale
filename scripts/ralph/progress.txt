@@ -1,0 +1,19 @@
+## Codebase Patterns
+- Root-level CLI flags shared by `whale`, `whale exec`, and `whale resume` should be declared in `internal/ui/cli/cmd/root.go` via `bindPersistentFlags`.
+- CLI startup config flows through `prepareCLIConfig`, which calls `app.LoadAndApplyConfig`; one-time command-line overrides should hook into that shared path instead of being re-parsed in subcommands.
+- The Go test suite can be affected by ambient `DEEPSEEK_API_KEY`; unset it when running `make test` if credential fallback tests fail unexpectedly.
+
+## 2026-05-15 18:03 - US-001
+- 实现了 root persistent flags `--thinking` 和 `--effort`，让交互式启动、`exec`、`resume` 共享同一套一次性推理参数入口。
+- 扩展 CLI 测试，覆盖 root help 对新增参数的展示，以及 `exec`/`resume` 对 root persistent flags 的继承。
+- 更改的文件：`internal/ui/cli/cmd/root.go`、`internal/ui/cli/cmd/commands_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - `bindPersistentFlags` 是新增公共 CLI 参数的唯一合理入口；这里的参数天然会出现在 root help，并被子命令继承。
+  - `commands_test.go` 已经有 root help 与 `prepareCLIConfig` 的行为测试，适合继续为 CLI 配置覆盖补回归用例。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - 只绑定 bool/string flag 还不能完整表达“显式传入默认值”的语义；后续 story 需要依赖 `flagChanged` 处理 `--thinking=true` 和 `--effort=high` 这种默认值覆盖场景。
+  - 当前环境里的 `DEEPSEEK_API_KEY` 会让 `LoadDeepSeekAPIKeyFallsBackToCredentials` 误失败，跑全量测试时需要清空该变量。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - `app.Config` 已经包含 `ThinkingEnabled` 和 `ReasoningEffort`，后续 story 不需要新增配置字段，只需复用共享配置准备链路。
+---

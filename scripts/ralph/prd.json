@@ -1,0 +1,108 @@
+{
+  "project": "Whale",
+  "branchName": "ralph/cli-thinking-effort-params",
+  "description": "命令行启动 thinking/effort 参数 - 为 Whale CLI 启动入口新增一次性 thinking 和 reasoning effort 覆盖能力，覆盖值只影响当前进程中的新模型调用。",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "暴露根级 CLI 参数",
+      "description": "作为 CLI 用户，我想在启动 Whale 时传入 --thinking=<bool> 和 --effort=<value>，以便为本次运行指定推理配置。实现必须使用 Cobra root persistent flags，使 whale、whale exec 和 whale resume 共享同一套参数。",
+      "acceptanceCriteria": [
+        "根命令公开 --thinking=<bool> 参数，支持用户显式传入 true 或 false",
+        "根命令公开 --effort=<value> 参数，支持用户传入当前产品可见档位 high 或 max",
+        "whale --help 显示 --thinking 和 --effort，并且帮助文案不暗示它们会持久化",
+        "新增参数是 root persistent flags，可被 whale、whale exec、whale resume 共享",
+        "相关 Go 测试覆盖 root help 中新增参数的展示",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "实现入口优先查看 internal/ui/cli/cmd/root.go。未使用 implement/technical-cli-thinking-effort-params.md，因为该文件不存在；约束来自 PRD 的 Technical Considerations。",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-002",
+      "title": "应用一次性配置覆盖",
+      "description": "作为 CLI 用户，我想命令行参数覆盖配置文件中的 thinking 和 effort，以便无需修改长期配置就能临时改变本次运行行为。覆盖必须发生在 LoadAndApplyConfig 合并配置之后，并且只影响当前进程。",
+      "acceptanceCriteria": [
+        "配置加载顺序为先合并默认配置、全局配置和项目配置，再应用命令行显式传入的 thinking 和 effort",
+        "使用 flag changed 状态判断用户是否显式传入参数，--thinking=false 必须正确覆盖 true 默认值或配置值",
+        "当用户传入 --thinking=true 时，即使配置值为 false，本次运行也必须开启 thinking",
+        "当用户传入 --effort=max 时，本次运行的 reasoning effort 使用 max",
+        "当用户未传入 thinking 或 effort 中的某一项时，该项保持现有配置来源决定的值",
+        "命令行覆盖不得调用 SaveGlobalPreferences、SetModelAndEffort、SetThinkingEnabled 或其他保存偏好的路径",
+        "相关 Go 测试覆盖配置文件值被 --thinking=false、--thinking=true、--effort=max 覆盖，以及未传参数时保持配置值",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "复用 app.Config.ThinkingEnabled、app.Config.ReasoningEffort 和 prepareCLIConfig 的一次性覆盖模式；不得新增配置字段。",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-003",
+      "title": "保持入口语义一致",
+      "description": "作为同时使用交互式 TUI、单次执行和恢复会话的用户，我想三个入口使用相同参数语义，以便不需要记忆不同命令的差异。实现应依赖共享的配置准备路径，而不是在子命令中重复解析。",
+      "acceptanceCriteria": [
+        "whale 交互式启动时使用新增参数决定本次 App 状态和后续模型调用",
+        "whale exec 单次非交互执行时使用新增参数决定本次模型调用",
+        "whale resume 恢复会话后，新增参数只影响恢复后的新增模型调用",
+        "whale resume 不改写历史消息、会话摘要、已有会话记录或会话 meta",
+        "whale exec 的 JSON 或 text 正常输出格式不因新增参数改变",
+        "三个入口复用同一套配置准备和校验路径，不在 exec 或 resume 子命令内实现独立参数解析",
+        "相关 Go 测试或现有 CLI 测试覆盖共享配置路径",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "不新增会话 meta 字段记录本次 CLI 覆盖值；恢复会话只影响后续新模型调用。",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-004",
+      "title": "校验无效输入",
+      "description": "作为 CLI 用户，我想在传入无效参数时立刻得到明确错误，以便知道如何修正命令。校验必须在启动阶段完成，避免进入 TUI、exec 执行或 resume 后续模型调用。",
+      "acceptanceCriteria": [
+        "--thinking 无法解析为 bool 时，Whale 在启动阶段拒绝继续运行",
+        "--effort 仅接受当前产品可见档位 high 和 max",
+        "传入不支持的 effort 值时，Whale 在启动阶段拒绝继续运行，并说明支持的取值",
+        "无效输入不得进入 TUI、exec 执行或 resume 后续模型调用",
+        "校验逻辑复用现有 effort 规范化和支持列表口径，不引入未公开的新档位",
+        "相关 Go 测试覆盖无效 effort 被拒绝",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "不得将未公开的新 effort 值静默接受或映射为其他档位。",
+      "retryCount": 0,
+      "blocked": false
+    },
+    {
+      "id": "US-005",
+      "title": "展示实际生效状态并更新文档",
+      "description": "作为 Whale 用户，我想在启动或查看状态时看到本次实际生效的 thinking 和 effort，以便确认命令行覆盖是否生效。实现应复用现有 startup lines、service 状态和 TUI footer 展示链路。",
+      "acceptanceCriteria": [
+        "交互式启动信息展示本次实际生效的 thinking 和 effort",
+        "service 状态和 TUI footer 展示本次实际生效的 thinking 和 effort",
+        "若未传命令行参数，展示值与现有配置行为保持一致",
+        "更新 docs/configuration.md，说明 --thinking 和 --effort 是一次性 CLI 覆盖参数",
+        "docs/configuration.md 明确新增参数不会写回配置文件",
+        "docs/configuration.md 保留配置文件中 reasoning_effort 和 thinking_enabled 的长期配置说明",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "这是 CLI/TUI 终端功能，不涉及 Web 前端；不需要 agent-browser 浏览器验证。",
+      "retryCount": 0,
+      "blocked": false
+    }
+  ]
+}

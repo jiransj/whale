@@ -331,8 +331,42 @@ func TestRootHelpOnlyShowsPublicRootFlags(t *testing.T) {
 			t.Fatalf("removed flag should not appear in help: %s\n%s", removed, help)
 		}
 	}
-	if !helpHasFlag(help, "--model") || !helpHasFlag(help, "--version") {
+	for _, expected := range []string{"--model", "--thinking", "--effort", "--version"} {
+		if !helpHasFlag(help, expected) {
+			t.Fatalf("expected public flag %s in help, got:\n%s", expected, help)
+		}
+	}
+	if !strings.Contains(help, "Override thinking for this run only") || !strings.Contains(help, "Override reasoning effort for this run only") {
 		t.Fatalf("expected public flags in help, got:\n%s", help)
+	}
+}
+
+func TestThinkingAndEffortFlagsArePersistent(t *testing.T) {
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+
+	if root.PersistentFlags().Lookup("thinking") == nil {
+		t.Fatal("expected thinking to be a root persistent flag")
+	}
+	if root.PersistentFlags().Lookup("effort") == nil {
+		t.Fatal("expected effort to be a root persistent flag")
+	}
+
+	for _, args := range [][]string{
+		{"exec", "--help"},
+		{"resume", "--help"},
+	} {
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%s help: %v", strings.Join(args[:1], " "), err)
+		}
+		help := out.String()
+		if !helpHasFlag(help, "--thinking") || !helpHasFlag(help, "--effort") {
+			t.Fatalf("expected inherited flags in %v help, got:\n%s", args, help)
+		}
 	}
 }
 
