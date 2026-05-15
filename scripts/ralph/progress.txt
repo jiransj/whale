@@ -14,3 +14,14 @@
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - `chatList.SetMessages()` 是聊天历史重建的集中入口；给它加 generation 计数后，可以直接在 TUI 测试里断言普通编辑是否误触发了全量重渲染。
 ---
+## [2026-05-16 00:04] - [US-001]
+- 复核并确认聊天刷新边界优化已在当前 branch 落地，重新运行 TUI 质量检查后将 `US-001` 状态写回为通过。
+- 更改的文件：`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - Ralph 任务文件可能因后续整理或校验被回退；开始新迭代前，先对照 `git log` 和 `progress.txt` 判断是需要补修代码，还是只需要恢复状态文件。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - 当同一 story 的代码提交已经在当前 branch 上时，不要重复实现；先跑项目约定检查，再最小化写回任务状态，避免制造无意义代码漂移。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - `make test-tui` 已覆盖这次聊天刷新边界改动的核心回归面；补跑 targeted `go test ./internal/tui -run ...` 能更快确认关键行为未回退。
+---

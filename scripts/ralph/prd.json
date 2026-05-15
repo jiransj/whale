@@ -18,7 +18,7 @@
       ],
       "priority": 1,
       "passes": true,
-      "notes": "可修改 internal/tui/render.go、internal/tui/model.go、internal/tui/model_keys.go 和 internal/tui/chat_viewport.go。复用现有 refreshViewportContent* 显式刷新入口；不要修改 Markdown 渲染器、工具执行、approval、hook、安全或持久化逻辑。本 Ralph 转换未找到 implement/technical-tui-long-history-input-performance.md；约束来自 PRD 中已提炼的技术考虑。",
+      "notes": "",
       "retryCount": 0,
       "blocked": false
     },
