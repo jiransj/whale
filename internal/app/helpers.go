@@ -28,6 +28,10 @@ func containsString(xs []string, v string) bool {
 	return false
 }
 
+func SupportedReasoningEfforts() []string {
+	return []string{"high", "max"}
+}
+
 func normalizeEffort(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "high", "max":
@@ -39,6 +43,10 @@ func normalizeEffort(v string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(v))
 	}
+}
+
+func NormalizeEffort(v string) string {
+	return normalizeEffort(v)
 }
 
 func onOff(v bool) string {

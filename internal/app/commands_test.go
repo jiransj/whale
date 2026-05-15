@@ -462,6 +462,64 @@ func TestBuildStatusIncludesContextAndBudget(t *testing.T) {
 	}
 }
 
+func TestStartupLinesIncludeEffectiveThinkingAndEffort(t *testing.T) {
+	app := &App{
+		sessionID:        "sess-1",
+		currentMode:      "agent",
+		approvalMode:     "never",
+		model:            "deepseek-v4-pro",
+		reasoningEffort:  "max",
+		thinkingEnabled:  false,
+		budgetWarningUSD: 0,
+	}
+
+	lines := app.StartupLines()
+	joined := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"model: deepseek-v4-pro",
+		"effort: max",
+		"thinking: off",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected startup lines to contain %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+func TestBuildStatusIncludesEffectiveThinkingAndEffort(t *testing.T) {
+	dir := t.TempDir()
+	sessionsDir := filepath.Join(dir, "sessions")
+	msgStore, err := store.NewJSONLStore(sessionsDir)
+	if err != nil {
+		t.Fatalf("store init: %v", err)
+	}
+	app := &App{
+		ctx:              context.Background(),
+		workspaceRoot:    dir,
+		sessionID:        "sess-1",
+		msgStore:         msgStore,
+		contextWindow:    1000,
+		currentMode:      "agent",
+		approvalMode:     "never",
+		model:            "deepseek-v4-pro",
+		reasoningEffort:  "max",
+		thinkingEnabled:  false,
+		budgetWarningUSD: 0,
+		cfg:              DefaultConfig(),
+	}
+
+	out := app.buildStatus()
+	for _, want := range []string{
+		"- model: deepseek-v4-pro",
+		"- effort: max",
+		"- thinking: off",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected status to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
 func TestHandleSlashSkillsCommands(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

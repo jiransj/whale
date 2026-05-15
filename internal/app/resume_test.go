@@ -138,8 +138,48 @@ func TestApplyResumeChoiceAllowsLegacySessionWithoutWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load meta: %v", err)
 	}
-	if meta.Workspace != current {
-		t.Fatalf("legacy workspace = %q, want %q", meta.Workspace, current)
+	if meta.Workspace != "" {
+		t.Fatalf("legacy workspace = %q, want empty until a new turn is written", meta.Workspace)
+	}
+}
+
+func TestApplyResumeChoiceDoesNotRewriteExistingSessionMeta(t *testing.T) {
+	current := t.TempDir()
+	sessionsDir := filepath.Join(t.TempDir(), "sessions")
+	writeResumeTestSession(t, sessionsDir, "s1", "same workspace")
+	if err := session.SaveSessionMeta(sessionsDir, "s1", session.SessionMeta{
+		Workspace: current,
+		Branch:    "original-branch",
+		Summary:   "existing summary",
+		TurnCount: 4,
+	}); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	before, err := session.LoadSessionMeta(sessionsDir, "s1")
+	if err != nil {
+		t.Fatalf("load before meta: %v", err)
+	}
+
+	app := &App{
+		sessionsDir:   sessionsDir,
+		workspaceRoot: current,
+		sessionID:     "current",
+		branch:        "new-branch",
+	}
+	out, err := app.ApplyResumeChoice("1")
+	if err != nil {
+		t.Fatalf("ApplyResumeChoice: %v", err)
+	}
+	if !out.Resumed {
+		t.Fatalf("expected resume, got message:\n%s", out.Message)
+	}
+
+	after, err := session.LoadSessionMeta(sessionsDir, "s1")
+	if err != nil {
+		t.Fatalf("load after meta: %v", err)
+	}
+	if after != before {
+		t.Fatalf("resume rewrote meta:\nbefore: %+v\nafter:  %+v", before, after)
 	}
 }
 
@@ -195,6 +235,56 @@ func TestNewDirectResumeBlocksCrossWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "This conversation is from a different directory.") {
 		t.Fatalf("unexpected error message:\n%s", err)
+	}
+}
+
+func TestNewDirectResumeKeepsSessionMetaUnchangedAndAppliesRuntimeConfig(t *testing.T) {
+	current := t.TempDir()
+	dataDir := t.TempDir()
+	sessionsDir := filepath.Join(dataDir, "sessions")
+	writeResumeTestSession(t, sessionsDir, "s1", "resume without rewrite")
+	if err := session.SaveSessionMeta(sessionsDir, "s1", session.SessionMeta{
+		Workspace: current,
+		Branch:    "saved-branch",
+		Summary:   "saved summary",
+		TurnCount: 3,
+	}); err != nil {
+		t.Fatalf("save meta: %v", err)
+	}
+	before, err := session.LoadSessionMeta(sessionsDir, "s1")
+	if err != nil {
+		t.Fatalf("load before meta: %v", err)
+	}
+
+	t.Chdir(current)
+	t.Setenv("DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := DefaultConfig()
+	cfg.DataDir = dataDir
+	cfg.ReasoningEffort = "max"
+	cfg.ThinkingEnabled = false
+	app, err := New(context.Background(), cfg, StartOptions{SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer app.Close()
+
+	if app.SessionID() != "s1" {
+		t.Fatalf("session = %q, want s1", app.SessionID())
+	}
+	if app.ReasoningEffort() != "max" {
+		t.Fatalf("effort: want max override, got %s", app.ReasoningEffort())
+	}
+	if app.ThinkingEnabled() {
+		t.Fatal("thinking: want false override on resumed runtime")
+	}
+
+	after, err := session.LoadSessionMeta(sessionsDir, "s1")
+	if err != nil {
+		t.Fatalf("load after meta: %v", err)
+	}
+	if after != before {
+		t.Fatalf("resume init rewrote meta:\nbefore: %+v\nafter:  %+v", before, after)
 	}
 }
 

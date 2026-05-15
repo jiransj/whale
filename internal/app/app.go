@@ -185,8 +185,10 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		}
 	}
 	branch := session.DetectGitBranch(workspaceRoot)
-	if _, err := session.PatchSessionMeta(sessionsDir, sessionID, session.SessionMeta{Workspace: workspaceRoot, Branch: branch}); err != nil {
-		return nil, fmt.Errorf("patch session meta failed: %w", err)
+	if start.NewSession || start.ResumeMenu {
+		if _, err := session.PatchSessionMeta(sessionsDir, sessionID, session.SessionMeta{Workspace: workspaceRoot, Branch: branch}); err != nil {
+			return nil, fmt.Errorf("patch session meta failed: %w", err)
+		}
 	}
 
 	model := firstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel)
@@ -376,7 +378,7 @@ func (a *App) ListMessages() ([]core.Message, error) {
 }
 func (a *App) SupportedModels() []string { return defaults.SupportedModels() }
 func (a *App) SupportedEfforts() []string {
-	return []string{"high", "max"}
+	return SupportedReasoningEfforts()
 }
 
 func (a *App) SetModelAndEffort(modelName, effort string) error {

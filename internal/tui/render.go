@@ -413,9 +413,9 @@ func resolveVersion() string {
 	return build.CurrentVersion()
 }
 
-func buildHeaderBanner(modelName, effort, cwd, version string) string {
-	return fmt.Sprintf("▸ Whale %s   model: %s %s   dir: %s",
-		version, modelName, effort, cwd)
+func buildHeaderBanner(modelName, effort, thinking, cwd, version string) string {
+	return fmt.Sprintf("▸ Whale %s   model: %s   effort: %s   thinking: %s   dir: %s",
+		version, modelName, effort, thinking, cwd)
 }
 
 func resolveWorkingDirectory() string {
