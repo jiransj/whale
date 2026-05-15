@@ -146,6 +146,14 @@ func TestHandleCommandModeSwitch(t *testing.T) {
 		t.Fatalf("unexpected /plan result: %+v", res)
 	}
 
+	res, err = handleCommand("/agent", "cur", now)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !res.Handled || res.Mode != "agent" {
+		t.Fatalf("unexpected /agent result: %+v", res)
+	}
+
 	if _, err = handleCommand("/plan show", "cur", now); err == nil {
 		t.Fatal("expected /plan show usage error")
 	}
@@ -349,6 +357,9 @@ func TestHandleLocalCommandStats(t *testing.T) {
 }
 
 func TestCommandsHelpKeepsSkillCommandOutOfPrimaryList(t *testing.T) {
+	if !strings.Contains(CommandsHelp, "/agent") {
+		t.Fatalf("expected /agent in help: %s", CommandsHelp)
+	}
 	if !strings.Contains(CommandsHelp, "/skills") {
 		t.Fatalf("expected /skills in help: %s", CommandsHelp)
 	}
@@ -426,14 +437,13 @@ func TestBuildStatusIncludesContextAndBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store init: %v", err)
 	}
-	cfg := DefaultConfig()
-	cfg.ContextWindow = 1000
 	app := &App{
 		ctx:           context.Background(),
 		workspaceRoot: dir,
 		sessionID:     "sess-1",
 		msgStore:      msgStore,
-		cfg:           cfg,
+		contextWindow: 1000,
+		cfg:           DefaultConfig(),
 	}
 
 	out := app.buildStatus()

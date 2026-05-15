@@ -49,9 +49,8 @@ type FileMCPConfig struct {
 }
 
 type FileContextConfig struct {
-	AutoCompact        *bool    `toml:"auto_compact,omitempty"`
-	CompactThreshold   *float64 `toml:"compact_threshold,omitempty"`
-	ModelContextWindow *int     `toml:"model_context_window,omitempty"`
+	AutoCompact      *bool    `toml:"auto_compact,omitempty"`
+	CompactThreshold *float64 `toml:"compact_threshold,omitempty"`
 }
 
 type FileProjectDocConfig struct {
@@ -173,9 +172,6 @@ func ApplyFileConfig(cfg *Config, file FileConfig) {
 	if file.Context.CompactThreshold != nil {
 		cfg.AutoCompactThreshold = *file.Context.CompactThreshold
 	}
-	if file.Context.ModelContextWindow != nil {
-		cfg.ContextWindow = *file.Context.ModelContextWindow
-	}
 	if file.ProjectDoc.Enabled != nil {
 		cfg.MemoryEnabled = *file.ProjectDoc.Enabled
 	}
@@ -225,9 +221,6 @@ func overlayExplicitConfig(dst *Config, src Config) {
 	}
 	if src.AutoCompactThreshold != def.AutoCompactThreshold {
 		dst.AutoCompactThreshold = src.AutoCompactThreshold
-	}
-	if src.ContextWindow != 0 && src.ContextWindow != def.ContextWindow {
-		dst.ContextWindow = src.ContextWindow
 	}
 	if src.MemoryEnabled != def.MemoryEnabled {
 		dst.MemoryEnabled = src.MemoryEnabled

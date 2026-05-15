@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -13,12 +12,7 @@ import (
 	tuirender "github.com/usewhale/whale/internal/tui/render"
 )
 
-var mouseCSIFragmentPattern = regexp.MustCompile(`^(?:\[?<\d+;\d+;\d+[Mm])+$`)
-
 func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
-	if m.discardMouseCSIFragment(msg) {
-		return nil, false, true
-	}
 	if !m.quitArmedUntil.IsZero() && time.Now().After(m.quitArmedUntil) {
 		m.quitArmedUntil = time.Time{}
 		if m.status == "Press Ctrl+C again to quit" {
@@ -68,10 +62,8 @@ func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "shift+tab", "backtab":
 		if !m.busy && !m.hasSlashSuggestions() && !m.hasSkillSuggestions() {
-			m.startBusy()
-			m.status = "switching mode"
 			m.dispatchIntent(service.Intent{Kind: service.IntentToggleMode})
-			return busyTickCmd(), true
+			return nil, true
 		}
 	case "up":
 		if m.hasSlashSuggestions() {
@@ -369,16 +361,7 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 				m.skillBinding = nil
 				m.updateSlashMatches()
 				if m.shouldAutoRunSlash(cmd) {
-					m.appendTranscript("you", tuirender.KindText, cmd)
-					m.input.SetValue("")
-					m.skillBinding = nil
-					m.slash.matches = nil
-					m.slash.selected = 0
-					m.startBusy()
-					m.status = "running"
-					m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: cmd})
-					m.refreshViewportContentFollow(true)
-					return tea.Sequence(m.flushNativeScrollbackCmd(), busyTickCmd()), false, true
+					return tea.Sequence(m.flushNativeScrollbackCmd(), m.submitPrompt(cmd)), false, true
 				}
 			}
 			return nil, false, true
@@ -429,29 +412,6 @@ func (m *model) handleComposerKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 	return nil, false
-}
-
-func (m *model) discardMouseCSIFragment(msg tea.KeyMsg) bool {
-	if msg.Type != tea.KeyRunes || msg.Paste {
-		m.pendingMouseCSIFragment = false
-		return false
-	}
-	text := string(msg.Runes)
-	if msg.Alt && text == "[" {
-		m.pendingMouseCSIFragment = true
-		return true
-	}
-	if mouseCSIFragmentPattern.MatchString(text) {
-		m.pendingMouseCSIFragment = false
-		return true
-	}
-	if m.pendingMouseCSIFragment {
-		m.pendingMouseCSIFragment = false
-		if strings.HasPrefix(text, "<") && mouseCSIFragmentPattern.MatchString(text) {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *model) applyPalette() {

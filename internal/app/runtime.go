@@ -47,7 +47,7 @@ func (a *App) ensureAgent() (*agent.Agent, error) {
 			agent.WithSessionsDir(a.sessionsDir),
 			agent.WithBudgetWarningUSD(a.budgetWarningUSD),
 			agent.WithUsageLogPath(filepath.Join(a.cfg.DataDir, "usage.jsonl")),
-			agent.WithAutoCompact(a.cfg.AutoCompact, a.cfg.AutoCompactThreshold, a.cfg.ContextWindow),
+			agent.WithAutoCompact(a.cfg.AutoCompact, a.cfg.AutoCompactThreshold, a.contextWindow),
 			agent.WithToolPolicy(policy.DefaultToolPolicy{Mode: a.approvalMode, AllowPrefixes: a.allowPrefixes, DenyPrefixes: a.denyPrefixes}),
 			agent.WithHooks(a.hooks, a.workspaceRoot),
 			agent.WithProjectMemory(a.cfg.MemoryEnabled, a.cfg.MemoryMaxChars, parseCSVList(a.cfg.MemoryFileOrder), a.workspaceRoot),

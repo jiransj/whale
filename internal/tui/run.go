@@ -29,7 +29,6 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	}
 	p := tea.NewProgram(
 		newModel(svc, modelName, effort, thinking),
-		tea.WithMouseCellMotion(),
 	)
 	_, err = p.Run()
 	if err == nil {

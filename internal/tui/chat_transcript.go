@@ -46,6 +46,7 @@ func (m *model) commitLiveTranscript(forceBottom bool) {
 	}
 	m.appendTranscriptMessages(m.assembler.Snapshot())
 	m.assembler.Reset()
+	m.clearPendingToolCalls()
 	m.refreshViewportContentFollow(forceBottom)
 }
 

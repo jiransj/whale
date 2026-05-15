@@ -39,34 +39,37 @@ const (
 )
 
 type model struct {
-	svc               *service.Service
-	dispatch          func(service.Intent)
-	input             composer.Composer
-	viewport          viewport.Model
-	assembler         *tuirender.Assembler
-	transcript        []tuirender.UIMessage
-	logs              []logEntry
-	diffs             []diffEntry
-	width             int
-	height            int
-	followTail        bool
-	viewportFrozen    bool
-	frozenChatContent string
-	mode              mode
-	page              page
-	status            string
-	busy              bool
-	busySince         time.Time
-	stopping          bool
-	sidebar           bool
-	model             string
-	effort            string
-	thinking          string
-	chatMode          string
-	product           string
-	version           string
-	cwd               string
-	approval          struct {
+	svc                *service.Service
+	dispatch           func(service.Intent)
+	input              composer.Composer
+	viewport           viewport.Model
+	chat               chatList
+	assembler          *tuirender.Assembler
+	pendingToolCalls   map[string]struct{}
+	transcript         []tuirender.UIMessage
+	logs               []logEntry
+	diffs              []diffEntry
+	width              int
+	height             int
+	followTail         bool
+	viewportFrozen     bool
+	frozenChatMessages []tuirender.UIMessage
+	mode               mode
+	page               page
+	status             string
+	busy               bool
+	busySince          time.Time
+	mouseCapture       bool
+	stopping           bool
+	sidebar            bool
+	model              string
+	effort             string
+	thinking           string
+	chatMode           string
+	product            string
+	version            string
+	cwd                string
+	approval           struct {
 		toolCallID string
 		toolName   string
 		reason     string
@@ -210,23 +213,25 @@ func newModel(svc *service.Service, modelName, effort, thinking string) model {
 		thinking = "on"
 	}
 	m := model{
-		svc:            svc,
-		input:          composer.New(),
-		viewport:       vp,
-		assembler:      tuirender.NewAssembler(),
-		status:         "ready",
-		followTail:     true,
-		page:           pageChat,
-		sidebar:        false,
-		logFilterInput: filter,
-		model:          modelName,
-		effort:         effort,
-		thinking:       thinking,
-		chatMode:       "agent",
-		product:        "Whale",
-		version:        resolveVersion(),
-		cwd:            resolveWorkingDirectory(),
-		historyIndex:   -1,
+		svc:              svc,
+		input:            composer.New(),
+		viewport:         vp,
+		chat:             newChatList(),
+		assembler:        tuirender.NewAssembler(),
+		pendingToolCalls: map[string]struct{}{},
+		status:           "ready",
+		followTail:       true,
+		page:             pageChat,
+		sidebar:          false,
+		logFilterInput:   filter,
+		model:            modelName,
+		effort:           effort,
+		thinking:         thinking,
+		chatMode:         "agent",
+		product:          "Whale",
+		version:          resolveVersion(),
+		cwd:              resolveWorkingDirectory(),
+		historyIndex:     -1,
 	}
 	if svc != nil {
 		m.dispatch = svc.Dispatch
@@ -312,29 +317,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.input.SetWidth(max(20, m.width-4))
-		mainWidth, bodyHeight := m.layoutDims()
-		m.viewport.Width = max(10, mainWidth-2)
-		m.viewport.Height = bodyHeight - 2
 		m.refreshViewportContent()
-		return m, nil
+		return m, m.withMouseCaptureCmd()
 	case svcMsg:
 		eventCmd, quit, direct := m.handleServiceEvents([]service.Event{service.Event(msg)})
 		if quit {
-			return m, tea.Quit
+			return m, m.withMouseCaptureCmd(tea.Quit)
 		}
 		if direct {
-			return m, eventCmd
+			return m, m.withMouseCaptureCmd(eventCmd)
 		}
-		return m, tea.Sequence(eventCmd, m.flushNativeScrollbackCmd(), waitEventCmd(m.svc))
+		return m, m.withMouseCaptureCmd(eventCmd, m.flushNativeScrollbackCmd(), waitEventCmd(m.svc))
 	case svcBatchMsg:
 		eventCmd, quit, direct := m.handleServiceEvents([]service.Event(msg))
 		if quit {
-			return m, tea.Quit
+			return m, m.withMouseCaptureCmd(tea.Quit)
 		}
 		if direct {
-			return m, eventCmd
+			return m, m.withMouseCaptureCmd(eventCmd)
 		}
-		return m, tea.Sequence(eventCmd, m.flushNativeScrollbackCmd(), waitEventCmd(m.svc))
+		return m, m.withMouseCaptureCmd(eventCmd, m.flushNativeScrollbackCmd(), waitEventCmd(m.svc))
 	case quitTimeoutMsg:
 		if !m.quitArmedUntil.IsZero() && time.Now().After(m.quitArmedUntil) {
 			m.quitArmedUntil = time.Time{}
@@ -342,40 +344,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "ready"
 			}
 		}
-		return m, nil
+		return m, m.withMouseCaptureCmd()
 	case busyTickMsg:
 		if m.busy {
-			return m, busyTickCmd()
+			return m, m.withMouseCaptureCmd(busyTickCmd())
 		}
-		return m, nil
-	case tea.MouseMsg:
-		m.refreshViewportContent()
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			if m.page == pageChat && m.busy {
-				m.freezeChatViewport()
-			}
-			m.viewport.LineUp(3)
-			if m.page == pageChat {
-				m.followTail = false
-			}
-		case tea.MouseButtonWheelDown:
-			m.viewport.LineDown(3)
-			if m.page == pageChat {
-				m.followTail = m.viewport.AtBottom()
-				if m.followTail {
-					return m, m.resumeChatTail()
-				}
-			}
-		}
-		return m, nil
+		return m, m.withMouseCaptureCmd()
 	case tea.KeyMsg:
 		cmd, quit, handled := m.handleKeyMsg(msg)
 		if quit {
-			return m, tea.Quit
+			return m, m.withMouseCaptureCmd(tea.Quit)
 		}
 		if handled {
-			return m, cmd
+			return m, m.withMouseCaptureCmd(cmd)
+		}
+		if m.consumeMouseCSIFragment(msg) {
+			m.refreshViewportContent()
+			return m, m.withMouseCaptureCmd()
+		}
+	case tea.MouseMsg:
+		if cmd, handled := m.handleMouseMsg(msg); handled {
+			return m, m.withMouseCaptureCmd(cmd)
 		}
 	}
 	prevInput := m.input.Value()
@@ -385,5 +374,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetHistoryNavigation()
 	}
 	m.refreshViewportContent()
-	return m, cmd
+	return m, m.withMouseCaptureCmd(cmd)
+}
+
+func (m *model) withMouseCaptureCmd(cmds ...tea.Cmd) tea.Cmd {
+	out := make([]tea.Cmd, 0, len(cmds)+1)
+	want := m.busy && m.mode == modeChat && m.page == pageChat
+	if want && !m.mouseCapture {
+		m.mouseCapture = true
+		out = append(out, tea.EnableMouseCellMotion)
+	} else if !want && m.mouseCapture {
+		m.mouseCapture = false
+		out = append(out, tea.DisableMouse)
+	}
+	for _, cmd := range cmds {
+		if cmd != nil {
+			out = append(out, cmd)
+		}
+	}
+	return tea.Sequence(out...)
 }

@@ -22,7 +22,7 @@ What should have happened?
 
 ## Environment
 
-- Whale version or commit:
+- Whale version (`whale -V` output):
 - OS:
 - Go version, if built from source:
 

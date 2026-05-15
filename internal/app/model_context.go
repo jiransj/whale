@@ -2,24 +2,14 @@ package app
 
 import "github.com/usewhale/whale/internal/defaults"
 
-const (
-	defaultContextWindow  = defaults.DefaultContextWindow
-	deepSeekV4ContextSize = defaults.DeepSeekV4ContextWindow
-)
-
-func inferredContextWindowForModel(model string) int {
+// contextWindowForModel returns the context window size (in tokens) for the given
+// model name. DeepSeek V4 models get 1M; everything else gets the default 128K.
+func contextWindowForModel(model string) int {
 	if model == "" {
-		return defaultContextWindow
+		return defaults.DefaultContextWindow
 	}
 	if defaults.IsDeepSeekV4Model(model) {
-		return deepSeekV4ContextSize
+		return defaults.DeepSeekV4ContextWindow
 	}
-	return defaultContextWindow
-}
-
-func resolveContextWindow(configWindow int, model string) int {
-	if configWindow > 0 && configWindow != defaultContextWindow {
-		return configWindow
-	}
-	return inferredContextWindowForModel(model)
+	return defaults.DefaultContextWindow
 }

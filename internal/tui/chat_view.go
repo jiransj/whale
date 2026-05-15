@@ -11,7 +11,7 @@ func (m *model) append(role, text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AppendDelta(role, text)
-	m.refreshViewportContentFollow(false)
+	m.refreshLiveViewportContent()
 }
 
 func (m *model) appendNotice(text string) {
@@ -19,7 +19,7 @@ func (m *model) appendNotice(text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AddNotice(text)
-	m.refreshViewportContentFollow(false)
+	m.refreshLiveViewportContent()
 }
 
 func (m *model) beginTurnTranscript() {
@@ -71,7 +71,7 @@ func (m *model) replaceCurrentTurnAssistant(text string) {
 	}
 	m.assembler.RemoveAssistantMessages()
 	m.assembler.AppendDelta("assistant", text)
-	m.refreshViewportContentFollow(false)
+	m.refreshLiveViewportContent()
 }
 
 func (m *model) markNoFinalAnswerIfNeeded() bool {
@@ -106,5 +106,5 @@ func (m *model) appendPlanDelta(text string) {
 		m.assembler = tuirender.NewAssembler()
 	}
 	m.assembler.AddPlanDelta(text)
-	m.refreshViewportContentFollow(false)
+	m.refreshLiveViewportContent()
 }

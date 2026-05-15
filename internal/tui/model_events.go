@@ -75,12 +75,17 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 			m.sawTerminalToolOutcomeThisTurn = true
 		}
 		if !m.updateToolCallFromResult(ev.ToolCallID, ev.ToolName, ev.Text, role, text, ev.Metadata) {
-			m.assembler.AddToolResultWithRole("", text, role)
+			m.markToolCallResolved(ev.ToolCallID)
+			if shouldShowUnmatchedToolResult(ev.ToolName, role, text) {
+				m.assembler.AddToolResultWithRole("", text, role)
+			}
 		}
 		m.addLog(logEntry{Kind: "tool_result", Source: ev.ToolName, Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
 		m.captureDiffMetadata(ev.ToolName, ev.Metadata)
 		m.captureDiff(ev.ToolName, ev.Text)
-		m.commitLiveTranscript(false)
+		if !m.hasPendingToolCalls() {
+			m.commitLiveTranscript(false)
+		}
 	case service.EventTaskStarted:
 		m.status = ev.Text
 		m.addLog(logEntry{Kind: "task_started", Source: ev.ToolName, Summary: ev.Text, Raw: fmt.Sprintf("%+v", ev.Metadata)})
@@ -169,6 +174,7 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		m.status = "skills"
 	case service.EventClearScreen:
 		m.assembler.Reset()
+		m.clearPendingToolCalls()
 		m.resetTranscriptWithHeader()
 		m.resetTurnVisibility()
 		m.logs = nil
@@ -177,6 +183,7 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		return tea.Sequence(clearScreenCmd(), waitEventCmd(m.svc)), false, true
 	case service.EventSessionHydrated:
 		m.assembler.Reset()
+		m.clearPendingToolCalls()
 		m.resetTranscriptWithHeader()
 		m.resetTurnVisibility()
 		m.logs = nil

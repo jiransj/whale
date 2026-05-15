@@ -142,6 +142,7 @@ func (c *Composer) HandleKey(msg tea.KeyMsg) bool {
 }
 
 func (c Composer) View() string {
+	c = c.initialized()
 	var view string
 	if c.rawValue() == "" {
 		copy := c.textarea
@@ -316,17 +317,31 @@ func (c Composer) promptLineAt(line string, first bool, cursor bool, col int) st
 	if first {
 		prefix = lipgloss.NewStyle().Foreground(tuitheme.Default.Accent).Bold(true).Render("›") + " "
 	}
-	if cursor {
-		runes := []rune(line)
-		if col < 0 {
-			col = 0
-		}
-		if col > len(runes) {
-			col = len(runes)
-		}
-		line = string(runes[:col]) + "█" + string(runes[col:])
+	return prefix + renderComposerLineText(line, cursor, col)
+}
+
+func renderComposerLineText(line string, cursor bool, col int) string {
+	runes := []rune(line)
+	if col < 0 {
+		col = 0
 	}
-	return prefix + line
+	if col > len(runes) {
+		col = len(runes)
+	}
+	var out strings.Builder
+	if cursor && col == 0 {
+		out.WriteString("█")
+	}
+	for i, r := range runes {
+		out.WriteRune(r)
+		if cursor && col == i+1 {
+			out.WriteString("█")
+		}
+	}
+	if len(runes) == 0 && cursor && col == 0 {
+		return "█"
+	}
+	return out.String()
 }
 
 func (c Composer) hiddenLine(n int) string {
@@ -446,6 +461,13 @@ func (c *Composer) ensureInitialized() {
 		return
 	}
 	*c = New()
+}
+
+func (c Composer) initialized() Composer {
+	if c.width != 0 {
+		return c
+	}
+	return New()
 }
 
 func (c Composer) rawValue() string {

@@ -52,5 +52,26 @@ func SummarizeHydratedToolCall(call core.ToolCall) string {
 			}
 		}
 	}
+	switch call.Name {
+	case "todo_add", "todo_update":
+		var body map[string]any
+		if err := json.Unmarshal([]byte(call.Input), &body); err == nil {
+			if text, _ := body["text"].(string); strings.TrimSpace(text) != "" {
+				return call.Name + ": " + strings.TrimSpace(text)
+			}
+			if id, _ := body["id"].(string); strings.TrimSpace(id) != "" {
+				return call.Name + ": " + strings.TrimSpace(id)
+			}
+		}
+	case "todo_remove":
+		var body map[string]any
+		if err := json.Unmarshal([]byte(call.Input), &body); err == nil {
+			if id, _ := body["id"].(string); strings.TrimSpace(id) != "" {
+				return call.Name + ": " + strings.TrimSpace(id)
+			}
+		}
+	case "todo_list", "todo_clear_done":
+		return call.Name
+	}
 	return fmt.Sprintf("%s: %s", call.Name, strings.TrimSpace(call.Input))
 }

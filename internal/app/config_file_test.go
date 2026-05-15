@@ -113,7 +113,6 @@ func TestConfigProjectOverridesGlobal(t *testing.T) {
 func TestApplyFileConfigUsesGroupedConfig(t *testing.T) {
 	autoCompact := false
 	compactThreshold := 0.7
-	contextWindow := 256000
 	projectDocEnabled := false
 	projectDocMaxBytes := 12000
 	budgetLimit := 1.25
@@ -128,9 +127,8 @@ func TestApplyFileConfigUsesGroupedConfig(t *testing.T) {
 		Budget: FileBudgetConfig{SessionLimitUSD: &budgetLimit},
 		MCP:    FileMCPConfig{ConfigPath: "~/custom-mcp.json"},
 		Context: FileContextConfig{
-			AutoCompact:        &autoCompact,
-			CompactThreshold:   &compactThreshold,
-			ModelContextWindow: &contextWindow,
+			AutoCompact:      &autoCompact,
+			CompactThreshold: &compactThreshold,
 		},
 		ProjectDoc: FileProjectDocConfig{
 			Enabled:           &projectDocEnabled,
@@ -151,7 +149,7 @@ func TestApplyFileConfigUsesGroupedConfig(t *testing.T) {
 	if cfg.APIBaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
 		t.Fatalf("api base url not applied: %s", cfg.APIBaseURL)
 	}
-	if cfg.AutoCompact || cfg.AutoCompactThreshold != compactThreshold || cfg.ContextWindow != contextWindow {
+	if cfg.AutoCompact || cfg.AutoCompactThreshold != compactThreshold {
 		t.Fatalf("context not applied: %+v", cfg)
 	}
 	if cfg.MemoryEnabled || cfg.MemoryMaxChars != projectDocMaxBytes || cfg.MemoryFileOrder != "AGENTS.md,TEAM.md" {

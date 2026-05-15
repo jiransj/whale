@@ -165,6 +165,17 @@ func TestComposerViewHasNoTrailingNewline(t *testing.T) {
 	}
 }
 
+func TestZeroValueComposerViewUsesDefaultState(t *testing.T) {
+	var c Composer
+	view := c.View()
+	if !strings.Contains(view, "Type message or command") {
+		t.Fatalf("expected zero-value composer view to render default placeholder, got %q", view)
+	}
+	if c.width != 0 {
+		t.Fatalf("expected value-receiver View not to mutate zero-value composer, width=%d", c.width)
+	}
+}
+
 func TestComposerViewPadsVisibleWidth(t *testing.T) {
 	c := New()
 	c.SetWidth(24)

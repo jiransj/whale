@@ -21,7 +21,7 @@ import (
 	"github.com/usewhale/whale/internal/tools"
 )
 
-const CommandsHelp = "/model, /permissions, /ask [prompt], /plan [prompt], /skills, /new [id], /resume, /clear, /status, /stats, /mcp, /compact, /init, /exit"
+const CommandsHelp = "/model, /permissions, /agent, /ask [prompt], /plan [prompt], /skills, /new [id], /resume, /clear, /status, /stats, /mcp, /compact, /init, /exit"
 
 type Config struct {
 	DataDir              string
@@ -31,7 +31,6 @@ type Config struct {
 	DenyPrefixes         string
 	AutoCompact          bool
 	AutoCompactThreshold float64
-	ContextWindow        int
 	MemoryEnabled        bool
 	MemoryMaxChars       int
 	MemoryFileOrder      string
@@ -83,6 +82,7 @@ type App struct {
 	model            string
 	reasoningEffort  string
 	thinkingEnabled  bool
+	contextWindow    int
 	mcpManager       *whalemcp.Manager
 	mcpInitMu        sync.Mutex
 	mcpInitStarted   bool
@@ -100,7 +100,6 @@ func DefaultConfig() Config {
 		ApprovalMode:         string(policy.ApprovalModeOnRequest),
 		AutoCompact:          true,
 		AutoCompactThreshold: defaults.DefaultAutoCompactThreshold,
-		ContextWindow:        defaultContextWindow,
 		MemoryEnabled:        true,
 		MemoryMaxChars:       defaults.DefaultMemoryMaxChars,
 		MemoryFileOrder:      defaults.DefaultMemoryFileOrderCSV,
@@ -193,7 +192,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 	model := firstNonEmpty(strings.TrimSpace(cfg.Model), defaults.DefaultModel)
 	effort := normalizeEffort(firstNonEmpty(strings.TrimSpace(cfg.ReasoningEffort), defaults.DefaultReasoningEffort))
 	thinking := cfg.ThinkingEnabled
-	cfg.ContextWindow = resolveContextWindow(cfg.ContextWindow, model)
+	contextWindow := contextWindowForModel(model)
 	apiKey, err := LoadDeepSeekAPIKey(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("load api key failed: %w", err)
@@ -265,6 +264,7 @@ func New(ctx context.Context, cfg Config, start StartOptions) (*App, error) {
 		model:            model,
 		reasoningEffort:  effort,
 		thinkingEnabled:  thinking,
+		contextWindow:    contextWindow,
 		mcpManager:       mcpManager,
 		apiKey:           apiKey,
 		approvalFn:       defaultApprovalFunc(start.ApprovalFunc),

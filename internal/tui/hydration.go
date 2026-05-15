@@ -49,7 +49,10 @@ func (m *model) hydrateSessionMessages(msgs []core.Message) {
 				}
 				role, text := summarizeToolResultForChat(tr.Name, body)
 				if !m.updateToolCallFromResult(tr.ToolCallID, tr.Name, tr.Content, role, text, tr.Metadata) {
-					m.assembler.AddToolResultWithRole("", text, role)
+					m.markToolCallResolved(tr.ToolCallID)
+					if shouldShowUnmatchedToolResult(tr.Name, role, text) {
+						m.assembler.AddToolResultWithRole("", text, role)
+					}
 				}
 				m.captureDiffMetadata(tr.Name, tr.Metadata)
 			}
