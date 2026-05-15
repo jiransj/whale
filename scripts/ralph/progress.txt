@@ -4,6 +4,7 @@
 - Composer edits should only refresh the chat viewport when `viewportBodyHeight(mainWidth)` changes; same-height edits should leave `chat.SetMessages()` untouched.
 - When only the body height changes at the current width, reuse the existing `chatList` items and sync layout with `chat.SetSize(...)` plus offset clamp or tail scroll; reserve `chat.SetMessages()` for width, page, or content changes.
 - Once tail-only rendering is active on the chat page, the first scroll-away action (`PgUp`, `Ctrl+U`, `Home`) must rebuild the full chat list before changing offsets; otherwise history navigation operates inside a cropped tail window.
+- Long-history composer perf tests should seed hundreds of transcript messages and guard both `chat.generation` and `len(m.chat.items)`; use rune/backspace edit cycles in benchmarks so composer height stays stable and measurements isolate the normal edit path.
 
 ## [2026-05-15 23:47] - [US-001]
 - 实现了聊天 viewport 布局缓存，移除 `View()`/composer 普通编辑路径中的无条件聊天重渲染，只在底部高度变化时才同步真实聊天区。
@@ -64,4 +65,16 @@
   - 如果直接在裁剪后的 `chatList` 上执行 `PgUp` 或 `Home`，用户会被限制在尾部窗口内，看不到更早历史；这个问题不会被单纯的尾部可见性测试捕获。
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - `viewport.TotalLineCount()` 很适合用来断言当前 chat viewport 是完整历史还是 tail-only 裁剪窗口，和 `m.View()` 的可见文本断言搭配使用最稳妥。
+---
+## [2026-05-16 00:36] - [US-005]
+- 增加了 600 条历史消息下的 composer 编辑回归测试，覆盖尾部和离尾两种状态下的连续输入、Backspace、Ctrl+U，断言 `chat.generation` 与 `len(m.chat.items)` 保持稳定且滚动位置不跳动。
+- 增加了 focused benchmark，覆盖 500/1000/2000 条历史消息下的 rune/backspace 编辑循环，用于观察普通编辑路径不会随着 transcript 长度线性触发聊天重渲染。
+- 更改的文件：`internal/tui/model_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - 长历史性能回归最稳的 guard 是同时看 `chat.generation` 和 `len(m.chat.items)`；前者能发现误触发 `SetMessages()`，后者能补充验证 tail/off-tail 视图没有悄悄重建成不同窗口。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - benchmark 如果只持续追加字符，composer 很快会因换行触发合法的高度同步，结果会掺入布局成本；改成 rune/backspace 循环才能更纯粹地观察普通编辑路径。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - `newModel(...)` 默认会带 header transcript；做大规模编辑基准时直接重置 `m.transcript` 再一次性灌入测试消息，更容易隔离聊天历史长度对编辑路径的影响。
 ---

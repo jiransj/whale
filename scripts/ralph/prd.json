@@ -78,7 +78,7 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "不引入虚拟列表、异步渲染 goroutine 或新 TUI 框架。不修改 session 格式、历史消息内容、工具结果摘要、快捷键语义或 UI 样式。",
+      "notes": "",
       "retryCount": 0,
       "blocked": false
     },
@@ -97,7 +97,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "如增加 render generation、width 或 message-count guard，只用于防止 composer 编辑路径误触发 SetMessages()，不得改变 transcript、assembler 或 session 持久化结构。",
       "retryCount": 0,
       "blocked": false
