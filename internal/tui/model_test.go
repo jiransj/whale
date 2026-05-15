@@ -2130,6 +2130,116 @@ func TestComposerEditsDoNotRerenderChatWhenHeightIsStable(t *testing.T) {
 	}
 }
 
+func TestComposerHeightGrowthAtTailUpdatesLayoutWithoutRerender(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("seed")
+	for i := 0; i < 60; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	mainWidth, _ := m.layoutDims()
+	initialBodyHeight := m.viewportBodyHeight(mainWidth)
+	initialGeneration := m.chat.generation
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = next.(model)
+	mainWidth, _ = m.layoutDims()
+	if got := m.viewportBodyHeight(mainWidth); got >= initialBodyHeight {
+		t.Fatalf("expected composer growth to reduce chat body height, got %d want < %d", got, initialBodyHeight)
+	}
+	if got := m.input.Value(); got != "seed\n" {
+		t.Fatalf("expected ctrl+j to add newline, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected composer growth not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if !m.followTail || !m.chat.AtBottom() || !m.viewport.AtBottom() {
+		t.Fatalf("expected tail-follow layout sync to keep latest content visible, follow=%v chatBottom=%v viewportBottom=%v", m.followTail, m.chat.AtBottom(), m.viewport.AtBottom())
+	}
+	if view := m.View(); !strings.Contains(view, "entry-59") {
+		t.Fatalf("expected tail view to keep latest entry visible after composer growth:\n%s", view)
+	}
+}
+
+func TestComposerHeightShrinkOffTailClampsLayoutWithoutRerender(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("seed\n")
+	for i := 0; i < 120; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	tailOffset := m.viewport.YOffset
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	if m.followTail {
+		t.Fatal("expected PageUp to leave tail-follow mode")
+	}
+	mainWidth, _ := m.layoutDims()
+	initialBodyHeight := m.viewportBodyHeight(mainWidth)
+	initialGeneration := m.chat.generation
+	initialOffset := m.viewport.YOffset
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(model)
+	mainWidth, _ = m.layoutDims()
+	if got := m.viewportBodyHeight(mainWidth); got <= initialBodyHeight {
+		t.Fatalf("expected composer shrink to increase chat body height, got %d want > %d", got, initialBodyHeight)
+	}
+	if got := m.input.Value(); got != "seed" {
+		t.Fatalf("expected backspace to remove trailing newline, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected composer shrink not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if m.followTail {
+		t.Fatal("expected off-tail layout sync not to resume tail following")
+	}
+	if m.viewport.YOffset > initialOffset {
+		t.Fatalf("expected off-tail layout sync only to clamp offset, got %d want <= %d", m.viewport.YOffset, initialOffset)
+	}
+	if m.viewport.YOffset >= tailOffset {
+		t.Fatalf("expected off-tail layout sync not to jump back to tail, got %d tail=%d", m.viewport.YOffset, tailOffset)
+	}
+}
+
+func TestCtrlUClearsMultilineComposerWithLayoutSyncOnly(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("alpha\nbeta")
+	for i := 0; i < 60; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	mainWidth, _ := m.layoutDims()
+	initialBodyHeight := m.viewportBodyHeight(mainWidth)
+	initialGeneration := m.chat.generation
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	mainWidth, _ = m.layoutDims()
+	if got := m.viewportBodyHeight(mainWidth); got <= initialBodyHeight {
+		t.Fatalf("expected Ctrl+U clear to free composer height, got %d want > %d", got, initialBodyHeight)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected Ctrl+U to clear multiline composer, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected Ctrl+U clear not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if !m.followTail || !m.chat.AtBottom() {
+		t.Fatalf("expected Ctrl+U clear at tail to keep latest content visible, follow=%v chatBottom=%v", m.followTail, m.chat.AtBottom())
+	}
+}
+
 func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80

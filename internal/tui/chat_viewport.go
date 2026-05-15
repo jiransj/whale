@@ -34,11 +34,12 @@ func (m *model) refreshLiveViewportContent() {
 func (m *model) refreshViewportContentIfBodyHeightChanged(prevMainWidth, prevBodyHeight int) {
 	mainWidth, _ := m.layoutDims()
 	bodyHeight := m.viewportBodyHeight(mainWidth)
-	if !m.viewportLayoutReady ||
-		m.viewportLayoutPage != m.page ||
-		mainWidth != prevMainWidth ||
-		bodyHeight != prevBodyHeight {
+	if !m.viewportLayoutReady || m.viewportLayoutPage != m.page || mainWidth != prevMainWidth {
 		m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+		return
+	}
+	if bodyHeight != prevBodyHeight {
+		m.syncViewportLayoutForBodyHeight(mainWidth, bodyHeight)
 	}
 }
 
@@ -50,6 +51,22 @@ func (m *model) ensureViewportContentForSize(mainWidth, bodyHeight int) {
 		return
 	}
 	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+}
+
+func (m *model) syncViewportLayoutForBodyHeight(mainWidth, bodyHeight int) {
+	if m.page == pageChat {
+		m.chat.SetSize(max(10, mainWidth), max(1, bodyHeight))
+		if !m.viewportFrozen && m.followTail {
+			m.chat.ScrollToBottom()
+		}
+		m.syncViewportFromChat()
+	} else {
+		m.viewport.Height = max(1, bodyHeight-2)
+	}
+	m.viewportLayoutReady = true
+	m.viewportLayoutPage = m.page
+	m.viewportLayoutWidth = mainWidth
+	m.viewportLayoutHeight = bodyHeight
 }
 
 func (m *model) refreshViewportContentForSize(mainWidth, bodyHeight int, forceBottom bool) {

@@ -37,7 +37,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "复用 followTail、viewportFrozen、frozenChatMessages 和 resumeChatTail() 的现有状态语义，不新增第二套 tail/history 状态机。不得改变 Ctrl+U 的 composer 优先清空语义。",
       "retryCount": 0,
       "blocked": false
