@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"runtime"
 	"sort"
 	"strings"
 
@@ -45,7 +46,7 @@ Ask mode is active.
 	}
 	systemBlocks = append(systemBlocks, renderDelegationPolicyBlock())
 	if strings.TrimSpace(a.workspaceRoot) != "" {
-		systemBlocks = append(systemBlocks, "Current Whale workspace root: "+a.workspaceRoot+"\nShell commands run from this directory by default. Do not assume a synthetic path such as /workspace; use relative paths or the shell_run cwd parameter for subdirectories.")
+		systemBlocks = append(systemBlocks, renderRuntimeEnvironmentBlock(runtime.GOOS, a.workspaceRoot))
 	}
 	systemBlocks = append(systemBlocks, renderToolSpecsBlock(a.tools.Specs()))
 	if strings.TrimSpace(a.workspaceRoot) != "" {
@@ -63,6 +64,24 @@ Ask mode is active.
 		}
 	}
 	return systemBlocks
+}
+
+func renderRuntimeEnvironmentBlock(goos, workspaceRoot string) string {
+	var b strings.Builder
+	b.WriteString("Runtime environment.\n\n")
+	b.WriteString("- OS: ")
+	b.WriteString(strings.TrimSpace(goos))
+	b.WriteString("\n")
+	b.WriteString("- Current Whale workspace root: ")
+	b.WriteString(strings.TrimSpace(workspaceRoot))
+	b.WriteString("\n")
+	b.WriteString("- shell_run commands run from the workspace root by default. Do not assume a synthetic path such as /workspace; use relative paths or the shell_run cwd parameter for subdirectories.\n")
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		b.WriteString("- On Windows, shell_run prefers pwsh when available, then falls back to ComSpec or cmd.exe.")
+	} else {
+		b.WriteString("- On Unix-like systems, shell_run uses /bin/sh.")
+	}
+	return b.String()
 }
 
 func renderDelegationPolicyBlock() string {
