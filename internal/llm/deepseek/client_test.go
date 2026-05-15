@@ -12,6 +12,7 @@ import (
 
 	"github.com/usewhale/whale/internal/core"
 	"github.com/usewhale/whale/internal/llm"
+	whaletools "github.com/usewhale/whale/internal/tools"
 )
 
 type fakeTool struct{ n string }
@@ -245,6 +246,42 @@ func TestToDeepSeekTools_FlattensDeepSchema(t *testing.T) {
 	props, _ := params["properties"].(map[string]any)
 	if _, ok := props["payload.file.path"]; !ok {
 		t.Fatalf("expected flattened payload.file.path in properties: %#v", props)
+	}
+}
+
+func TestToDeepSeekToolsIncludesApplyPatchFormatInstructions(t *testing.T) {
+	ts, err := whaletools.NewToolset(t.TempDir())
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	out := toDeepSeekTools(ts.Tools())
+	var fn map[string]any
+	for _, tool := range out {
+		candidate, _ := tool["function"].(map[string]any)
+		if candidate["name"] == "apply_patch" {
+			fn = candidate
+			break
+		}
+	}
+	if fn == nil {
+		t.Fatal("apply_patch tool not sent to provider")
+	}
+	desc, _ := fn["description"].(string)
+	for _, want := range []string{
+		"*** Begin Patch",
+		"*** Update File: path/to/file",
+		"Do not use unified diff headers",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("apply_patch provider description missing %q:\n%s", want, desc)
+		}
+	}
+	params, _ := fn["parameters"].(map[string]any)
+	props, _ := params["properties"].(map[string]any)
+	patchProp, _ := props["patch"].(map[string]any)
+	patchDesc, _ := patchProp["description"].(string)
+	if !strings.Contains(patchDesc, "*** Begin Patch") || !strings.Contains(patchDesc, "Do not send unified diff") {
+		t.Fatalf("patch parameter description missing format guidance: %q", patchDesc)
 	}
 }
 

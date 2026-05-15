@@ -32,22 +32,24 @@ func (b *Toolset) editFile(_ context.Context, call core.ToolCall) (core.ToolResu
 		}
 		return marshalToolError(call, "read_failed", err.Error()), nil
 	}
-	before := string(data)
+	before, lineEndings := normalizeLineEndings(string(data))
 	if in.Search == "" {
 		return marshalToolError(call, "invalid_args", "search is required"), nil
 	}
-	if !strings.Contains(before, in.Search) {
+	search := normalizeLineEndingText(in.Search)
+	replace := normalizeLineEndingText(in.Replace)
+	if !strings.Contains(before, search) {
 		return marshalToolError(call, "search_not_found", "search text not found"), nil
 	}
 	after := ""
 	replacements := 1
 	if in.All {
-		replacements = strings.Count(before, in.Search)
-		after = strings.ReplaceAll(before, in.Search, in.Replace)
+		replacements = strings.Count(before, search)
+		after = strings.ReplaceAll(before, search, replace)
 	} else {
-		after = strings.Replace(before, in.Search, in.Replace, 1)
+		after = strings.Replace(before, search, replace, 1)
 	}
-	if err := os.WriteFile(abs, []byte(after), 0o644); err != nil {
+	if err := os.WriteFile(abs, []byte(restoreLineEndings(after, lineEndings)), 0o644); err != nil {
 		return marshalToolError(call, "write_failed", err.Error()), nil
 	}
 	metadata := fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: after}})
@@ -78,16 +80,18 @@ func (b *Toolset) previewEditFile(_ context.Context, call core.ToolCall) (map[st
 	if err != nil {
 		return nil, err
 	}
-	before := string(data)
+	before, _ := normalizeLineEndings(string(data))
 	if in.Search == "" {
 		return nil, os.ErrInvalid
 	}
-	if !strings.Contains(before, in.Search) {
+	search := normalizeLineEndingText(in.Search)
+	replace := normalizeLineEndingText(in.Replace)
+	if !strings.Contains(before, search) {
 		return nil, os.ErrNotExist
 	}
-	after := strings.Replace(before, in.Search, in.Replace, 1)
+	after := strings.Replace(before, search, replace, 1)
 	if in.All {
-		after = strings.ReplaceAll(before, in.Search, in.Replace)
+		after = strings.ReplaceAll(before, search, replace)
 	}
 	return fileDiffMetadata([]fileChangePreview{{path: in.FilePath, before: before, after: after}}), nil
 }
