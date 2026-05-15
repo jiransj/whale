@@ -395,6 +395,7 @@ func defaultHookSpawner(parent context.Context, in HookSpawnInput) HookSpawnResu
 		return HookSpawnResult{ExitCode: -1, SpawnErr: err}
 	}
 	cmd := exec.CommandContext(ctx, spec.Bin, spec.Args...)
+	shell.ConfigureCommand(cmd)
 	if in.CWD != "" {
 		cmd.Dir = in.CWD
 	}

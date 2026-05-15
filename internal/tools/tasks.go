@@ -97,7 +97,7 @@ func runShellBackground(ctx context.Context, dir, command string, task *shellTas
 		return
 	}
 	cmd := exec.CommandContext(ctx, spec.Bin, spec.Args...)
-	configureShellCommand(cmd)
+	shell.ConfigureCommand(cmd)
 	cmd.Dir = dir
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
