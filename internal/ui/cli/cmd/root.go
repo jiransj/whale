@@ -48,6 +48,12 @@ func prepareCLIConfig(cmd *cobra.Command, opts *cliOptions) error {
 		cfg.Model = flagCfg.Model
 		cfg.ModelExplicit = true
 	}
+	if flagChanged(cmd, "thinking") {
+		cfg.ThinkingEnabled = flagCfg.ThinkingEnabled
+	}
+	if flagChanged(cmd, "effort") {
+		cfg.ReasoningEffort = flagCfg.ReasoningEffort
+	}
 	opts.cfg = cfg
 	return validateModel(opts.cfg.Model)
 }

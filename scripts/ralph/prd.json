@@ -18,7 +18,7 @@
       ],
       "priority": 1,
       "passes": true,
-      "notes": "实现入口优先查看 internal/ui/cli/cmd/root.go。未使用 implement/technical-cli-thinking-effort-params.md，因为该文件不存在；约束来自 PRD 的 Technical Considerations。",
+      "notes": "",
       "retryCount": 0,
       "blocked": false
     },
@@ -38,7 +38,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "复用 app.Config.ThinkingEnabled、app.Config.ReasoningEffort 和 prepareCLIConfig 的一次性覆盖模式；不得新增配置字段。",
       "retryCount": 0,
       "blocked": false

@@ -193,6 +193,140 @@ func TestPrepareCLIConfigPreservesConfiguredThinking(t *testing.T) {
 	}
 }
 
+func TestPrepareCLIConfigExplicitThinkingFalseOverridesConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	thinking := true
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{ThinkingEnabled: &thinking}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("thinking", "false"); err != nil {
+		t.Fatalf("set thinking: %v", err)
+	}
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if opts.cfg.ThinkingEnabled {
+		t.Fatal("thinking_enabled should be overridden to false")
+	}
+
+	loaded, _, err := app.LoadConfigFile(app.GlobalConfigPath(dataDir))
+	if err != nil {
+		t.Fatalf("LoadConfigFile: %v", err)
+	}
+	if loaded.ThinkingEnabled == nil || !*loaded.ThinkingEnabled {
+		t.Fatal("global config should remain unchanged")
+	}
+}
+
+func TestPrepareCLIConfigExplicitThinkingTrueOverridesConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	thinking := false
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{ThinkingEnabled: &thinking}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("thinking", "true"); err != nil {
+		t.Fatalf("set thinking: %v", err)
+	}
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if !opts.cfg.ThinkingEnabled {
+		t.Fatal("thinking_enabled should be overridden to true")
+	}
+}
+
+func TestPrepareCLIConfigExplicitEffortOverridesConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{ReasoningEffort: "high"}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("effort", "max"); err != nil {
+		t.Fatalf("set effort: %v", err)
+	}
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if opts.cfg.ReasoningEffort != "max" {
+		t.Fatalf("reasoning_effort: want max, got %s", opts.cfg.ReasoningEffort)
+	}
+}
+
+func TestPrepareCLIConfigKeepsUnspecifiedThinkingAndEffortFromConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	workspace := t.TempDir()
+	thinking := true
+	if err := app.SaveConfigFile(app.GlobalConfigPath(dataDir), app.FileConfig{
+		ReasoningEffort: "max",
+		ThinkingEnabled: &thinking,
+	}); err != nil {
+		t.Fatalf("save global config: %v", err)
+	}
+
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	opts.cfg.DataDir = dataDir
+	root := newRootCmd(opts)
+	if err := prepareCLIConfig(root, opts); err != nil {
+		t.Fatalf("prepareCLIConfig: %v", err)
+	}
+	if !opts.cfg.ThinkingEnabled {
+		t.Fatal("thinking_enabled should stay true from config")
+	}
+	if opts.cfg.ReasoningEffort != "max" {
+		t.Fatalf("reasoning_effort: want max from config, got %s", opts.cfg.ReasoningEffort)
+	}
+}
+
 func TestReadExecPromptPrefersArg(t *testing.T) {
 	got, err := readExecPrompt(strings.NewReader("stdin prompt"), []string{"arg prompt"})
 	if err != nil {

@@ -1,6 +1,7 @@
 ## Codebase Patterns
 - Root-level CLI flags shared by `whale`, `whale exec`, and `whale resume` should be declared in `internal/ui/cli/cmd/root.go` via `bindPersistentFlags`.
 - CLI startup config flows through `prepareCLIConfig`, which calls `app.LoadAndApplyConfig`; one-time command-line overrides should hook into that shared path instead of being re-parsed in subcommands.
+- For CLI flags that may be explicitly passed with a default-valued result such as `--thinking=false`, re-apply the override after `LoadAndApplyConfig` using `flagChanged(cmd, name)` so config-file values do not win accidentally.
 - The Go test suite can be affected by ambient `DEEPSEEK_API_KEY`; unset it when running `make test` if credential fallback tests fail unexpectedly.
 
 ## 2026-05-15 18:03 - US-001
@@ -16,4 +17,18 @@
   - 当前环境里的 `DEEPSEEK_API_KEY` 会让 `LoadDeepSeekAPIKeyFallsBackToCredentials` 误失败，跑全量测试时需要清空该变量。
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - `app.Config` 已经包含 `ThinkingEnabled` 和 `ReasoningEffort`，后续 story 不需要新增配置字段，只需复用共享配置准备链路。
+---
+## 2026-05-15 18:26 - US-002
+- 在 `prepareCLIConfig` 中新增 `thinking` 和 `effort` 的显式覆盖回放，让 `LoadAndApplyConfig` 合并配置后仍能保留本次 CLI 一次性覆盖。
+- 新增 CLI 配置测试，覆盖 `--thinking=false`、`--thinking=true`、`--effort=max` 覆盖配置文件，以及未传参时继续沿用配置值；同时确认一次性覆盖不会写回全局配置文件。
+- 更改的文件：`internal/ui/cli/cmd/root.go`、`internal/ui/cli/cmd/commands_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - `prepareCLIConfig` 里先拿 `flagCfg := opts.cfg` 再 `LoadAndApplyConfig`，适合在合并后按 `flagChanged` 回放一次性 CLI 覆盖，而不需要扩展 `app.Config` 结构。
+  - CLI 覆盖是否误持久化，最便宜的回归方式是读取原始 `config.toml` 再断言内容未变化。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - `overlayExplicitConfig` 只会在值偏离默认值时覆盖，因此像 `--thinking=false` 这种“显式传入默认值”的场景不能只依赖它。
+  - `root.PersistentFlags().Set(...)` 会同时更新 flag 值和 `Changed` 状态，适合直接驱动 `prepareCLIConfig` 的单元测试。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - 当前代码库还没有独立的 CLI lint 目标，Ralph 迭代里的质量门主要依赖 `make fmt-check`、`make vet`、`make test` 和 `make build`。
 ---
