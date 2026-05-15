@@ -36,6 +36,18 @@ Whale reads user-editable configuration from:
 Project config overrides global config. The `--model` CLI flag can override
 the configured model for one run.
 
+Whale also supports one-time CLI overrides for reasoning settings:
+
+```bash
+whale --thinking=false
+whale exec --effort=max "summarize this repo"
+whale resume <session-id> --thinking=true --effort=high
+```
+
+`--thinking` and `--effort` are runtime-only overrides. Whale applies them
+after merging default, global, and project config for the current process, and
+it does not write them back to `config.toml`.
+
 Example:
 
 ```toml
@@ -92,7 +104,8 @@ If you started with Whale v0.1.9 or newer, you do not need this command.
 
 - `whale exec` and the interactive TUI use the same underlying tool loop.
 - Normal approval behavior still applies in headless mode.
-- Reasoning effort and thinking are configured in `config.toml`.
+- `reasoning_effort` and `thinking_enabled` in `config.toml` remain the
+  long-term defaults when `--effort` or `--thinking` are not passed.
 - `DEEPSEEK_BASE_URL` overrides `[api].base_url`; if neither is set, Whale uses
   `https://api.deepseek.com`.
 - Skill enable/disable choices are stored in project config under

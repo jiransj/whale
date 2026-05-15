@@ -80,7 +80,7 @@
       ],
       "priority": 4,
       "passes": true,
-      "notes": "不得将未公开的新 effort 值静默接受或映射为其他档位。",
+      "notes": "",
       "retryCount": 0,
       "blocked": false
     },
@@ -99,7 +99,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "这是 CLI/TUI 终端功能，不涉及 Web 前端；不需要 agent-browser 浏览器验证。",
       "retryCount": 0,
       "blocked": false

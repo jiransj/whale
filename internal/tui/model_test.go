@@ -1410,12 +1410,17 @@ func TestChatTranscriptRetainsLocalCommandResultsAcrossSubmits(t *testing.T) {
 }
 
 func TestChatStartupHeaderRendersInsideViewportHeight(t *testing.T) {
-	m := newModel(nil, "deepseek-v4-flash", "high", "on")
+	m := newModel(nil, "deepseek-v4-flash", "max", "off")
 	m.width = 80
 	m.height = 10
 	view := m.View()
 	if !strings.Contains(view, "▸ Whale") {
 		t.Fatalf("expected startup header in chat view:\n%s", view)
+	}
+	for _, want := range []string{"effort: max", "thinking: off"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected startup header to contain %q:\n%s", want, view)
+		}
 	}
 	if got := strings.Count(strings.TrimRight(view, "\n"), "\n") + 1; got != m.height {
 		t.Fatalf("expected view to keep terminal height %d, got %d:\n%s", m.height, got, view)
@@ -2139,6 +2144,17 @@ func TestChatBusyViewShowsWorkingAboveComposer(t *testing.T) {
 	if strings.Index(view, "Working (12s)") > strings.Index(view, "Type message or command") {
 		t.Fatalf("working status line should appear above composer:\n%s", view)
 	}
+}
+
+func TestChatFooterShowsEffectiveThinkingAndEffort(t *testing.T) {
+	m := newModel(nil, "deepseek-v4-pro", "max", "off")
+	m.width = 80
+	m.height = 24
+
+	view := m.View()
+	assertFooterLastLine(t, view, "model: deepseek-v4-pro")
+	assertFooterLastLine(t, view, "effort: max")
+	assertFooterLastLine(t, view, "thinking: off")
 }
 
 func TestChatStoppingViewShowsStoppingAboveComposer(t *testing.T) {

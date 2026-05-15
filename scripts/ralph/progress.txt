@@ -5,6 +5,7 @@
 - When a public CLI flag should reject legacy aliases, validate the explicit raw input in `prepareCLIConfig` against both the normalized value and the public supported list so values like `low` or `xhigh` are rejected instead of silently remapped.
 - Resuming an existing session should keep persisted session meta untouched until a new turn is written; startup-time CLI overrides belong in runtime state, not in `*.meta.json`.
 - The Go test suite can be affected by ambient `DEEPSEEK_API_KEY`; unset it when running `make test` if credential fallback tests fail unexpectedly.
+- Effective CLI runtime state should be displayed from shared app/runtime fields through `StartupLines()`, `buildStatus()`, and the TUI footer/header, rather than from raw flag values, so config-driven and one-shot override paths stay consistent.
 
 ## 2026-05-15 18:03 - US-001
 - 实现了 root persistent flags `--thinking` 和 `--effort`，让交互式启动、`exec`、`resume` 共享同一套一次性推理参数入口。
@@ -61,4 +62,18 @@
   - `App.SupportedEfforts()` 如果仍保留单独字面量，后续很容易和 CLI 校验口径漂移，最好统一走共享 helper。
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - 当前 story 不涉及 Web 前端，按任务说明无需浏览器验证；CLI 级别回归已经能覆盖 `exec` 入口的提前失败语义。
+---
+## 2026-05-15 19:09 - US-005
+- 更新 TUI 启动 header，直接展示本次运行实际生效的 `effort` 和 `thinking`，让交互式启动阶段就能确认 CLI 一次性覆盖结果。
+- 补充回归测试，覆盖 `StartupLines()`、`/status` 对应的 `buildStatus()`、以及 TUI footer 对实际 `effort/thinking` 的展示；同时更新 `docs/configuration.md`，说明 `--thinking` 和 `--effort` 是不会写回配置文件的一次性覆盖。
+- 更改的文件：`internal/tui/chat_transcript.go`、`internal/tui/render.go`、`internal/tui/model_test.go`、`internal/app/commands_test.go`、`docs/configuration.md`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - 启动可见状态的回归测试可以直接落在 `App.StartupLines()` 和 `buildStatus()`，不需要为了验证 CLI 覆盖去启动整套 TUI/service。
+  - `newModel` 初始化出来的 header/footer 是独立于 service 事件的第一屏展示，涉及运行态状态可见性时这里也要一起检查。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - 只更新 footer 不足以满足“启动即确认”的需求；TUI 还有一条单独的 header banner，需要和 footer/status 保持同一口径。
+  - `scripts/ralph/prd.json` 在多轮 Ralph 迭代中会持续处于已修改状态，提交前要确认只把当前 story 的 `passes` 向前推进，不要误改其他 story 字段。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - 本 story 仍然是 CLI/TUI 终端功能，不涉及 Web 前端；按任务说明无需 agent-browser 验证。
 ---
