@@ -22,6 +22,14 @@ func (m *model) appendNotice(text string) {
 	m.refreshLiveViewportContent()
 }
 
+func (m *model) appendLiveToolResult(text, role string) {
+	if m.assembler == nil {
+		m.assembler = tuirender.NewAssembler()
+	}
+	m.assembler.AddToolResultWithRole("", text, role)
+	m.refreshLiveViewportContent()
+}
+
 func (m *model) beginTurnTranscript() {
 	m.turnTranscriptStart = len(m.transcript)
 	m.visibleAssistantThisTurn = ""

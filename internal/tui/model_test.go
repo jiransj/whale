@@ -2799,6 +2799,53 @@ func TestMultipleToolResultsWaitForPendingToolCallsBeforeCommit(t *testing.T) {
 	}
 }
 
+func TestUnmatchedToolResultRefreshesLiveViewportWhilePendingCallsRemain(t *testing.T) {
+	m := model{
+		assembler:  tuirender.NewAssembler(),
+		mode:       modeChat,
+		page:       pageChat,
+		width:      100,
+		height:     16,
+		followTail: true,
+	}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-1",
+		ToolName:   "shell_run",
+		Text:       `shell_run: {"command":"echo first"}`,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-2",
+		ToolName:   "shell_run",
+		Text:       `shell_run: {"command":"echo second"}`,
+	}))
+	m = next.(model)
+
+	beforeGeneration := m.chat.generation
+	beforeView := m.View()
+
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"duration_ms":12},"payload":{"stdout":"visible output"}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "missing-id",
+		ToolName:   "shell_run",
+		Text:       raw,
+	}))
+	m = next.(model)
+
+	if m.chat.generation <= beforeGeneration {
+		t.Fatalf("expected unmatched live tool result to refresh chat viewport, generation before=%d after=%d", beforeGeneration, m.chat.generation)
+	}
+	if got := m.View(); got == beforeView || !strings.Contains(got, "visible output") {
+		t.Fatalf("expected unmatched live tool result to appear in chat viewport:\n%s", got)
+	}
+	if got := len(m.assembler.Snapshot()); got != 3 {
+		t.Fatalf("expected pending tool calls plus unmatched result to remain live, got %d", got)
+	}
+}
+
 func TestTaskToolResultSummaries(t *testing.T) {
 	rawParallel := `{"ok":true,"success":true,"data":{"model":"deepseek-v4-flash","results":[{"index":0,"output":"a"},{"index":1,"output":"b"}]},"metadata":{"duration_ms":42}}`
 	role, got := summarizeToolResultForChat("parallel_reason", rawParallel)

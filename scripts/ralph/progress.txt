@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Chat transcript and live assembler mutations should call `refreshViewportContentFollow(...)` or `refreshLiveViewportContent()` explicitly; do not rely on `View()` to rebuild persistent chat state.
+- Live tool results that cannot reconcile to an existing tool cell still need an explicit `refreshLiveViewportContent()`; otherwise they stay invisible until the remaining pending tool calls finally commit.
 - Composer edits should only refresh the chat viewport when `viewportBodyHeight(mainWidth)` changes; same-height edits should leave `chat.SetMessages()` untouched.
 - When only the body height changes at the current width, reuse the existing `chatList` items and sync layout with `chat.SetSize(...)` plus offset clamp or tail scroll; reserve `chat.SetMessages()` for width, page, or content changes.
 
@@ -37,4 +38,16 @@
   - `refreshViewportContentIfBodyHeightChanged()` 同时服务 chat 和非 chat 页面；抽轻量同步时要保留 logs/diff 页对 `viewport.Height` 的更新，否则底部输入区变化会让非 chat 页面高度缓存失真。
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - `chat.generation` 已经是判断是否误走完整聊天重渲染路径的最好探针，适合继续用于 composer 性能相关回归测试。
+---
+## [2026-05-16 00:22] - [US-003]
+- 补齐了未匹配 live `tool result` 的显式聊天刷新入口；当结果无法回填到现有 tool cell、且仍有 pending tool calls 时，现在也会立即刷新聊天区，而不是等到最终 commit 才显示。
+- 增加了 TUI 回归测试，覆盖 pending tool calls 仍存在时的未匹配 `tool result` 可见性，确保聊天 viewport 会立刻重绘。
+- 更改的文件：`internal/tui/chat_view.go`、`internal/tui/model_events.go`、`internal/tui/model_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - live 更新不只是 assistant delta；任何直接写 assembler、但又不马上 commit transcript 的事件路径，都需要显式刷新聊天 viewport。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - `EventToolResult` 的未匹配分支如果只追加 assembler 而不刷新，在仍有 pending tool calls 时，UI 会一直停留在旧视图，直到最后一次 commit 才突然出现结果。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - `chat.generation` 很适合拿来断言 service event 是否真的触发了聊天区重建，比只看 transcript/assembler 更能直接反映 viewport 刷新行为。
 ---

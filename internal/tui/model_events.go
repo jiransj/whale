@@ -77,7 +77,7 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		if !m.updateToolCallFromResult(ev.ToolCallID, ev.ToolName, ev.Text, role, text, ev.Metadata) {
 			m.markToolCallResolved(ev.ToolCallID)
 			if shouldShowUnmatchedToolResult(ev.ToolName, role, text) {
-				m.assembler.AddToolResultWithRole("", text, role)
+				m.appendLiveToolResult(text, role)
 			}
 		}
 		m.addLog(logEntry{Kind: "tool_result", Source: ev.ToolName, Summary: truncateLine(ev.Text, 120), Raw: ev.Text})
