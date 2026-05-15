@@ -1753,6 +1753,29 @@ func TestChatViewportBusyFollowTailUsesTailRenderWindow(t *testing.T) {
 	}
 }
 
+func TestChatViewportIdleFollowTailUsesTailRenderWindow(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 200; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.refreshViewportContentFollow(false)
+
+	lineLimit := max(chatTailRenderLineFloor, m.viewportBodyHeight(m.width)*4)
+	if lines := m.viewport.TotalLineCount(); lines > lineLimit {
+		t.Fatalf("expected idle tail-follow render to keep a bounded line window, got %d lines", lines)
+	}
+	view := m.View()
+	if strings.Contains(view, "entry-000") {
+		t.Fatalf("expected old transcript lines to be outside the idle tail render window:\n%s", view)
+	}
+	if !strings.Contains(view, "entry-199") {
+		t.Fatalf("expected latest transcript lines to remain visible in idle tail render window:\n%s", view)
+	}
+}
+
 func TestChatViewportBusyFollowTailCropsSingleLargeLiveMessage(t *testing.T) {
 	for _, height := range []int{8, 10, 20} {
 		t.Run(fmt.Sprintf("height_%d", height), func(t *testing.T) {
@@ -1779,6 +1802,34 @@ func TestChatViewportBusyFollowTailCropsSingleLargeLiveMessage(t *testing.T) {
 				t.Fatalf("expected cropped single-message live tail to remain visible:\n%s", view)
 			}
 		})
+	}
+}
+
+func TestChatViewportHomeFromIdleTailRenderRestoresFullHistory(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 200; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.refreshViewportContentFollow(false)
+	tailLines := m.viewport.TotalLineCount()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m = next.(model)
+	if m.followTail {
+		t.Fatal("expected Home from idle tail render to disable tail following")
+	}
+	if fullLines := m.viewport.TotalLineCount(); fullLines <= tailLines {
+		t.Fatalf("expected Home from idle tail render to restore full scrollable content, tail=%d full=%d", tailLines, fullLines)
+	}
+	view := m.View()
+	if !strings.Contains(view, "entry-000") {
+		t.Fatalf("expected Home from idle tail render to restore early history:\n%s", view)
+	}
+	if strings.Contains(view, "entry-199") {
+		t.Fatalf("expected Home from idle tail render to move away from the latest tail:\n%s", view)
 	}
 }
 

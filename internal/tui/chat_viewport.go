@@ -111,7 +111,7 @@ func (m *model) refreshViewportContentForSize(mainWidth, bodyHeight int, forceBo
 }
 
 func (m *model) shouldRenderChatTailOnly(forceBottom bool) bool {
-	return m.page == pageChat && m.busy && m.followTail && !m.viewportFrozen && !forceBottom
+	return m.page == pageChat && m.followTail && !m.viewportFrozen && !forceBottom
 }
 
 func (m *model) freezeChatViewport() {
