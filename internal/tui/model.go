@@ -39,37 +39,41 @@ const (
 )
 
 type model struct {
-	svc                *service.Service
-	dispatch           func(service.Intent)
-	input              composer.Composer
-	viewport           viewport.Model
-	chat               chatList
-	assembler          *tuirender.Assembler
-	pendingToolCalls   map[string]struct{}
-	transcript         []tuirender.UIMessage
-	logs               []logEntry
-	diffs              []diffEntry
-	width              int
-	height             int
-	followTail         bool
-	viewportFrozen     bool
-	frozenChatMessages []tuirender.UIMessage
-	mode               mode
-	page               page
-	status             string
-	busy               bool
-	busySince          time.Time
-	mouseCapture       bool
-	stopping           bool
-	sidebar            bool
-	model              string
-	effort             string
-	thinking           string
-	chatMode           string
-	product            string
-	version            string
-	cwd                string
-	approval           struct {
+	svc                  *service.Service
+	dispatch             func(service.Intent)
+	input                composer.Composer
+	viewport             viewport.Model
+	chat                 chatList
+	assembler            *tuirender.Assembler
+	pendingToolCalls     map[string]struct{}
+	transcript           []tuirender.UIMessage
+	logs                 []logEntry
+	diffs                []diffEntry
+	width                int
+	height               int
+	followTail           bool
+	viewportFrozen       bool
+	frozenChatMessages   []tuirender.UIMessage
+	viewportLayoutReady  bool
+	viewportLayoutPage   page
+	viewportLayoutWidth  int
+	viewportLayoutHeight int
+	mode                 mode
+	page                 page
+	status               string
+	busy                 bool
+	busySince            time.Time
+	mouseCapture         bool
+	stopping             bool
+	sidebar              bool
+	model                string
+	effort               string
+	thinking             string
+	chatMode             string
+	product              string
+	version              string
+	cwd                  string
+	approval             struct {
 		toolCallID string
 		toolName   string
 		reason     string
@@ -351,11 +355,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.withMouseCaptureCmd()
 	case tea.KeyMsg:
+		prevMainWidth, _ := m.layoutDims()
+		prevBodyHeight := m.viewportBodyHeight(prevMainWidth)
 		cmd, quit, handled := m.handleKeyMsg(msg)
 		if quit {
 			return m, m.withMouseCaptureCmd(tea.Quit)
 		}
 		if handled {
+			m.refreshViewportContentIfBodyHeightChanged(prevMainWidth, prevBodyHeight)
 			return m, m.withMouseCaptureCmd(cmd)
 		}
 		if m.consumeMouseCSIFragment(msg) {
@@ -367,13 +374,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.withMouseCaptureCmd(cmd)
 		}
 	}
+	prevMainWidth, _ := m.layoutDims()
+	prevBodyHeight := m.viewportBodyHeight(prevMainWidth)
 	prevInput := m.input.Value()
 	cmd := m.input.Update(msg)
 	m.updateSlashMatches()
 	if m.inHistoryNav && m.input.Value() != prevInput {
 		m.resetHistoryNavigation()
 	}
-	m.refreshViewportContent()
+	m.refreshViewportContentIfBodyHeightChanged(prevMainWidth, prevBodyHeight)
 	return m, m.withMouseCaptureCmd(cmd)
 }
 

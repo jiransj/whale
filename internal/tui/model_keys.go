@@ -24,7 +24,6 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 		m.input.HandlePaste(string(msg.Runes))
 		m.resetHistoryNavigation()
 		m.updateSlashMatches()
-		m.refreshViewportContent()
 		return nil, false, true
 	}
 	if m.mode == modeChat {
@@ -396,7 +395,6 @@ func (m *model) handleComposerKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 		m.input.InsertNewline()
 		m.resetHistoryNavigation()
 		m.updateSlashMatches()
-		m.refreshViewportContent()
 		return nil, true
 	case "ctrl+p":
 		m.historyPrev()
@@ -408,7 +406,6 @@ func (m *model) handleComposerKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	if m.input.HandleKey(msg) {
 		m.resetHistoryNavigation()
 		m.updateSlashMatches()
-		m.refreshViewportContent()
 		return nil, true
 	}
 	return nil, false

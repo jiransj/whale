@@ -1,0 +1,16 @@
+## Codebase Patterns
+- Chat transcript and live assembler mutations should call `refreshViewportContentFollow(...)` or `refreshLiveViewportContent()` explicitly; do not rely on `View()` to rebuild persistent chat state.
+- Composer edits should only refresh the chat viewport when `viewportBodyHeight(mainWidth)` changes; same-height edits should leave `chat.SetMessages()` untouched.
+
+## [2026-05-15 23:47] - [US-001]
+- 实现了聊天 viewport 布局缓存，移除 `View()`/composer 普通编辑路径中的无条件聊天重渲染，只在底部高度变化时才同步真实聊天区。
+- 增加了 TUI 回归测试，验证同高度的 composer 输入与 Backspace 不会触发聊天区重新 `SetMessages()`，同时保持滚动位置不跳动。
+- 更改的文件：`internal/tui/model.go`、`internal/tui/render.go`、`internal/tui/chat_viewport.go`、`internal/tui/model_keys.go`、`internal/tui/chat_list.go`、`internal/tui/model_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - 聊天页的真实渲染状态需要在 `Update()` 路径内显式落到 `model.chat` / `model.viewport`，因为 `View()` 使用值接收者，只适合按需补画，不适合作为持久状态同步入口。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - `refreshViewportContentForSize()` 的 chat 分支如果提前返回而不写回布局缓存，会让后续每次 composer 编辑都被误判为需要全量刷新。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - `chatList.SetMessages()` 是聊天历史重建的集中入口；给它加 generation 计数后，可以直接在 TUI 测试里断言普通编辑是否误触发了全量重渲染。
+---

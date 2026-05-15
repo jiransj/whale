@@ -2092,6 +2092,44 @@ func TestCtrlUStillClearsComposerInsteadOfScrollingTranscript(t *testing.T) {
 	}
 }
 
+func TestComposerEditsDoNotRerenderChatWhenHeightIsStable(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("seed\nline")
+	for i := 0; i < 60; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	initialGeneration := m.chat.generation
+	initialOffset := m.viewport.YOffset
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = next.(model)
+	if got := m.input.Value(); got != "seed\nlinea" {
+		t.Fatalf("expected rune input to update composer, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected rune input not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if m.viewport.YOffset != initialOffset {
+		t.Fatalf("expected rune input not to move chat offset, got %d want %d", m.viewport.YOffset, initialOffset)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(model)
+	if got := m.input.Value(); got != "seed\nline" {
+		t.Fatalf("expected backspace to update composer, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected backspace not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if m.viewport.YOffset != initialOffset {
+		t.Fatalf("expected backspace not to move chat offset, got %d want %d", m.viewport.YOffset, initialOffset)
+	}
+}
+
 func TestChatLiveViewRendersWithoutViewportFrame(t *testing.T) {
 	m := newModel(nil, "", "", "")
 	m.width = 80

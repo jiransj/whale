@@ -31,6 +31,27 @@ func (m *model) refreshLiveViewportContent() {
 	m.refreshViewportContentFollow(false)
 }
 
+func (m *model) refreshViewportContentIfBodyHeightChanged(prevMainWidth, prevBodyHeight int) {
+	mainWidth, _ := m.layoutDims()
+	bodyHeight := m.viewportBodyHeight(mainWidth)
+	if !m.viewportLayoutReady ||
+		m.viewportLayoutPage != m.page ||
+		mainWidth != prevMainWidth ||
+		bodyHeight != prevBodyHeight {
+		m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+	}
+}
+
+func (m *model) ensureViewportContentForSize(mainWidth, bodyHeight int) {
+	if m.viewportLayoutReady &&
+		m.viewportLayoutPage == m.page &&
+		m.viewportLayoutWidth == mainWidth &&
+		m.viewportLayoutHeight == bodyHeight {
+		return
+	}
+	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+}
+
 func (m *model) refreshViewportContentForSize(mainWidth, bodyHeight int, forceBottom bool) {
 	content := ""
 	if m.page == pageChat {
@@ -51,6 +72,10 @@ func (m *model) refreshViewportContentForSize(mainWidth, bodyHeight int, forceBo
 			m.chat.ScrollToBottom()
 		}
 		m.syncViewportFromChat()
+		m.viewportLayoutReady = true
+		m.viewportLayoutPage = m.page
+		m.viewportLayoutWidth = mainWidth
+		m.viewportLayoutHeight = bodyHeight
 		return
 	}
 	m.viewport.Width = max(10, mainWidth-2)
@@ -62,6 +87,10 @@ func (m *model) refreshViewportContentForSize(mainWidth, bodyHeight int, forceBo
 		content = strings.Join(m.renderDiffs(), "\n")
 	}
 	m.viewport.SetContent(content)
+	m.viewportLayoutReady = true
+	m.viewportLayoutPage = m.page
+	m.viewportLayoutWidth = mainWidth
+	m.viewportLayoutHeight = bodyHeight
 }
 
 func (m *model) shouldRenderChatTailOnly(forceBottom bool) bool {

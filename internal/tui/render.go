@@ -17,7 +17,7 @@ func (m model) renderBody(mainWidth, bodyHeight int) string {
 	if bodyHeight <= 0 {
 		return ""
 	}
-	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
+	m.ensureViewportContentForSize(mainWidth, bodyHeight)
 	if m.page != pageChat {
 		return lipgloss.NewStyle().
 			Width(mainWidth).
