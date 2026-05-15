@@ -2,6 +2,7 @@
 - Root-level CLI flags shared by `whale`, `whale exec`, and `whale resume` should be declared in `internal/ui/cli/cmd/root.go` via `bindPersistentFlags`.
 - CLI startup config flows through `prepareCLIConfig`, which calls `app.LoadAndApplyConfig`; one-time command-line overrides should hook into that shared path instead of being re-parsed in subcommands.
 - For CLI flags that may be explicitly passed with a default-valued result such as `--thinking=false`, re-apply the override after `LoadAndApplyConfig` using `flagChanged(cmd, name)` so config-file values do not win accidentally.
+- When a public CLI flag should reject legacy aliases, validate the explicit raw input in `prepareCLIConfig` against both the normalized value and the public supported list so values like `low` or `xhigh` are rejected instead of silently remapped.
 - Resuming an existing session should keep persisted session meta untouched until a new turn is written; startup-time CLI overrides belong in runtime state, not in `*.meta.json`.
 - The Go test suite can be affected by ambient `DEEPSEEK_API_KEY`; unset it when running `make test` if credential fallback tests fail unexpectedly.
 
@@ -46,4 +47,18 @@
   - 旧测试里默认把 legacy session 的空 `Workspace` 当成“恢复时应立刻补写”，这与“resume 只影响后续新模型调用”的语义冲突，修改行为时要同步收紧断言。
   - 有用的上下文（例如，"评估面板在 component X 中"）
   - `runExec` 不会输出 startup lines，适合用 HTTP stub 精确检查本次 provider payload，同时验证 text/json 输出契约未被 CLI 覆盖参数影响。
+---
+## 2026-05-15 18:57 - US-004
+- 在 `prepareCLIConfig` 中新增共享 `effort` 启动校验，显式传入的值现在只接受公开档位 `high` 和 `max`；像 `low`、`medium`、`xhigh` 这类历史映射值会在进入 TUI、`exec` 或 `resume` 前被拒绝。
+- 导出共享的 effort 支持列表与归一化函数，避免 CLI 校验和运行态支持口径分叉；补充 CLI 回归测试，覆盖别名被拒绝以及 `exec` 子命令提前失败。
+- 更改的文件：`internal/app/app.go`、`internal/app/helpers.go`、`internal/ui/cli/cmd/root.go`、`internal/ui/cli/cmd/commands_test.go`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **未来迭代的学习：**
+  - 发现的 patterns（例如，"这个 codebase 使用 X 来做 Y"）
+  - 公共 CLI 参数的显式输入校验应放在 `prepareCLIConfig`，这样 root、`exec`、`resume` 会自动共享相同的启动拒绝语义。
+  - 如果代码里保留了兼容旧配置的 `normalizeEffort` 映射，面向用户的新 CLI 参数不能只检查归一化结果，否则会把未公开档位错误地“纠正”为公开值。
+  - 遇到的陷阱（例如，"更改 W 时不要忘记更新 Z"）
+  - Cobra 在 `Execute()` 报错时会把错误和 usage 一起写到输出流；测试“提前拒绝”时应断言没有进入正常命令输出，而不是假设输出为空。
+  - `App.SupportedEfforts()` 如果仍保留单独字面量，后续很容易和 CLI 校验口径漂移，最好统一走共享 helper。
+  - 有用的上下文（例如，"评估面板在 component X 中"）
+  - 当前 story 不涉及 Web 前端，按任务说明无需浏览器验证；CLI 级别回归已经能覆盖 `exec` 入口的提前失败语义。
 ---

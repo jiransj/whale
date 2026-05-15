@@ -378,7 +378,7 @@ func (a *App) ListMessages() ([]core.Message, error) {
 }
 func (a *App) SupportedModels() []string { return defaults.SupportedModels() }
 func (a *App) SupportedEfforts() []string {
-	return []string{"high", "max"}
+	return SupportedReasoningEfforts()
 }
 
 func (a *App) SetModelAndEffort(modelName, effort string) error {

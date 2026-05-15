@@ -52,7 +52,11 @@ func prepareCLIConfig(cmd *cobra.Command, opts *cliOptions) error {
 		cfg.ThinkingEnabled = flagCfg.ThinkingEnabled
 	}
 	if flagChanged(cmd, "effort") {
-		cfg.ReasoningEffort = flagCfg.ReasoningEffort
+		effort, err := validateEffort(flagCfg.ReasoningEffort)
+		if err != nil {
+			return err
+		}
+		cfg.ReasoningEffort = effort
 	}
 	opts.cfg = cfg
 	return validateModel(opts.cfg.Model)
@@ -68,6 +72,16 @@ func validateModel(v string) error {
 		return fmt.Errorf("unsupported model: %s", v)
 	}
 	return nil
+}
+
+func validateEffort(v string) (string, error) {
+	normalized := app.NormalizeEffort(v)
+	for _, supported := range app.SupportedReasoningEfforts() {
+		if strings.EqualFold(normalized, supported) && strings.EqualFold(strings.TrimSpace(v), normalized) {
+			return normalized, nil
+		}
+	}
+	return "", fmt.Errorf("unsupported effort: %s (supported: %s)", v, strings.Join(app.SupportedReasoningEfforts(), ", "))
 }
 
 func newRootCmd(opts *cliOptions) *cobra.Command {

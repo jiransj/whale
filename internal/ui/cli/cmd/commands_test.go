@@ -293,6 +293,31 @@ func TestPrepareCLIConfigExplicitEffortOverridesConfig(t *testing.T) {
 	}
 }
 
+func TestPrepareCLIConfigRejectsUnsupportedEffortAlias(t *testing.T) {
+	workspace := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+	if err := root.PersistentFlags().Set("effort", "xhigh"); err != nil {
+		t.Fatalf("set effort: %v", err)
+	}
+	err = prepareCLIConfig(root, opts)
+	if err == nil {
+		t.Fatal("expected unsupported effort error")
+	}
+	if !strings.Contains(err.Error(), "unsupported effort: xhigh") || !strings.Contains(err.Error(), "high, max") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPrepareCLIConfigKeepsUnspecifiedThinkingAndEffortFromConfig(t *testing.T) {
 	dataDir := t.TempDir()
 	workspace := t.TempDir()
@@ -539,6 +564,38 @@ func TestRootHelpOnlyShowsPublicRootFlags(t *testing.T) {
 	}
 	if !strings.Contains(help, "Override thinking for this run only") || !strings.Contains(help, "Override reasoning effort for this run only") {
 		t.Fatalf("expected public flags in help, got:\n%s", help)
+	}
+}
+
+func TestExecRejectsUnsupportedEffortBeforeRun(t *testing.T) {
+	workspace := t.TempDir()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(oldwd) }()
+
+	opts := &cliOptions{cfg: app.DefaultConfig()}
+	root := newRootCmd(opts)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"exec", "--effort=low", "hi"})
+	err = root.Execute()
+	if err == nil {
+		t.Fatal("expected unsupported effort error")
+	}
+	if !strings.Contains(err.Error(), "unsupported effort: low") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out.String(), "unsupported effort: low") {
+		t.Fatalf("expected CLI error output, got %q", out.String())
+	}
+	if strings.Contains(out.String(), "hello from exec") {
+		t.Fatalf("expected exec to stop before normal output, got %q", out.String())
 	}
 }
 
