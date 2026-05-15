@@ -2,6 +2,33 @@ package tools
 
 import "github.com/usewhale/whale/internal/core"
 
+const applyPatchDescription = `Apply structured multi-file patch text.
+
+Use Whale's apply_patch format, not unified diff. The patch must be a single string with this shape:
+
+*** Begin Patch
+*** Update File: path/to/file
+@@
+ context line to keep
+-old line to remove
++new line to add
+ context line to keep
+*** End Patch
+
+Supported file operations:
+*** Add File: <path>    creates a new file; every content line must start with +
+*** Delete File: <path> deletes an existing file; no hunks follow
+*** Update File: <path> patches an existing file; include one or more @@ hunks
+
+Hunk rules:
+- Each hunk starts with @@ on its own line.
+- Hunk lines must start with exactly one of: space for context, - for removed text, + for added text.
+- Keep enough context lines for an exact match.
+- Paths are relative to the workspace. Do not use absolute paths.
+- Do not use unified diff headers such as diff --git, --- a/file, or +++ b/file.`
+
+const applyPatchParamDescription = `Full patch text in Whale's *** Begin Patch format. Do not send unified diff. Use headers like *** Update File: path, then @@ hunks with space/-/+ lines.`
+
 func (b *Toolset) fileDiscoveryTools() []core.Tool {
 	return []core.Tool{
 		toolFn{
@@ -88,12 +115,12 @@ func (b *Toolset) fileMutationTools() []core.Tool {
 		},
 		toolFn{
 			name:        "apply_patch",
-			description: "Apply structured multi-file patch text. Supports *** Begin Patch format with Update/Add/Delete blocks and @@ hunks. Prefer this for coordinated edits across files.",
+			description: applyPatchDescription,
 			parameters: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]any{
-					"patch": map[string]any{"type": "string", "description": "Patch text in *** Begin Patch format"},
+					"patch": map[string]any{"type": "string", "description": applyPatchParamDescription},
 				},
 				"required": []string{"patch"},
 			},

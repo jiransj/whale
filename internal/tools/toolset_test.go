@@ -110,6 +110,62 @@ func TestEditFileMatchesLFSearchAndPreservesCRLF(t *testing.T) {
 	}
 }
 
+func TestEditFilePreservesMixedLineEndings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("alpha\r\nbeta\ngamma\r\ndelta\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	res, err := ts.editFile(context.Background(), tc("edit", map[string]any{
+		"file_path": "a.txt",
+		"search":    "beta\ngamma",
+		"replace":   "whale\ngamma",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("edit failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "alpha\r\nwhale\ngamma\r\ndelta\n" {
+		t.Fatalf("content = %q, want mixed line endings preserved", string(got))
+	}
+}
+
+func TestEditFileDuplicateReplacementKeepsMixedLineEndings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("a\r\nb\nc\r\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	res, err := ts.editFile(context.Background(), tc("edit", map[string]any{
+		"file_path": "a.txt",
+		"search":    "b",
+		"replace":   "c",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("edit failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "a\r\nc\nc\r\n" {
+		t.Fatalf("content = %q, want duplicate replacement to preserve mixed endings", string(got))
+	}
+}
+
 func TestApplyPatchMatchesLFHunksAndPreservesCRLF(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.txt")
@@ -148,6 +204,218 @@ func TestApplyPatchMatchesLFHunksAndPreservesCRLF(t *testing.T) {
 	}
 	if string(got) != "alpha\r\nwhale\r\ngamma\r\n" {
 		t.Fatalf("content = %q, want CRLF preserved", string(got))
+	}
+}
+
+func TestApplyPatchPreservesMixedLineEndings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("alpha\r\nbeta\ngamma\r\ndelta\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		" alpha",
+		"-beta",
+		"+whale",
+		"+inserted",
+		" gamma",
+		"*** End Patch",
+	}, "\n")
+
+	res, err := ts.applyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil || res.IsError {
+		t.Fatalf("apply patch failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "alpha\r\nwhale\ninserted\ngamma\r\ndelta\n" {
+		t.Fatalf("content = %q, want mixed line endings preserved", string(got))
+	}
+}
+
+func TestApplyPatchDuplicateInsertionBeforeContextKeepsMixedLineEndings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("a\nc\r\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		" a",
+		"+c",
+		" c",
+		"*** End Patch",
+	}, "\n")
+
+	res, err := ts.applyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil || res.IsError {
+		t.Fatalf("apply patch failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "a\nc\nc\r\n" {
+		t.Fatalf("content = %q, want inserted duplicate to keep context separator", string(got))
+	}
+}
+
+func TestApplyPatchDoesNotCarryDeletedSeparatorAcrossContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("a\r\nb\nc\r\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: a.txt",
+		"@@",
+		"-a",
+		" b",
+		"+x",
+		" c",
+		"*** End Patch",
+	}, "\n")
+
+	res, err := ts.applyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil || res.IsError {
+		t.Fatalf("apply patch failed: err=%v res=%+v", err, res)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	if string(got) != "b\nx\nc\r\n" {
+		t.Fatalf("content = %q, want deletion separator not to cross context", string(got))
+	}
+}
+
+func TestApplyPatchToolDescriptionDocumentsFormat(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	var spec core.ToolSpec
+	for _, tool := range ts.Tools() {
+		if tool.Name() == "apply_patch" {
+			spec = core.DescribeTool(tool)
+			break
+		}
+	}
+	if spec.Name == "" {
+		t.Fatal("apply_patch tool not found")
+	}
+	for _, want := range []string{
+		"*** Begin Patch",
+		"*** Update File: path/to/file",
+		"*** Add File: <path>",
+		"*** Delete File: <path>",
+		"Do not use unified diff headers",
+	} {
+		if !strings.Contains(spec.Description, want) {
+			t.Fatalf("apply_patch description missing %q:\n%s", want, spec.Description)
+		}
+	}
+	props, _ := spec.Parameters["properties"].(map[string]any)
+	patchProp, _ := props["patch"].(map[string]any)
+	desc, _ := patchProp["description"].(string)
+	if !strings.Contains(desc, "*** Begin Patch") || !strings.Contains(desc, "Do not send unified diff") {
+		t.Fatalf("patch parameter description does not document patch format: %q", desc)
+	}
+}
+
+func TestApplyPatchParseErrorsGuideAwayFromUnifiedDiff(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"--- a/a.txt",
+		"+++ b/a.txt",
+		"@@",
+		"-world",
+		"+whale",
+		"*** End Patch",
+	}, "\n")
+
+	res, err := ts.applyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil {
+		t.Fatalf("apply patch returned dispatch error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected parse error, got %+v", res)
+	}
+	env, ok := core.ParseToolEnvelope(res.Content)
+	if !ok {
+		t.Fatalf("parse envelope: %s", res.Content)
+	}
+	if env.Code != "patch_parse_failed" {
+		t.Fatalf("code = %q, want patch_parse_failed", env.Code)
+	}
+	for _, want := range []string{
+		"unified diff syntax",
+		"*** Update File/Add File/Delete File",
+		"Minimal valid example:",
+	} {
+		if !strings.Contains(env.Error, want) {
+			t.Fatalf("parse error missing %q:\n%s", want, env.Error)
+		}
+	}
+}
+
+func TestApplyPatchParseErrorsGuideBadUpdateHeader(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"Update File: a.txt",
+		"@@",
+		"-old",
+		"+new",
+		"*** End Patch",
+	}, "\n")
+
+	res, err := ts.applyPatch(context.Background(), tc("apply_patch", map[string]any{"patch": patch}))
+	if err != nil {
+		t.Fatalf("apply patch returned dispatch error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected parse error, got %+v", res)
+	}
+	env, ok := core.ParseToolEnvelope(res.Content)
+	if !ok {
+		t.Fatalf("parse envelope: %s", res.Content)
+	}
+	if !strings.Contains(env.Error, "must start with the exact header *** Update File: <path>") {
+		t.Fatalf("parse error did not explain update header:\n%s", env.Error)
 	}
 }
 
