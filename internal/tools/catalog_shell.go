@@ -53,7 +53,8 @@ var shellReadOnlyAllowPrefixesUnix = []string{
 }
 
 var shellReadOnlyAllowPrefixesWindows = []string{
-	"dir", "cd", "echo", "type", "more", "where", "findstr", "rg",
+	"dir", "cd", "type", "more", "where", "findstr", "rg",
+	"Get-ChildItem", "Get-Content", "Get-Location", "Select-String", "Get-Command",
 	"git status", "git diff", "git log", "git show", "git branch", "git remote", "git rev-parse", "git config --get",
 	"go test", "go vet", "go version",
 	"cargo test", "cargo check", "cargo clippy", "rustc --version",
@@ -84,15 +85,44 @@ func shellReadOnlyCheckForGOOS(goos string) func(map[string]any) bool {
 
 func shellReadOnlyCheckWithPrefixes(args map[string]any, prefixes []string) bool {
 	cmd, _ := args["command"].(string)
-	cmd = strings.ToLower(strings.TrimSpace(cmd))
-	if cmd == "" {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" || shellHasUnsafeSyntax(cmd) {
 		return false
 	}
+	cmd = strings.ToLower(cmd)
 	for _, prefix := range prefixes {
 		p := strings.ToLower(strings.TrimSpace(prefix))
 		if cmd == p || strings.HasPrefix(cmd, p+" ") {
 			return true
 		}
 	}
+	return false
+}
+
+func shellHasUnsafeSyntax(command string) bool {
+	var inSingleQuote bool
+	var inDoubleQuote bool
+
+	for _, r := range command {
+		switch r {
+		case '\'':
+			if !inDoubleQuote {
+				inSingleQuote = !inSingleQuote
+			}
+		case '"':
+			if !inSingleQuote {
+				inDoubleQuote = !inDoubleQuote
+			}
+		case '\n', '\r':
+			if !inSingleQuote && !inDoubleQuote {
+				return true
+			}
+		case '|', ';', '>', '<', '&':
+			if !inSingleQuote && !inDoubleQuote {
+				return true
+			}
+		}
+	}
+
 	return false
 }
