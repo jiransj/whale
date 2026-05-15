@@ -1,17 +1,18 @@
 package tools
 
 import (
-	"runtime"
 	"strings"
 
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/shell"
 )
 
 func (b *Toolset) shellTools() []core.Tool {
+	rt := shell.DescribeRuntime()
 	return []core.Tool{
 		toolFn{
 			name:        "shell_run",
-			description: shellRunDescription(runtime.GOOS),
+			description: shellRunDescriptionFor(rt),
 			parameters: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -23,7 +24,7 @@ func (b *Toolset) shellTools() []core.Tool {
 				},
 				"required": []string{"command"},
 			},
-			readOnlyCheck: shellReadOnlyCheckForGOOS(runtime.GOOS),
+			readOnlyCheck: shellReadOnlyCheckFor(rt),
 			fn:            b.shellRun,
 		},
 		toolFn{
@@ -44,7 +45,19 @@ func (b *Toolset) shellTools() []core.Tool {
 	}
 }
 
-var shellReadOnlyAllowPrefixesUnix = []string{
+func shellRunDescription() string {
+	return shellRunDescriptionFor(shell.DescribeRuntime())
+}
+
+func shellRunDescriptionFor(rt shell.RuntimeDescription) string {
+	base := "Run a shell command from the current Whale workspace. Commands default to the workspace root; do not assume synthetic paths like /workspace. Use relative paths, or set cwd to a subdirectory inside the workspace, instead of prefixing commands with cd."
+	if guidance := rt.ToolGuidance(); strings.TrimSpace(guidance) != "" {
+		return base + " " + strings.TrimSpace(guidance)
+	}
+	return base
+}
+
+var shellReadOnlyAllowPrefixes = []string{
 	"ls", "pwd", "echo", "cat", "head", "tail", "wc", "file", "tree", "find", "grep", "rg",
 	"git status", "git diff", "git log", "git show", "git branch", "git remote", "git rev-parse", "git config --get",
 	"go test", "go vet", "go version",
@@ -52,77 +65,153 @@ var shellReadOnlyAllowPrefixesUnix = []string{
 	"python --version", "python3 --version", "node --version", "npm --version", "npx --version",
 }
 
-var shellReadOnlyAllowPrefixesWindows = []string{
-	"dir", "cd", "type", "more", "where", "findstr", "rg",
-	"Get-ChildItem", "Get-Content", "Get-Location", "Select-String", "Get-Command",
-	"git status", "git diff", "git log", "git show", "git branch", "git remote", "git rev-parse", "git config --get",
-	"go test", "go vet", "go version",
-	"cargo test", "cargo check", "cargo clippy", "rustc --version",
-	"python --version", "py --version", "node --version", "npm --version", "npx --version",
-}
-
-func shellRunDescription(goos string) string {
-	base := "shell_run runs a shell command from the current Whale workspace. Commands default to the workspace root; do not assume synthetic paths like /workspace. Use relative paths, or set cwd to a subdirectory inside the workspace, instead of prefixing commands with cd."
-	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
-		return base + " On Windows, commands run through pwsh when available, then fall back to ComSpec or cmd.exe."
-	}
-	return base + " On Unix-like systems, commands run through /bin/sh."
-}
-
 func shellReadOnlyCheck(args map[string]any) bool {
-	return shellReadOnlyCheckForGOOS(runtime.GOOS)(args)
+	return shellReadOnlyCheckFor(shell.DescribeRuntime())(args)
 }
 
-func shellReadOnlyCheckForGOOS(goos string) func(map[string]any) bool {
-	prefixes := shellReadOnlyAllowPrefixesUnix
-	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
-		prefixes = shellReadOnlyAllowPrefixesWindows
-	}
+func shellReadOnlyCheckFor(rt shell.RuntimeDescription) func(args map[string]any) bool {
 	return func(args map[string]any) bool {
-		return shellReadOnlyCheckWithPrefixes(args, prefixes)
+		return shellReadOnlyCheckWithRuntime(rt, args)
 	}
 }
 
-func shellReadOnlyCheckWithPrefixes(args map[string]any, prefixes []string) bool {
-	cmd, _ := args["command"].(string)
-	cmd = strings.TrimSpace(cmd)
-	if cmd == "" || shellHasUnsafeSyntax(cmd) {
+func shellReadOnlyCheckWithRuntime(rt shell.RuntimeDescription, args map[string]any) bool {
+	if rt.Spec.Kind != shell.KindPOSIX {
 		return false
 	}
-	cmd = strings.ToLower(cmd)
-	for _, prefix := range prefixes {
-		p := strings.ToLower(strings.TrimSpace(prefix))
-		if cmd == p || strings.HasPrefix(cmd, p+" ") {
+	cmd, _ := args["command"].(string)
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return false
+	}
+	argv, ok := parsePOSIXReadOnlyShellCommand(cmd)
+	if !ok || len(argv) == 0 {
+		return false
+	}
+	lowerArgv := lowerShellArgv(argv)
+	if shellReadOnlyCommandHasUnsafeArgs(lowerArgv) {
+		return false
+	}
+	for _, prefix := range shellReadOnlyAllowPrefixes {
+		if shellArgvHasPrefix(lowerArgv, prefix) {
 			return true
 		}
 	}
 	return false
 }
 
-func shellHasUnsafeSyntax(command string) bool {
-	var inSingleQuote bool
-	var inDoubleQuote bool
-
-	for _, r := range command {
-		switch r {
-		case '\'':
-			if !inDoubleQuote {
-				inSingleQuote = !inSingleQuote
-			}
-		case '"':
-			if !inSingleQuote {
-				inDoubleQuote = !inDoubleQuote
-			}
-		case '\n', '\r':
-			if !inSingleQuote && !inDoubleQuote {
+func shellReadOnlyCommandHasUnsafeArgs(argv []string) bool {
+	switch {
+	case shellArgvHasPrefix(argv, "find"):
+		for _, field := range argv {
+			switch field {
+			case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fls":
 				return true
 			}
-		case '|', ';', '>', '<', '&':
-			if !inSingleQuote && !inDoubleQuote {
+			if strings.HasPrefix(field, "-fprint") {
+				return true
+			}
+		}
+	case shellArgvHasPrefix(argv, "git diff"), shellArgvHasPrefix(argv, "git show"), shellArgvHasPrefix(argv, "git log"):
+		for _, field := range argv {
+			if field == "--output" || strings.HasPrefix(field, "--output=") || field == "--ext-diff" || field == "--external-diff" || field == "--textconv" {
+				return true
+			}
+		}
+	case shellArgvHasPrefix(argv, "rg"):
+		for _, field := range argv {
+			if field == "--pre" || strings.HasPrefix(field, "--pre=") {
 				return true
 			}
 		}
 	}
-
 	return false
+}
+
+func shellArgvHasPrefix(argv []string, prefix string) bool {
+	prefixArgv := strings.Fields(strings.ToLower(strings.TrimSpace(prefix)))
+	if len(argv) < len(prefixArgv) {
+		return false
+	}
+	for i, want := range prefixArgv {
+		if argv[i] != want {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerShellArgv(argv []string) []string {
+	lower := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		lower = append(lower, strings.ToLower(arg))
+	}
+	return lower
+}
+
+func parsePOSIXReadOnlyShellCommand(cmd string) ([]string, bool) {
+	var argv []string
+	var word strings.Builder
+	var quote rune
+	inWord := false
+
+	flush := func() {
+		if inWord {
+			argv = append(argv, word.String())
+			word.Reset()
+			inWord = false
+		}
+	}
+
+	for _, r := range cmd {
+		switch quote {
+		case '\'':
+			if r == '\'' {
+				quote = 0
+				continue
+			}
+			word.WriteRune(r)
+			continue
+		case '"':
+			switch r {
+			case '"':
+				quote = 0
+				continue
+			case '\\', '$', '`':
+				return nil, false
+			}
+			word.WriteRune(r)
+			continue
+		}
+
+		switch {
+		case r == ' ' || r == '\t':
+			flush()
+		case r == '\'' || r == '"':
+			quote = r
+			inWord = true
+		case posixReadOnlyRejectedRune(r):
+			return nil, false
+		default:
+			inWord = true
+			word.WriteRune(r)
+		}
+	}
+	if quote != 0 {
+		return nil, false
+	}
+	flush()
+	if len(argv) == 0 {
+		return nil, false
+	}
+	return argv, true
+}
+
+func posixReadOnlyRejectedRune(r rune) bool {
+	switch r {
+	case '\\', '$', '`', ';', '|', '&', '<', '>', '\n', '\r', '(', ')', '{', '}', '#', '*', '?', '[', ']':
+		return true
+	default:
+		return false
+	}
 }

@@ -5,18 +5,22 @@ import (
 	"testing"
 
 	"github.com/usewhale/whale/internal/core"
+	"github.com/usewhale/whale/internal/shell"
 )
 
 func TestRuntimeEnvironmentBlockIncludesWorkspaceAndShellRunCWD(t *testing.T) {
-	block := renderRuntimeEnvironmentBlock("linux", "/repo")
+	block := renderRuntimeBlock("/repo", shell.RuntimeDescription{
+		GOOS: "linux",
+		Spec: shell.Spec{Kind: shell.KindPOSIX, DisplayName: "/bin/sh"},
+	})
 
 	for _, want := range []string{
-		"Runtime environment.",
+		"Current Whale runtime:",
 		"OS: linux",
 		"Current Whale workspace root: /repo",
-		"shell_run commands run from the workspace root by default",
+		"Shell: /bin/sh (/bin/sh -lc)",
+		"Shell commands run from the current Whale workspace by default",
 		"shell_run cwd parameter",
-		"/bin/sh",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("runtime block missing %q:\n%s", want, block)
@@ -25,13 +29,18 @@ func TestRuntimeEnvironmentBlockIncludesWorkspaceAndShellRunCWD(t *testing.T) {
 }
 
 func TestRuntimeEnvironmentBlockWindowsUsesCurrentShellRunName(t *testing.T) {
-	block := renderRuntimeEnvironmentBlock("windows", `C:\repo`)
+	block := renderRuntimeBlock(`C:\repo`, shell.RuntimeDescription{
+		GOOS: "windows",
+		Spec: shell.Spec{Kind: shell.KindPowerShell, DisplayName: "PowerShell"},
+	})
 
 	for _, want := range []string{
 		"OS: windows",
-		`shell_run commands run from the workspace root by default`,
-		"prefers pwsh when available",
-		"falls back to ComSpec or cmd.exe",
+		"Shell: PowerShell",
+		`Current Whale workspace root: C:\repo`,
+		"Use PowerShell syntax",
+		"read_file",
+		"Ask/Plan mode",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("windows runtime block missing %q:\n%s", want, block)
@@ -48,7 +57,7 @@ func TestImmutableSystemBlocksIncludeRuntimeEnvironment(t *testing.T) {
 	a := NewAgentWithRegistry(nil, nil, core.NewToolRegistry(nil), WithProjectMemory(false, 0, nil, "/repo"))
 	joined := strings.Join(a.buildImmutableSystemBlocks(), "\n\n")
 
-	if !strings.Contains(joined, "Runtime environment.") {
+	if !strings.Contains(joined, "Current Whale runtime:") {
 		t.Fatalf("system blocks missing runtime environment:\n%s", joined)
 	}
 	if !strings.Contains(joined, "Current Whale workspace root: /repo") {

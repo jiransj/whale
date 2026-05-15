@@ -1071,6 +1071,23 @@ func (p *planWriteProvider) StreamResponse(_ context.Context, _ []core.Message, 
 	return out
 }
 
+type unsafeShellProvider struct{}
+
+func (p *unsafeShellProvider) StreamResponse(_ context.Context, _ []core.Message, _ []core.Tool) <-chan llm.ProviderEvent {
+	out := make(chan llm.ProviderEvent, 1)
+	out <- llm.ProviderEvent{
+		Type: llm.EventComplete,
+		Response: &llm.ProviderResponse{
+			FinishReason: core.FinishReasonToolUse,
+			ToolCalls: []core.ToolCall{
+				{ID: "unsafe-shell-1", Name: "shell_run", Input: `{"command":"find . \"-exec\" rm {} +"}`},
+			},
+		},
+	}
+	close(out)
+	return out
+}
+
 type writeLikeTool struct{}
 
 func (w writeLikeTool) Name() string { return "write" }
@@ -1131,6 +1148,38 @@ func TestRuntimeAskModeBlocksNonReadOnlyTools(t *testing.T) {
 	}
 	if !sawModeBlocked || !sawBlockedResult {
 		t.Fatalf("expected ask_mode_blocked event and result, got event=%v result=%v", sawModeBlocked, sawBlockedResult)
+	}
+}
+
+func TestRuntimeAskModeBlocksQuotedUnsafeShellReadCommand(t *testing.T) {
+	ts, err := tools.NewToolset(t.TempDir())
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+	a := agent.NewAgentWithRegistry(
+		&unsafeShellProvider{},
+		store.NewInMemoryStore(),
+		core.NewToolRegistry(ts.Tools()),
+		agent.WithSessionMode(session.ModeAsk),
+		agent.WithSessionsDir(t.TempDir()),
+	)
+
+	events, err := a.RunStream(context.Background(), "eval-ask-unsafe-shell-block", "go")
+	if err != nil {
+		t.Fatalf("run stream failed: %v", err)
+	}
+	var sawModeBlocked bool
+	var sawBlockedResult bool
+	for ev := range events {
+		if ev.Type == agent.AgentEventTypeToolModeBlocked && ev.ToolBlocked != nil && ev.ToolBlocked.ReasonCode == "ask_mode_blocked" {
+			sawModeBlocked = true
+		}
+		if ev.Type == agent.AgentEventTypeToolResult && ev.Result != nil && ev.Result.Name == "shell_run" && strings.Contains(ev.Result.Content, "ask_mode_blocked") {
+			sawBlockedResult = true
+		}
+	}
+	if !sawModeBlocked || !sawBlockedResult {
+		t.Fatalf("expected quoted unsafe shell command to be ask_mode_blocked, got event=%v result=%v", sawModeBlocked, sawBlockedResult)
 	}
 }
 
