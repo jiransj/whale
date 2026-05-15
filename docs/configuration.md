@@ -60,7 +60,6 @@ config_path = "~/.whale/mcp.json"
 [context]
 auto_compact = true
 compact_threshold = 0.85
-model_context_window = 128000
 
 [skills]
 disabled = ["legacy-review"]
@@ -70,6 +69,10 @@ enabled = true
 max_bytes = 8000
 fallback_filenames = ["AGENTS.md", ".claude/instructions.md", "CLAUDE.md"]
 ```
+
+**Context window** is automatically inferred from the model name. `deepseek-v4-flash`
+and `deepseek-v4-pro` get 1,000,000 tokens (1M); other models default to 128K. No
+manual configuration is needed.
 
 ## Migrating old config
 

@@ -127,6 +127,7 @@ Whale's goal is to make DeepSeek's pricing, cache behavior, and coding capabilit
 - **Plan before execution**: use `/plan` to review a plan before letting the agent implement it.
 - **Extend tools**: connect external tools with MCP and reuse workflows with Skills.
 - **Run headlessly**: use `whale exec` from scripts, CI, or one-shot tasks.
+- **1M context window**: DeepSeek V4 models automatically use 1M token context with no manual config.
 
 ## Common Commands
 

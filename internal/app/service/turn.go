@@ -263,6 +263,25 @@ func summarizeToolCall(call core.ToolCall) string {
 		if qs := body["questions"]; qs != nil {
 			return fmt.Sprintf("request_user_input: %d question(s)", len(asAnySlice(qs)))
 		}
+	case "todo_add":
+		if text := strings.TrimSpace(asString(body["text"])); text != "" {
+			return "todo_add: " + text
+		}
+	case "todo_update":
+		if text := strings.TrimSpace(asString(body["text"])); text != "" {
+			return "todo_update: " + text
+		}
+		if id := strings.TrimSpace(asString(body["id"])); id != "" {
+			return "todo_update: " + id
+		}
+	case "todo_remove":
+		if id := strings.TrimSpace(asString(body["id"])); id != "" {
+			return "todo_remove: " + id
+		}
+	case "todo_list":
+		return "todo_list"
+	case "todo_clear_done":
+		return "todo_clear_done"
 	}
 	if strings.TrimSpace(call.Input) != "" {
 		return fmt.Sprintf("%s: %s", name, strings.TrimSpace(call.Input))

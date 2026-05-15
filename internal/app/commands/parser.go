@@ -57,6 +57,9 @@ func Parse(line, currentSessionID string, now time.Time) (Result, error) {
 	if trimmed == "/clear" {
 		return Result{Handled: true, SessionID: currentSessionID, ClearScreen: true}, nil
 	}
+	if trimmed == "/agent" {
+		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModeAgent)}, nil
+	}
 	if trimmed == "/ask" {
 		return Result{Handled: true, SessionID: currentSessionID, Mode: string(session.ModeAsk)}, nil
 	}

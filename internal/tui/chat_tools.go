@@ -12,8 +12,9 @@ func (m *model) appendToolCall(toolCallID, toolName, text string) {
 	if m.assembler == nil {
 		m.assembler = tuirender.NewAssembler()
 	}
+	m.markToolCallPending(toolCallID)
 	m.assembler.AddToolCall(toolCallID, summarizeToolCallForChat(toolName, text))
-	m.refreshViewportContentFollow(false)
+	m.refreshLiveViewportContent()
 }
 
 func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, summary string, metadata map[string]any) bool {
@@ -35,8 +36,9 @@ func (m *model) updateToolCallFromResult(toolCallID, toolName, result, role, sum
 		role = shellResultRole(role)
 	}
 	ok := m.assembler.UpdateToolCall(toolCallID, title, role)
+	m.markToolCallResolved(toolCallID)
 	if ok {
-		m.refreshViewportContentFollow(false)
+		m.refreshLiveViewportContent()
 	}
 	return ok
 }
@@ -48,9 +50,38 @@ func (m *model) updateTaskProgress(toolCallID, toolName, text string) bool {
 	title := summarizeTaskProgressForChat(toolName, text)
 	ok := m.assembler.UpdateToolCall(toolCallID, title, "result_running")
 	if ok {
-		m.refreshViewportContentFollow(false)
+		m.refreshLiveViewportContent()
 	}
 	return ok
+}
+
+func (m *model) markToolCallPending(toolCallID string) {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" {
+		return
+	}
+	if m.pendingToolCalls == nil {
+		m.pendingToolCalls = map[string]struct{}{}
+	}
+	m.pendingToolCalls[toolCallID] = struct{}{}
+}
+
+func (m *model) markToolCallResolved(toolCallID string) {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" || m.pendingToolCalls == nil {
+		return
+	}
+	delete(m.pendingToolCalls, toolCallID)
+}
+
+func (m *model) hasPendingToolCalls() bool {
+	return len(m.pendingToolCalls) > 0
+}
+
+func (m *model) clearPendingToolCalls() {
+	for k := range m.pendingToolCalls {
+		delete(m.pendingToolCalls, k)
+	}
 }
 
 func summarizeToolCallForChat(toolName, text string) string {
@@ -73,6 +104,8 @@ func summarizeToolCallForChat(toolName, text string) string {
 		}
 		role := taskRoleFromText(text)
 		return "Subagent " + role + "\n" + firstNonEmpty(detail, "starting")
+	case "todo":
+		return todoToolTitle(toolName, text, "running")
 	default:
 		if detail == "" {
 			detail = toolName
@@ -150,6 +183,8 @@ func completedToolTitle(toolName, raw, previous string) string {
 		}
 		role := firstNonEmpty(asString(env.data["role"]), "explore")
 		return "Subagent " + role
+	case "todo":
+		return todoToolTitle(toolName, firstNonEmpty(previousToolActionLine(previous), raw), "done")
 	default:
 		label := toolName
 		if label == "" {
@@ -180,6 +215,16 @@ func shellResultRole(role string) string {
 	}
 }
 
+func shouldShowUnmatchedToolResult(toolName, role, text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	if toolDisplayKind(toolName) == "todo" && strings.TrimSpace(role) == "result_ok" {
+		return false
+	}
+	return true
+}
+
 func toolDisplayKind(toolName string) string {
 	switch strings.TrimSpace(toolName) {
 	case "shell_run", "shell_wait":
@@ -190,6 +235,8 @@ func toolDisplayKind(toolName string) string {
 		return "edit"
 	case "parallel_reason", "spawn_subagent":
 		return "task"
+	case "todo_add", "todo_list", "todo_update", "todo_remove", "todo_clear_done":
+		return "todo"
 	default:
 		return "unknown"
 	}
@@ -214,6 +261,8 @@ func toolCallDetail(text string) string {
 				asString(body["query"]),
 				asString(body["url"]),
 				asString(body["task_id"]),
+				asString(body["text"]),
+				asString(body["id"]),
 			)
 			if detail != "" {
 				return detail
@@ -302,6 +351,70 @@ func previousToolActionLine(text string) string {
 		return strings.TrimSpace(lines[0])
 	}
 	return ""
+}
+
+func todoToolTitle(toolName, text, state string) string {
+	action := todoToolAction(toolName, state)
+	detail := todoToolDetail(text)
+	if detail == "" {
+		return action
+	}
+	return action + "\n" + detail
+}
+
+func todoToolAction(toolName, state string) string {
+	done := state == "done"
+	switch strings.TrimSpace(toolName) {
+	case "todo_add":
+		if done {
+			return "Todo added"
+		}
+		return "Adding todo"
+	case "todo_update":
+		if done {
+			return "Todo updated"
+		}
+		return "Updating todo"
+	case "todo_remove":
+		if done {
+			return "Todo removed"
+		}
+		return "Removing todo"
+	case "todo_clear_done":
+		if done {
+			return "Cleared completed todos"
+		}
+		return "Clearing completed todos"
+	case "todo_list":
+		if done {
+			return "Listed todos"
+		}
+		return "Listing todos"
+	default:
+		if done {
+			return "Todo completed"
+		}
+		return "Updating todo"
+	}
+}
+
+func todoToolDetail(text string) string {
+	detail := toolCallDetail(text)
+	if detail != "" && !strings.HasPrefix(detail, "{") {
+		return detail
+	}
+	t := strings.TrimSpace(text)
+	if idx := strings.Index(t, ":"); idx >= 0 {
+		t = strings.TrimSpace(t[idx+1:])
+	}
+	if !strings.HasPrefix(t, "{") {
+		return firstLine(t)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(t), &body); err != nil {
+		return ""
+	}
+	return firstNonEmpty(asString(body["text"]), asString(body["id"]))
 }
 
 func editLine(toolName, fallback string, env toolResultEnvelope) string {

@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/usewhale/whale/internal/app"
+	appcommands "github.com/usewhale/whale/internal/app/commands"
 	"github.com/usewhale/whale/internal/app/service"
 	tuirender "github.com/usewhale/whale/internal/tui/render"
 )
@@ -33,6 +34,17 @@ func (m *model) submitPromptWithBinding(value string, binding *app.SkillBinding)
 	if value == "" {
 		return nil
 	}
+	if cmd, ok := immediateLocalSubmitCommand(value); ok {
+		m.recordPromptHistory(cmd)
+		m.resetHistoryNavigation()
+		m.input.SetValue("")
+		m.skillBinding = nil
+		m.slash.matches = nil
+		m.slash.selected = 0
+		m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: cmd})
+		m.refreshViewportContent()
+		return nil
+	}
 	m.recordPromptHistory(value)
 	m.resetHistoryNavigation()
 	m.appendTranscript("you", tuirender.KindText, visibleSubmittedText(value))
@@ -46,6 +58,16 @@ func (m *model) submitPromptWithBinding(value string, binding *app.SkillBinding)
 	m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: value, SkillBinding: binding})
 	m.refreshViewportContentFollow(true)
 	return busyTickCmd()
+}
+
+func immediateLocalSubmitCommand(value string) (string, bool) {
+	cmd := appcommands.ExpandUniqueSlashPrefix(strings.TrimSpace(value), app.CommandsHelp, "/mcp")
+	switch cmd {
+	case "/agent", "/ask", "/plan", "/model", "/permissions", "/skills":
+		return cmd, true
+	default:
+		return "", false
+	}
 }
 
 func (m *model) enqueuePrompt(value string) bool {

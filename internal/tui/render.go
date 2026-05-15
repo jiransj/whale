@@ -14,6 +14,10 @@ import (
 )
 
 func (m model) renderBody(mainWidth, bodyHeight int) string {
+	if bodyHeight <= 0 {
+		return ""
+	}
+	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
 	if m.page != pageChat {
 		return lipgloss.NewStyle().
 			Width(mainWidth).
@@ -22,16 +26,33 @@ func (m model) renderBody(mainWidth, bodyHeight int) string {
 			BorderForeground(tuitheme.Default.Border).
 			Render(m.viewport.View())
 	}
-	if bodyHeight <= 0 {
-		return ""
-	}
-	m.refreshViewportContentForSize(mainWidth, bodyHeight, false)
-	return lipgloss.NewStyle().Width(mainWidth).Render(m.viewport.View())
+	return lipgloss.NewStyle().Width(mainWidth).Render(m.chat.View())
 }
 
 func (m model) View() string {
 	mainWidth, _ := m.layoutDims()
-	m.refreshViewportContent()
+	bottom := m.renderBottom(mainWidth)
+	bodyHeight := m.height - countVisibleLines(bottom)
+	if m.height <= 0 {
+		bodyHeight = 0
+	}
+	bodyHeight = max(0, bodyHeight)
+	body := m.renderBody(mainWidth, bodyHeight)
+	body = padVisibleLines(body, bodyHeight, mainWidth)
+	if body == "" {
+		return bottom
+	}
+	return body + "\n" + bottom
+}
+
+func (m model) viewportBodyHeight(mainWidth int) int {
+	if m.height <= 0 {
+		return 0
+	}
+	return max(0, m.height-countVisibleLines(m.renderBottom(mainWidth)))
+}
+
+func (m model) renderBottom(mainWidth int) string {
 	footerText := "model: " + m.model + "  effort: " + m.effort + "  thinking: " + m.thinking
 	if m.chatMode == "ask" || m.chatMode == "plan" {
 		footerText += "  mode: " + m.chatMode + " (Shift+Tab to switch)"
@@ -45,6 +66,12 @@ func (m model) View() string {
 		footerText = appendFooterDir(footerText, m.cwd, mainWidth)
 	}
 	footer := lipgloss.NewStyle().Width(mainWidth).MaxWidth(mainWidth).Render(lipgloss.JoinHorizontal(lipgloss.Left, footerText))
+	bottomParts := m.bottomPartsBeforeInput(mainWidth)
+	bottomParts = append(bottomParts, m.input.View(), footer)
+	return strings.Join(bottomParts, "\n")
+}
+
+func (m model) bottomPartsBeforeInput(mainWidth int) []string {
 	bottomParts := make([]string, 0, 8)
 	if statusLine := m.renderBusyStatusLine(mainWidth); statusLine != "" {
 		bottomParts = append(bottomParts, statusLine)
@@ -111,20 +138,7 @@ func (m model) View() string {
 	if queued := m.renderQueuedPrompts(mainWidth); queued != "" {
 		bottomParts = append(bottomParts, queued)
 	}
-	bottomParts = append(bottomParts, m.input.View(), footer)
-	bottom := strings.Join(bottomParts, "\n")
-
-	bodyHeight := m.height - countVisibleLines(bottom)
-	if m.height <= 0 {
-		bodyHeight = 0
-	}
-	bodyHeight = max(0, bodyHeight)
-	body := m.renderBody(mainWidth, bodyHeight)
-	body = padVisibleLines(body, bodyHeight, mainWidth)
-	if body == "" {
-		return bottom
-	}
-	return body + "\n" + bottom
+	return bottomParts
 }
 
 func (m model) renderApprovalPrompt() string {

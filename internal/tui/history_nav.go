@@ -83,28 +83,55 @@ func (m *model) recordPromptHistory(value string) {
 
 func (m *model) handleViewportScrollKey(key string) tea.Cmd {
 	m.refreshViewportContent()
+	if m.page != pageChat {
+		switch key {
+		case "pgup":
+			m.viewport.ViewUp()
+		case "pgdown":
+			m.viewport.ViewDown()
+		case "ctrl+u":
+			m.viewport.HalfViewUp()
+		case "ctrl+d":
+			m.viewport.HalfViewDown()
+		case "home":
+			m.viewport.GotoTop()
+		case "end":
+			m.viewport.GotoBottom()
+		}
+		return nil
+	}
 	switch key {
 	case "pgup":
 		if m.busy {
+			wasFollowingLiveTail := m.followTail && !m.viewportFrozen
 			m.freezeChatViewport()
+			if wasFollowingLiveTail {
+				m.followTail = false
+				break
+			}
 		}
-		m.viewport.ViewUp()
+		m.chat.PageUp()
 		m.followTail = false
 	case "pgdown":
-		m.viewport.ViewDown()
-		m.followTail = m.viewport.AtBottom()
+		m.chat.PageDown()
+		m.followTail = m.chat.AtBottom()
 		if m.followTail {
 			return m.resumeChatTail()
 		}
 	case "ctrl+u":
 		if m.busy {
+			wasFollowingLiveTail := m.followTail && !m.viewportFrozen
 			m.freezeChatViewport()
+			if wasFollowingLiveTail {
+				m.followTail = false
+				break
+			}
 		}
-		m.viewport.HalfViewUp()
+		m.chat.HalfPageUp()
 		m.followTail = false
 	case "ctrl+d":
-		m.viewport.HalfViewDown()
-		m.followTail = m.viewport.AtBottom()
+		m.chat.HalfPageDown()
+		m.followTail = m.chat.AtBottom()
 		if m.followTail {
 			return m.resumeChatTail()
 		}
@@ -112,11 +139,12 @@ func (m *model) handleViewportScrollKey(key string) tea.Cmd {
 		if m.busy {
 			m.freezeChatViewport()
 		}
-		m.viewport.GotoTop()
+		m.chat.ScrollToTop()
 		m.followTail = false
 	case "end":
 		return m.resumeChatTail()
 	}
+	m.syncViewportFromChat()
 	return nil
 }
 
@@ -126,7 +154,6 @@ func (m *model) resumeChatTail() tea.Cmd {
 		return nil
 	}
 	m.unfreezeChatViewport()
-	m.viewport.GotoBottom()
 	m.followTail = true
 	m.refreshViewportContentFollow(true)
 	return m.flushNativeScrollbackCmd()

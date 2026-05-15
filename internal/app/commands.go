@@ -140,7 +140,7 @@ func formatContextWindowStatus(a *App) string {
 		return "- context window: unavailable"
 	}
 	used := compact.EstimateMessagesTokens(msgs)
-	window := a.cfg.ContextWindow
+	window := a.contextWindow
 	if window < 1 {
 		window = 1
 	}

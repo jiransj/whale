@@ -2,7 +2,7 @@ package app
 
 import "testing"
 
-func TestInferredContextWindowForModel(t *testing.T) {
+func TestContextWindowForModel(t *testing.T) {
 	tests := []struct {
 		model string
 		want  int
@@ -14,17 +14,14 @@ func TestInferredContextWindowForModel(t *testing.T) {
 		{model: "", want: 128_000},
 	}
 	for _, tt := range tests {
-		if got := inferredContextWindowForModel(tt.model); got != tt.want {
-			t.Fatalf("inferredContextWindowForModel(%q) = %d, want %d", tt.model, got, tt.want)
+		name := tt.model
+		if name == "" {
+			name = "empty"
 		}
-	}
-}
-
-func TestResolveContextWindow(t *testing.T) {
-	if got := resolveContextWindow(128_000, "deepseek-v4-pro"); got != 1_000_000 {
-		t.Fatalf("resolveContextWindow(default, v4-pro) = %d, want 1000000", got)
-	}
-	if got := resolveContextWindow(256_000, "deepseek-v4-pro"); got != 256_000 {
-		t.Fatalf("resolveContextWindow(explicit override) = %d, want 256000", got)
+		t.Run(name, func(t *testing.T) {
+			if got := contextWindowForModel(tt.model); got != tt.want {
+				t.Fatalf("contextWindowForModel(%q) = %d, want %d", tt.model, got, tt.want)
+			}
+		})
 	}
 }
