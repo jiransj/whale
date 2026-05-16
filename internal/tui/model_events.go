@@ -61,6 +61,28 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		m.append("error", ev.Text)
 		m.addLog(logEntry{Kind: "error", Source: "system", Summary: ev.Text, Raw: ev.Text})
 		m.status = "error"
+	case service.EventLocalSubmitResult:
+		role := ev.Status
+		if role == "" {
+			role = "info"
+		}
+		if !isEnvironmentInventoryBlock(ev.Text) {
+			m.appendLocalSubmitResult(role, ev.Text)
+		} else {
+			m.addLog(logEntry{
+				Kind:    "env_summary",
+				Source:  "system",
+				Summary: "environment summary captured",
+				Raw:     ev.Text,
+			})
+		}
+		m.addLog(logEntry{Kind: role, Source: "system", Summary: ev.Text, Raw: ev.Text})
+		if role == "error" {
+			m.status = "error"
+		}
+		if role == "info" {
+			m.syncModelEffortFromInfo(ev.Text)
+		}
 	case service.EventToolCall:
 		m.appendToolCall(ev.ToolCallID, ev.ToolName, ev.Text)
 		m.addLog(logEntry{
@@ -130,6 +152,24 @@ func (m *model) handleServiceEvent(ev service.Event) (tea.Cmd, bool, bool) {
 		m.sessionIndex = firstSessionChoiceIndex(ev.Choices)
 		m.addLog(logEntry{Kind: "sessions_listed", Source: "session", Summary: fmt.Sprintf("%d sessions", len(ev.Choices)), Raw: strings.Join(ev.Choices, "\n")})
 		m.status = "session picker"
+	case service.EventLocalSubmitDone:
+		if m.localSubmitPending > 0 {
+			m.localSubmitPending--
+		}
+		if !m.busy && m.localSubmitPending > 0 {
+			m.status = "wait for command to finish"
+		}
+		if !m.busy && m.localSubmitPending == 0 {
+			if m.status == "command pending" || m.status == "wait for command to finish" {
+				m.status = "ready"
+			}
+			if next, ok := m.popQueuedPrompt(); ok {
+				m.deferredPlanPicker = false
+				eventCmd = m.submitPromptWithBinding(next.Text, next.SkillBinding)
+			} else if m.deferredPlanPicker && m.mode == modeChat {
+				m.openPlanImplementationPicker()
+			}
+		}
 	case service.EventTurnDone:
 		eventCmd = m.handleTurnDone(ev)
 	case service.EventModelPicker:
@@ -233,19 +273,43 @@ func (m *model) handleTurnDone(ev service.Event) tea.Cmd {
 	m.status = "ready"
 	queuedTurnStarted := false
 	queuedRestored := false
+	shouldOpenPlanPicker := wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat
 	var eventCmd tea.Cmd
 	if wasStopping {
+		m.deferredPlanPicker = false
 		queuedRestored = m.restoreQueuedPromptsToComposer()
+	} else if m.localSubmitPending > 0 {
+		if shouldOpenPlanPicker {
+			m.deferredPlanPicker = true
+		}
+		m.status = "wait for command to finish"
 	} else if next, ok := m.popQueuedPrompt(); ok {
+		m.deferredPlanPicker = false
 		eventCmd = m.submitPromptWithBinding(next.Text, next.SkillBinding)
 		queuedTurnStarted = true
 	}
-	if !queuedTurnStarted && !queuedRestored && wasBusy && m.chatMode == "plan" && m.sawPlanThisTurn && m.mode == modeChat {
-		m.mode = modePlanImplementation
-		m.planImplementation.index = 0
+	if !queuedTurnStarted && !queuedRestored && m.localSubmitPending == 0 && shouldOpenPlanPicker {
+		m.openPlanImplementationPicker()
 	}
 	m.resetTurnVisibility()
 	return eventCmd
+}
+
+func (m *model) openPlanImplementationPicker() {
+	m.deferredPlanPicker = false
+	m.mode = modePlanImplementation
+	m.planImplementation.index = 0
+}
+
+func (m *model) appendLocalSubmitResult(role, text string) {
+	if m.busy {
+		m.append(role, text)
+		return
+	}
+	if m.assembler != nil && m.assembler.Len() > 0 {
+		m.commitLiveTranscript(false)
+	}
+	m.appendTranscript(role, tuirender.KindText, text)
 }
 
 func (m *model) resetTurnVisibility() {

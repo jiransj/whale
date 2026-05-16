@@ -63,6 +63,8 @@ type model struct {
 	status               string
 	busy                 bool
 	busySince            time.Time
+	localSubmitPending   int
+	deferredPlanPicker   bool
 	mouseCapture         bool
 	stopping             bool
 	sidebar              bool

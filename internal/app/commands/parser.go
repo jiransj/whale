@@ -37,11 +37,15 @@ func Parse(line, currentSessionID string, now time.Time) (Result, error) {
 	if trimmed == "/status" {
 		return Result{Handled: true, SessionID: currentSessionID, ShowStatus: true}, nil
 	}
-	if strings.HasPrefix(trimmed, "/resume ") {
+	fields := strings.Fields(trimmed)
+	head := ""
+	if len(fields) > 0 {
+		head = fields[0]
+	}
+	if head == "/resume" && len(fields) > 1 {
 		return Result{}, fmt.Errorf("usage: /resume")
 	}
-	if strings.HasPrefix(trimmed, "/new") {
-		fields := strings.Fields(trimmed)
+	if head == "/new" {
 		next := ""
 		if len(fields) > 2 {
 			return Result{}, fmt.Errorf("usage: /new [id]")

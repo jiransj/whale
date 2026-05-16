@@ -60,6 +60,11 @@ func (m *model) handleKeyMsg(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 func (m *model) handleChatModeKey(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "shift+tab", "backtab":
+		if m.localSubmitPending > 0 {
+			m.status = "wait for command to finish"
+			m.refreshViewportContent()
+			return m.flushNativeScrollbackCmd(), true
+		}
 		if !m.busy && !m.hasSlashSuggestions() && !m.hasSkillSuggestions() {
 			m.dispatchIntent(service.Intent{Kind: service.IntentToggleMode})
 			return nil, true
@@ -309,6 +314,11 @@ func (m *model) handlePlanImplementationKey(msg tea.KeyMsg) tea.Cmd {
 			m.planImplementation.index++
 		}
 	case "enter":
+		if m.localSubmitPending > 0 {
+			m.status = "wait for command to finish"
+			m.refreshViewportContent()
+			return m.flushNativeScrollbackCmd()
+		}
 		if m.planImplementation.index == 0 {
 			m.appendTranscript("you", tuirender.KindText, "Implement the plan.")
 			m.beginTurnTranscript()
@@ -348,10 +358,12 @@ func (m *model) handleGlobalKey(msg tea.KeyMsg) (tea.Cmd, bool, bool) {
 		return armQuitCmd(2 * time.Second), false, true
 	case "enter":
 		if m.busy {
-			if m.stopping {
-				m.status = "stopping"
-			}
-			m.enqueuePrompt(m.input.Value())
+			m.submitPromptWhileBusy(m.input.Value())
+			return m.flushNativeScrollbackCmd(), false, true
+		}
+		if m.localSubmitPending > 0 {
+			m.status = "wait for command to finish"
+			m.refreshViewportContent()
 			return m.flushNativeScrollbackCmd(), false, true
 		}
 		if m.hasSlashSuggestions() {

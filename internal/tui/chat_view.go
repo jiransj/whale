@@ -53,19 +53,60 @@ func (m *model) reconcileFinalAssistant(lastResponse string) bool {
 		m.sawAssistantThisTurn = true
 		return true
 	}
-	m.replaceCurrentTurnAssistant(final)
+	if m.replaceLiveTurnAssistant(final) {
+		m.sawAssistantThisTurn = true
+		return true
+	}
+	if m.replaceCommittedTurnAssistant(final) {
+		m.sawAssistantThisTurn = true
+		return true
+	}
+	m.append("assistant", final)
 	m.sawAssistantThisTurn = true
 	return true
 }
 
-func (m *model) replaceCurrentTurnAssistant(text string) {
+func (m *model) replaceLiveTurnAssistant(text string) bool {
+	if m.assembler == nil || !m.assembler.ReplaceTrailingAssistantMessages(text) {
+		return false
+	}
+	m.refreshLiveViewportContent()
+	return true
+}
+
+func (m *model) replaceCommittedTurnAssistant(text string) bool {
+	if m.assembler != nil && m.assembler.Len() > 0 {
+		return false
+	}
 	start := m.turnTranscriptStart
 	if start < 0 || start > len(m.transcript) {
 		start = len(m.transcript)
 	}
-	out := m.transcript[:start]
+	firstAssistantRel := -1
+	for i, msg := range m.transcript[start:] {
+		if msg.Role == "assistant" && msg.Kind == tuirender.KindText {
+			if firstAssistantRel == -1 {
+				firstAssistantRel = i
+			}
+			continue
+		}
+		if firstAssistantRel != -1 {
+			return false
+		}
+	}
+	if firstAssistantRel == -1 {
+		return false
+	}
+	out := make([]tuirender.UIMessage, 0, len(m.transcript))
+	out = append(out, m.transcript[:start]...)
+	replaced := false
 	for _, msg := range m.transcript[start:] {
 		if msg.Role == "assistant" && msg.Kind == tuirender.KindText {
+			if !replaced {
+				msg.Text = text
+				out = append(out, msg)
+				replaced = true
+			}
 			continue
 		}
 		out = append(out, msg)
@@ -74,12 +115,8 @@ func (m *model) replaceCurrentTurnAssistant(text string) {
 	if m.nativeScrollbackPrinted > start {
 		m.nativeScrollbackPrinted = start
 	}
-	if m.assembler == nil {
-		m.assembler = tuirender.NewAssembler()
-	}
-	m.assembler.RemoveAssistantMessages()
-	m.assembler.AppendDelta("assistant", text)
-	m.refreshLiveViewportContent()
+	m.refreshViewportContentFollow(false)
+	return true
 }
 
 func (m *model) markNoFinalAnswerIfNeeded() bool {

@@ -58,13 +58,16 @@ func (a *App) HandleSlash(line string) (handled bool, output string, synthetic s
 	// For /new: capture old session info before switching.
 	oldID := a.sessionID
 	oldMsgCount := 0
-	if strings.HasPrefix(strings.TrimSpace(line), "/new") {
+	trimmed := strings.TrimSpace(line)
+	fields := strings.Fields(trimmed)
+	isNewCommand := len(fields) > 0 && fields[0] == "/new"
+	if isNewCommand {
 		if msgs, err := a.msgStore.List(a.ctx, a.sessionID); err == nil {
 			oldMsgCount = len(msgs)
 		}
 	}
 	a.sessionID = cmdResult.SessionID
-	if strings.HasPrefix(strings.TrimSpace(line), "/new") {
+	if isNewCommand {
 		modeState, err := session.LoadModeState(a.sessionsDir, a.sessionID)
 		if err != nil {
 			return true, "", "", false, false, err
@@ -102,7 +105,7 @@ func (a *App) HandleLocalCommand(line string) (handled bool, output string, err 
 				return true, a.buildStatsView(fields[1]), nil
 			}
 		}
-		return true, "", errors.New("usage: /stats [usage|tools|recent|all]")
+		return true, "", errors.New("usage: /stats [usage|tools|repair|recent|all]")
 	}
 	if strings.HasPrefix(line, "/compact") {
 		fields := strings.Fields(line)

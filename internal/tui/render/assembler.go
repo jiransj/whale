@@ -34,6 +34,13 @@ func (a *Assembler) Reset() {
 	a.toolEntryByID = map[string]int{}
 }
 
+func (a *Assembler) Len() int {
+	if a == nil {
+		return 0
+	}
+	return len(a.messages)
+}
+
 func (a *Assembler) RemoveAssistantMessages() {
 	if a == nil || len(a.messages) == 0 {
 		return
@@ -47,6 +54,29 @@ func (a *Assembler) RemoveAssistantMessages() {
 	}
 	a.messages = out
 	a.rebuildToolEntryIndex()
+}
+
+func (a *Assembler) ReplaceTrailingAssistantMessages(text string) bool {
+	t := strings.TrimSpace(strings.TrimRight(text, "\n"))
+	if a == nil || t == "" || len(a.messages) == 0 {
+		return false
+	}
+	start := -1
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		msg := a.messages[i]
+		if msg.Role == "assistant" && msg.Kind == KindText {
+			start = i
+			continue
+		}
+		break
+	}
+	if start == -1 {
+		return false
+	}
+	a.messages[start].Text = t
+	a.messages = a.messages[:start+1]
+	a.rebuildToolEntryIndex()
+	return true
 }
 
 func (a *Assembler) Snapshot() []UIMessage {
@@ -166,11 +196,34 @@ func (a *Assembler) SetPlan(text string) {
 	if t == "" {
 		return
 	}
-	if n := len(a.messages); n > 0 && a.messages[n-1].Kind == KindPlan {
-		a.messages[n-1].Text = t
+	if a.replacePlanMessages(t) {
 		return
 	}
 	a.AddPlan(t)
+}
+
+func (a *Assembler) replacePlanMessages(text string) bool {
+	if a == nil || len(a.messages) == 0 {
+		return false
+	}
+	replaced := false
+	out := a.messages[:0]
+	for _, msg := range a.messages {
+		if msg.Kind == KindPlan {
+			if !replaced {
+				msg.Text = text
+				out = append(out, msg)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, msg)
+	}
+	a.messages = out
+	if replaced {
+		a.rebuildToolEntryIndex()
+	}
+	return replaced
 }
 
 func (a *Assembler) AddToolResult(name, text string) {

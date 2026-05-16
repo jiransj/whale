@@ -15,6 +15,8 @@ func (s *Service) Dispatch(in Intent) {
 	switch in.Kind {
 	case IntentSubmit:
 		go s.handleSubmit(in.Input, in.HiddenInput, in.SkillBinding)
+	case IntentSubmitLocal:
+		s.enqueueLocalSubmit(in.Input)
 	case IntentAllowTool:
 		s.resolveApproval(in.ToolCallID, policy.ApprovalAllow)
 	case IntentAllowToolForSession:
@@ -92,6 +94,121 @@ func (s *Service) Dispatch(in Intent) {
 			return
 		}
 		s.emit(Event{Kind: EventSkillsManager, Skills: s.SkillsForManager()})
+	}
+}
+
+func (s *Service) enqueueLocalSubmit(line string) {
+	if s.localSubmits == nil || s.ctx == nil {
+		go s.runLocalSubmitLine(line)
+		return
+	}
+	select {
+	case s.localSubmits <- line:
+	case <-s.ctx.Done():
+	default:
+		s.emit(localSubmitResultEvent("error", "local command queue is full; wait before running another command"))
+		s.emit(localSubmitDoneEvent())
+	}
+}
+
+func (s *Service) runLocalSubmitWorker() {
+	for {
+		select {
+		case line := <-s.localSubmits:
+			s.runLocalSubmitLine(line)
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) runLocalSubmitLine(line string) {
+	s.handleLocalSubmit(line)
+	s.emit(localSubmitDoneEvent())
+}
+
+func (s *Service) handleLocalSubmit(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	submit := appcommands.ClassifySubmit(line, app.CommandsHelp, "/mcp")
+	line = submit.Line
+	if submit.Class == appcommands.SubmitText || submit.Class == appcommands.SubmitTurnStarting {
+		s.emit(localSubmitResultEvent("error", "command is not available as a local submit"))
+		return
+	}
+	prevSessionID := s.app.SessionID()
+	if line == "/model" {
+		s.emit(Event{
+			Kind:            EventModelPicker,
+			ModelChoices:    s.app.SupportedModels(),
+			EffortChoices:   s.app.SupportedEfforts(),
+			CurrentModel:    s.app.Model(),
+			CurrentEffort:   s.app.ReasoningEffort(),
+			ThinkingChoices: []string{"on", "off"},
+			CurrentThinking: onOff(s.app.ThinkingEnabled()),
+		})
+		return
+	}
+	if line == "/permissions" {
+		s.emit(Event{
+			Kind:            EventPermissionsPicker,
+			ApprovalChoices: []string{"Ask first", "Auto approve"},
+			CurrentApproval: approvalModeDisplay(s.app.ApprovalMode()),
+		})
+		return
+	}
+	if line == "/skills" {
+		s.emit(Event{Kind: EventSkillsMenu})
+		return
+	}
+	if s.app.IsResumeMenu(line) {
+		s.emitLocalSessionChoices()
+		return
+	}
+	if strings.HasPrefix(line, "/model ") {
+		s.emit(localSubmitResultEvent("error", "usage: /model"))
+		return
+	}
+	handled, out, synthetic, shouldExit, clearScreen, err := s.app.HandleSlash(line)
+	if err != nil {
+		s.emit(localSubmitResultEvent("error", err.Error()))
+		return
+	}
+	if handled {
+		if synthetic != "" {
+			s.emit(localSubmitResultEvent("error", "command starts an agent turn and cannot run as a local submit"))
+			return
+		}
+		if clearScreen {
+			s.emit(Event{Kind: EventClearScreen})
+		}
+		if shouldExit {
+			s.emit(Event{Kind: EventExitRequested})
+		}
+		if s.app.SessionID() != prevSessionID {
+			s.emitSessionHydrated()
+		}
+		if out != "" {
+			s.emit(localSubmitResultEvent("info", out))
+		}
+		return
+	}
+	handled, out, err = s.app.HandleLocalCommand(line)
+	if err != nil {
+		s.emit(localSubmitResultEvent("error", err.Error()))
+		return
+	}
+	if handled {
+		if out != "" {
+			s.emit(localSubmitResultEvent("info", out))
+		}
+		return
+	}
+	if appcommands.LooksLikeSlashCommand(line) {
+		s.emit(localSubmitResultEvent("error", fmt.Sprintf("• Unrecognized command %q. Type \"/\" for a list of supported commands.", line)))
+		return
 	}
 }
 
@@ -248,4 +365,26 @@ func (s *Service) emitSessionChoices() bool {
 	}
 	s.emit(Event{Kind: EventSessionsListed, Choices: choices})
 	return true
+}
+
+func (s *Service) emitLocalSessionChoices() bool {
+	choices, err := s.app.ListResumeChoices(20)
+	if err != nil {
+		s.emit(localSubmitResultEvent("error", err.Error()))
+		return false
+	}
+	if len(choices) == 0 {
+		s.emit(localSubmitResultEvent("info", "no saved sessions"))
+		return false
+	}
+	s.emit(Event{Kind: EventSessionsListed, Choices: choices})
+	return true
+}
+
+func localSubmitResultEvent(status, text string) Event {
+	return Event{Kind: EventLocalSubmitResult, Text: text, Status: status, Metadata: map[string]any{EventMetadataLocalSubmit: true}}
+}
+
+func localSubmitDoneEvent() Event {
+	return Event{Kind: EventLocalSubmitDone, Metadata: map[string]any{EventMetadataLocalSubmit: true}}
 }

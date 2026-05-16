@@ -14,6 +14,7 @@ type IntentKind string
 
 const (
 	IntentSubmit              IntentKind = "submit"
+	IntentSubmitLocal         IntentKind = "submit_local"
 	IntentAllowTool           IntentKind = "allow_tool"
 	IntentAllowToolForSession IntentKind = "allow_tool_for_session"
 	IntentDenyTool            IntentKind = "deny_tool"
@@ -48,7 +49,10 @@ type Intent struct {
 
 type EventKind string
 
-const EventMetadataAgentTurn = "agent_turn"
+const (
+	EventMetadataAgentTurn   = "agent_turn"
+	EventMetadataLocalSubmit = "local_submit"
+)
 
 const (
 	EventInfo              EventKind = "info"
@@ -68,6 +72,8 @@ const (
 	EventUserInputRequired EventKind = "user_input_required"
 	EventUserInputDone     EventKind = "user_input_done"
 	EventSessionsListed    EventKind = "sessions_listed"
+	EventLocalSubmitResult EventKind = "local_submit_result"
+	EventLocalSubmitDone   EventKind = "local_submit_done"
 	EventTurnDone          EventKind = "turn_done"
 	EventModelPicker       EventKind = "model_picker"
 	EventPermissionsPicker EventKind = "permissions_picker"
@@ -110,6 +116,7 @@ type Service struct {
 	serviceCtxCancel context.CancelFunc
 	app              *app.App
 	events           chan Event
+	localSubmits     chan string
 	cancelMu         sync.Mutex
 	cancel           context.CancelFunc
 	active           bool
@@ -139,12 +146,14 @@ func New(ctx context.Context, cfg app.Config, start app.StartOptions) (*Service,
 		serviceCtxCancel: cancel,
 		app:              a,
 		events:           make(chan Event, 512),
+		localSubmits:     make(chan string, 64),
 		approvals:        map[string]chan policy.ApprovalDecision{},
 		sessionGrants:    map[string]map[string]bool{},
 		inputs:           map[string]chan userInputDecision{},
 	}
 	a.SetApprovalFunc(s.awaitApproval)
 	a.SetUserInputFunc(s.awaitUserInput)
+	go s.runLocalSubmitWorker()
 	for _, line := range a.StartupLines() {
 		s.emit(Event{Kind: EventInfo, Text: line})
 	}

@@ -30,24 +30,29 @@ func TestCriticalEventsDeliverAfterDeltaBackpressure(t *testing.T) {
 	go func() {
 		deltas.flushReliable()
 		s.emit(Event{Kind: EventPlanCompleted, Text: "final plan"})
+		s.emit(Event{Kind: EventLocalSubmitResult, Status: "info", Text: "local result"})
 		s.emit(Event{Kind: EventTurnDone, LastResponse: "done"})
 		close(done)
 	}()
 
 	seenCompleted := false
+	seenLocal := false
 	seenDone := false
 	deadline := time.After(2 * time.Second)
-	for !seenCompleted || !seenDone {
+	for !seenCompleted || !seenLocal || !seenDone {
 		select {
 		case ev := <-s.Events():
 			if ev.Kind == EventPlanCompleted && ev.Text == "final plan" {
 				seenCompleted = true
 			}
+			if ev.Kind == EventLocalSubmitResult && ev.Text == "local result" {
+				seenLocal = true
+			}
 			if ev.Kind == EventTurnDone {
 				seenDone = true
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for critical events, completed=%v done=%v", seenCompleted, seenDone)
+			t.Fatalf("timed out waiting for critical events, completed=%v local=%v done=%v", seenCompleted, seenLocal, seenDone)
 		}
 	}
 	select {
@@ -273,6 +278,94 @@ func TestSkillsCommandOpensMenuAndToggleUpdatesSuggestions(t *testing.T) {
 	}
 	if got := svc.SkillSuggestions(); len(got) != 1 || got[0].Name != "test-skill" {
 		t.Fatalf("expected enabled skill suggestion, got %+v", got)
+	}
+}
+
+func TestLocalSubmitDoesNotEmitTurnDone(t *testing.T) {
+	cfg := app.DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	svc, err := New(t.Context(), cfg, app.StartOptions{NewSession: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+	waitForServiceEvent(t, svc, EventSessionHydrated)
+
+	svc.Dispatch(Intent{Kind: IntentSubmitLocal, Input: "/stats usage"})
+	for {
+		ev := nextServiceEvent(t, svc)
+		if ev.Kind == EventTurnDone {
+			t.Fatal("local submit emitted EventTurnDone")
+		}
+		if ev.Kind == EventLocalSubmitResult && ev.Status == "info" && strings.Contains(ev.Text, "Stats") {
+			break
+		}
+	}
+	select {
+	case ev := <-svc.Events():
+		if ev.Kind == EventTurnDone {
+			t.Fatal("local submit emitted delayed EventTurnDone")
+		}
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestLocalSubmitDispatchEnqueuesWithoutHandlingInline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc := &Service{
+		ctx:          ctx,
+		localSubmits: make(chan string, 1),
+	}
+
+	svc.Dispatch(Intent{Kind: IntentSubmitLocal, Input: "/stats all"})
+
+	select {
+	case got := <-svc.localSubmits:
+		if got != "/stats all" {
+			t.Fatalf("unexpected queued local submit: %q", got)
+		}
+	default:
+		t.Fatal("expected local submit to be queued without inline handling")
+	}
+}
+
+func TestLocalSubmitEmitsDone(t *testing.T) {
+	cfg := app.DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	svc, err := New(t.Context(), cfg, app.StartOptions{NewSession: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+	waitForServiceEvent(t, svc, EventSessionHydrated)
+
+	svc.Dispatch(Intent{Kind: IntentSubmitLocal, Input: "/model bad"})
+
+	errEvent := waitForServiceEvent(t, svc, EventLocalSubmitResult)
+	if errEvent.Status != "error" || errEvent.Text != "usage: /model" {
+		t.Fatalf("unexpected local submit error: status=%q text=%q", errEvent.Status, errEvent.Text)
+	}
+	waitForServiceEvent(t, svc, EventLocalSubmitDone)
+}
+
+func TestLocalSubmitDispatchPreservesOrder(t *testing.T) {
+	cfg := app.DefaultConfig()
+	cfg.DataDir = t.TempDir()
+	svc, err := New(t.Context(), cfg, app.StartOptions{NewSession: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer svc.Close()
+	waitForServiceEvent(t, svc, EventSessionHydrated)
+
+	svc.Dispatch(Intent{Kind: IntentSubmitLocal, Input: "/model bad"})
+	svc.Dispatch(Intent{Kind: IntentSubmitLocal, Input: "/skills bad"})
+
+	first := waitForServiceEvent(t, svc, EventLocalSubmitResult)
+	second := waitForServiceEvent(t, svc, EventLocalSubmitResult)
+	if first.Status != "error" || second.Status != "error" || first.Text != "usage: /model" || second.Text != "usage: /skills" {
+		t.Fatalf("expected local submit order to be preserved, got status=%q text=%q then status=%q text=%q", first.Status, first.Text, second.Status, second.Text)
 	}
 }
 
