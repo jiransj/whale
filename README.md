@@ -44,9 +44,11 @@ brew install usewhale/tap/whale
 
 Windows:
 
-1. 从 [GitHub Releases](https://github.com/usewhale/whale/releases) 下载 `whale-windows-amd64.zip`。
-2. 解压后把 `whale.exe` 所在目录加入 `PATH`。
-3. 在 PowerShell 或 `cmd.exe` 中运行 `whale setup`。
+```powershell
+irm https://raw.githubusercontent.com/usewhale/whale/main/scripts/install.ps1 | iex
+```
+
+安装脚本会优先按系统架构选择 Windows x64 或 ARM64 包，并把 `whale.exe` 加入当前用户的 `PATH`。如果旧版本没有 ARM64 包，会回退到 x64 emulation。也可以从 [GitHub Releases](https://github.com/usewhale/whale/releases) 手动下载对应的 Windows zip。
 
 首次运行：
 
