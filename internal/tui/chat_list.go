@@ -16,6 +16,7 @@ type chatList struct {
 	items      []chatItem
 	offsetIdx  int
 	offsetLine int
+	generation uint64
 }
 
 type chatItem struct {
@@ -43,6 +44,7 @@ func (l *chatList) SetMessages(messages []tuirender.UIMessage, renderWidth int) 
 		items = append(items, chatItem{msg: msg, lines: lines})
 	}
 	l.items = items
+	l.generation++
 	if len(l.items) == 0 {
 		l.offsetIdx = 0
 		l.offsetLine = 0

@@ -40,6 +40,23 @@ func selectSlashCommand(t *testing.T, m *model, want string) {
 	t.Fatalf("slash command %q not found in matches %+v", want, m.slash.matches)
 }
 
+func newLongHistoryComposerModel(historyCount int, input string) model {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 12
+	m.transcript = make([]tuirender.UIMessage, 0, historyCount)
+	m.input.SetValue(input)
+	for i := 0; i < historyCount; i++ {
+		m.transcript = append(m.transcript, tuirender.UIMessage{
+			Role: "info",
+			Kind: tuirender.KindText,
+			Text: fmt.Sprintf("entry-%04d", i),
+		})
+	}
+	m.refreshViewportContentFollow(true)
+	return m
+}
+
 func TestIsEnvironmentInventoryBlock_PositiveChinese(t *testing.T) {
 	text := "- 系统： macOS\n- 版本： 26.0\n- 构建号： 25A354"
 	if !isEnvironmentInventoryBlock(text) {
@@ -1753,6 +1770,29 @@ func TestChatViewportBusyFollowTailUsesTailRenderWindow(t *testing.T) {
 	}
 }
 
+func TestChatViewportIdleFollowTailUsesTailRenderWindow(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 200; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.refreshViewportContentFollow(false)
+
+	lineLimit := max(chatTailRenderLineFloor, m.viewportBodyHeight(m.width)*4)
+	if lines := m.viewport.TotalLineCount(); lines > lineLimit {
+		t.Fatalf("expected idle tail-follow render to keep a bounded line window, got %d lines", lines)
+	}
+	view := m.View()
+	if strings.Contains(view, "entry-000") {
+		t.Fatalf("expected old transcript lines to be outside the idle tail render window:\n%s", view)
+	}
+	if !strings.Contains(view, "entry-199") {
+		t.Fatalf("expected latest transcript lines to remain visible in idle tail render window:\n%s", view)
+	}
+}
+
 func TestChatViewportBusyFollowTailCropsSingleLargeLiveMessage(t *testing.T) {
 	for _, height := range []int{8, 10, 20} {
 		t.Run(fmt.Sprintf("height_%d", height), func(t *testing.T) {
@@ -1779,6 +1819,34 @@ func TestChatViewportBusyFollowTailCropsSingleLargeLiveMessage(t *testing.T) {
 				t.Fatalf("expected cropped single-message live tail to remain visible:\n%s", view)
 			}
 		})
+	}
+}
+
+func TestChatViewportHomeFromIdleTailRenderRestoresFullHistory(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 200; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.refreshViewportContentFollow(false)
+	tailLines := m.viewport.TotalLineCount()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m = next.(model)
+	if m.followTail {
+		t.Fatal("expected Home from idle tail render to disable tail following")
+	}
+	if fullLines := m.viewport.TotalLineCount(); fullLines <= tailLines {
+		t.Fatalf("expected Home from idle tail render to restore full scrollable content, tail=%d full=%d", tailLines, fullLines)
+	}
+	view := m.View()
+	if !strings.Contains(view, "entry-000") {
+		t.Fatalf("expected Home from idle tail render to restore early history:\n%s", view)
+	}
+	if strings.Contains(view, "entry-199") {
+		t.Fatalf("expected Home from idle tail render to move away from the latest tail:\n%s", view)
 	}
 }
 
@@ -2089,6 +2157,251 @@ func TestCtrlUStillClearsComposerInsteadOfScrollingTranscript(t *testing.T) {
 	}
 	if m.viewport.YOffset != 0 {
 		t.Fatalf("expected Ctrl+U not to scroll transcript, offset=%d", m.viewport.YOffset)
+	}
+}
+
+func TestComposerEditsDoNotRerenderChatWhenHeightIsStable(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("seed\nline")
+	for i := 0; i < 60; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	initialGeneration := m.chat.generation
+	initialOffset := m.viewport.YOffset
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	m = next.(model)
+	if got := m.input.Value(); got != "seed\nlinea" {
+		t.Fatalf("expected rune input to update composer, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected rune input not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if m.viewport.YOffset != initialOffset {
+		t.Fatalf("expected rune input not to move chat offset, got %d want %d", m.viewport.YOffset, initialOffset)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(model)
+	if got := m.input.Value(); got != "seed\nline" {
+		t.Fatalf("expected backspace to update composer, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected backspace not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if m.viewport.YOffset != initialOffset {
+		t.Fatalf("expected backspace not to move chat offset, got %d want %d", m.viewport.YOffset, initialOffset)
+	}
+}
+
+func TestLongHistoryComposerEditsStayIncrementalAtTail(t *testing.T) {
+	m := newLongHistoryComposerModel(600, "seed")
+	initialGeneration := m.chat.generation
+	initialItems := len(m.chat.items)
+
+	for _, msg := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("a")},
+		{Type: tea.KeyRunes, Runes: []rune("b")},
+		{Type: tea.KeyBackspace},
+		{Type: tea.KeyCtrlU},
+	} {
+		next, _ := m.Update(msg)
+		m = next.(model)
+		if m.chat.generation != initialGeneration {
+			t.Fatalf("expected long-history edit %v not to rerender chat, gen=%d want=%d", msg.Type, m.chat.generation, initialGeneration)
+		}
+		if len(m.chat.items) != initialItems {
+			t.Fatalf("expected long-history edit %v to keep chat item count stable, got %d want %d", msg.Type, len(m.chat.items), initialItems)
+		}
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected Ctrl+U to clear composer after long-history edits, got %q", got)
+	}
+	if !m.followTail || !m.chat.AtBottom() || !m.viewport.AtBottom() {
+		t.Fatalf("expected long-history tail edits to keep latest content visible, follow=%v chatBottom=%v viewportBottom=%v", m.followTail, m.chat.AtBottom(), m.viewport.AtBottom())
+	}
+	if view := m.View(); !strings.Contains(view, "entry-0599") {
+		t.Fatalf("expected long-history tail view to keep latest entry visible:\n%s", view)
+	}
+}
+
+func TestLongHistoryComposerEditsStayIncrementalOffTail(t *testing.T) {
+	m := newLongHistoryComposerModel(600, "seed")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	if m.followTail {
+		t.Fatal("expected PageUp to leave tail-follow mode for long history")
+	}
+	initialGeneration := m.chat.generation
+	initialItems := len(m.chat.items)
+	initialOffset := m.viewport.YOffset
+
+	for _, msg := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune("a")},
+		{Type: tea.KeyBackspace},
+		{Type: tea.KeyCtrlU},
+	} {
+		next, _ = m.Update(msg)
+		m = next.(model)
+		if m.chat.generation != initialGeneration {
+			t.Fatalf("expected off-tail long-history edit %v not to rerender chat, gen=%d want=%d", msg.Type, m.chat.generation, initialGeneration)
+		}
+		if len(m.chat.items) != initialItems {
+			t.Fatalf("expected off-tail long-history edit %v to keep chat item count stable, got %d want %d", msg.Type, len(m.chat.items), initialItems)
+		}
+		if m.viewport.YOffset != initialOffset {
+			t.Fatalf("expected off-tail long-history edit %v not to move chat offset, got %d want %d", msg.Type, m.viewport.YOffset, initialOffset)
+		}
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected Ctrl+U to clear composer after off-tail long-history edits, got %q", got)
+	}
+	if m.followTail {
+		t.Fatal("expected off-tail long-history edits not to resume tail following")
+	}
+	if view := m.View(); strings.Contains(view, "entry-0599") {
+		t.Fatalf("expected off-tail long-history edits not to jump back to the latest tail:\n%s", view)
+	}
+}
+
+func BenchmarkComposerEditCycleLongHistory(b *testing.B) {
+	for _, historyCount := range []int{500, 1000, 2000} {
+		b.Run(fmt.Sprintf("history-%d", historyCount), func(b *testing.B) {
+			m := newLongHistoryComposerModel(historyCount, "seed")
+			initialGeneration := m.chat.generation
+			initialItems := len(m.chat.items)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+				m = next.(model)
+				next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+				m = next.(model)
+			}
+			b.StopTimer()
+
+			if m.chat.generation != initialGeneration {
+				b.Fatalf("expected edit cycle not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+			}
+			if len(m.chat.items) != initialItems {
+				b.Fatalf("expected edit cycle to keep chat item count stable, got %d want %d", len(m.chat.items), initialItems)
+			}
+		})
+	}
+}
+
+func TestComposerHeightGrowthAtTailUpdatesLayoutWithoutRerender(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("seed")
+	for i := 0; i < 60; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	mainWidth, _ := m.layoutDims()
+	initialBodyHeight := m.viewportBodyHeight(mainWidth)
+	initialGeneration := m.chat.generation
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = next.(model)
+	mainWidth, _ = m.layoutDims()
+	if got := m.viewportBodyHeight(mainWidth); got >= initialBodyHeight {
+		t.Fatalf("expected composer growth to reduce chat body height, got %d want < %d", got, initialBodyHeight)
+	}
+	if got := m.input.Value(); got != "seed\n" {
+		t.Fatalf("expected ctrl+j to add newline, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected composer growth not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if !m.followTail || !m.chat.AtBottom() || !m.viewport.AtBottom() {
+		t.Fatalf("expected tail-follow layout sync to keep latest content visible, follow=%v chatBottom=%v viewportBottom=%v", m.followTail, m.chat.AtBottom(), m.viewport.AtBottom())
+	}
+	if view := m.View(); !strings.Contains(view, "entry-59") {
+		t.Fatalf("expected tail view to keep latest entry visible after composer growth:\n%s", view)
+	}
+}
+
+func TestComposerHeightShrinkOffTailClampsLayoutWithoutRerender(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("seed\n")
+	for i := 0; i < 120; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%03d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	tailOffset := m.viewport.YOffset
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	if m.followTail {
+		t.Fatal("expected PageUp to leave tail-follow mode")
+	}
+	mainWidth, _ := m.layoutDims()
+	initialBodyHeight := m.viewportBodyHeight(mainWidth)
+	initialGeneration := m.chat.generation
+	initialOffset := m.viewport.YOffset
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = next.(model)
+	mainWidth, _ = m.layoutDims()
+	if got := m.viewportBodyHeight(mainWidth); got <= initialBodyHeight {
+		t.Fatalf("expected composer shrink to increase chat body height, got %d want > %d", got, initialBodyHeight)
+	}
+	if got := m.input.Value(); got != "seed" {
+		t.Fatalf("expected backspace to remove trailing newline, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected composer shrink not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if m.followTail {
+		t.Fatal("expected off-tail layout sync not to resume tail following")
+	}
+	if m.viewport.YOffset > initialOffset {
+		t.Fatalf("expected off-tail layout sync only to clamp offset, got %d want <= %d", m.viewport.YOffset, initialOffset)
+	}
+	if m.viewport.YOffset >= tailOffset {
+		t.Fatalf("expected off-tail layout sync not to jump back to tail, got %d tail=%d", m.viewport.YOffset, tailOffset)
+	}
+}
+
+func TestCtrlUClearsMultilineComposerWithLayoutSyncOnly(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	m.input.SetValue("alpha\nbeta")
+	for i := 0; i < 60; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.refreshViewportContentFollow(true)
+	mainWidth, _ := m.layoutDims()
+	initialBodyHeight := m.viewportBodyHeight(mainWidth)
+	initialGeneration := m.chat.generation
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m = next.(model)
+	mainWidth, _ = m.layoutDims()
+	if got := m.viewportBodyHeight(mainWidth); got <= initialBodyHeight {
+		t.Fatalf("expected Ctrl+U clear to free composer height, got %d want > %d", got, initialBodyHeight)
+	}
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("expected Ctrl+U to clear multiline composer, got %q", got)
+	}
+	if m.chat.generation != initialGeneration {
+		t.Fatalf("expected Ctrl+U clear not to rerender chat, gen=%d want=%d", m.chat.generation, initialGeneration)
+	}
+	if !m.followTail || !m.chat.AtBottom() {
+		t.Fatalf("expected Ctrl+U clear at tail to keep latest content visible, follow=%v chatBottom=%v", m.followTail, m.chat.AtBottom())
 	}
 }
 
@@ -2648,6 +2961,53 @@ func TestMultipleToolResultsWaitForPendingToolCallsBeforeCommit(t *testing.T) {
 	}
 	if strings.Contains(rendered, "\n┃ ✓") {
 		t.Fatalf("todo results should not render as standalone checkmarks:\n%s", rendered)
+	}
+}
+
+func TestUnmatchedToolResultRefreshesLiveViewportWhilePendingCallsRemain(t *testing.T) {
+	m := model{
+		assembler:  tuirender.NewAssembler(),
+		mode:       modeChat,
+		page:       pageChat,
+		width:      100,
+		height:     16,
+		followTail: true,
+	}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-1",
+		ToolName:   "shell_run",
+		Text:       `shell_run: {"command":"echo first"}`,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-2",
+		ToolName:   "shell_run",
+		Text:       `shell_run: {"command":"echo second"}`,
+	}))
+	m = next.(model)
+
+	beforeGeneration := m.chat.generation
+	beforeView := m.View()
+
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"duration_ms":12},"payload":{"stdout":"visible output"}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "missing-id",
+		ToolName:   "shell_run",
+		Text:       raw,
+	}))
+	m = next.(model)
+
+	if m.chat.generation <= beforeGeneration {
+		t.Fatalf("expected unmatched live tool result to refresh chat viewport, generation before=%d after=%d", beforeGeneration, m.chat.generation)
+	}
+	if got := m.View(); got == beforeView || !strings.Contains(got, "visible output") {
+		t.Fatalf("expected unmatched live tool result to appear in chat viewport:\n%s", got)
+	}
+	if got := len(m.assembler.Snapshot()); got != 3 {
+		t.Fatalf("expected pending tool calls plus unmatched result to remain live, got %d", got)
 	}
 }
 

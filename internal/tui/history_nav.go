@@ -82,8 +82,8 @@ func (m *model) recordPromptHistory(value string) {
 }
 
 func (m *model) handleViewportScrollKey(key string) tea.Cmd {
-	m.refreshViewportContent()
 	if m.page != pageChat {
+		m.refreshViewportContent()
 		switch key {
 		case "pgup":
 			m.viewport.ViewUp()
@@ -99,6 +99,16 @@ func (m *model) handleViewportScrollKey(key string) tea.Cmd {
 			m.viewport.GotoBottom()
 		}
 		return nil
+	}
+	switch key {
+	case "pgup", "ctrl+u", "home":
+		if m.followTail && !m.viewportFrozen {
+			m.refreshViewportContentFollow(true)
+		} else {
+			m.refreshViewportContent()
+		}
+	default:
+		m.refreshViewportContent()
 	}
 	switch key {
 	case "pgup":
