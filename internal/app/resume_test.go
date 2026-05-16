@@ -92,6 +92,53 @@ func TestApplyResumeChoiceBlocksCrossWorkspace(t *testing.T) {
 	}
 }
 
+func TestResumeCommandWindowsQuotesWorkspaceAndExecutableWithSpaces(t *testing.T) {
+	got := resumeCommandFor("windows", `C:\Whale Repro Home\workspace original`, "s1", `C:\Program Files\Whale Repro\whale.exe`)
+	want := `cmd /v:on /c "set whale_resume_workspace=C:\Whale Repro Home\workspace original&&set whale_resume_bin=C:\Program Files\Whale Repro\whale.exe&&set whale_resume_session=s1&&cd /d "!whale_resume_workspace!"&&"!whale_resume_bin!" resume "!whale_resume_session!""`
+	if got != want {
+		t.Fatalf("resume command:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestResumeCommandWindowsQuotesUnsafeSessionID(t *testing.T) {
+	got := resumeCommandFor("windows", `C:\work`, "s&1", `C:\Program Files\Whale Repro\whale.exe`)
+	want := `cmd /v:on /c "set whale_resume_workspace=C:\work&&set whale_resume_bin=C:\Program Files\Whale Repro\whale.exe&&set whale_resume_session=s^&1&&cd /d "!whale_resume_workspace!"&&"!whale_resume_bin!" resume "!whale_resume_session!""`
+	if got != want {
+		t.Fatalf("resume command:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestResumeCommandWindowsEscapesCmdExpansion(t *testing.T) {
+	got := resumeCommandFor("windows", `C:\Users\%USERNAME%\workspace`, "s%USERNAME%", `C:\Program Files\Whale %USERNAME%\whale.exe`)
+	want := `cmd /v:on /c "set whale_resume_workspace=C:\Users\^%USERNAME^%\workspace&&set whale_resume_bin=C:\Program Files\Whale ^%USERNAME^%\whale.exe&&set whale_resume_session=s^%USERNAME^%&&cd /d "!whale_resume_workspace!"&&"!whale_resume_bin!" resume "!whale_resume_session!""`
+	if got != want {
+		t.Fatalf("resume command:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestCmdSetValueEscapesCmdMetacharacters(t *testing.T) {
+	tests := map[string]string{
+		`s%USERNAME%`:    `s^%USERNAME^%`,
+		`s&1`:            `s^&1`,
+		`s^1`:            `s^^1`,
+		`s!USERNAME!`:    `s^^!USERNAME^^!`,
+		`C:\work(a)\out`: `C:\work^(a^)\out`,
+	}
+	for input, want := range tests {
+		if got := cmdSetValue(input); got != want {
+			t.Fatalf("cmdSetValue(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestResumeCommandPOSIXQuotesWorkspaceExecutableAndUnsafeSessionID(t *testing.T) {
+	got := resumeCommandFor("darwin", `/tmp/Whale Repro/workspace original`, "s&1", `/tmp/Whale Repro/whale`)
+	want := `cd '/tmp/Whale Repro/workspace original' && '/tmp/Whale Repro/whale' resume 's&1'`
+	if got != want {
+		t.Fatalf("resume command:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestApplyResumeChoiceAllowsSameWorkspace(t *testing.T) {
 	current := t.TempDir()
 	sessionsDir := filepath.Join(t.TempDir(), "sessions")
