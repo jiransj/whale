@@ -43,6 +43,7 @@ func (b *Toolset) shellRun(ctx context.Context, call core.ToolCall) (core.ToolRe
 			cctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			runShellBackground(cctx, workdir, in.Command, task)
+			b.tasks.completed(task.ID)
 		}()
 		return marshalToolResult(call, map[string]any{
 			"status": "running",
@@ -191,32 +192,16 @@ func (b *Toolset) shellWait(ctx context.Context, call core.ToolCall) (core.ToolR
 	for {
 		snap := task.snapshot()
 		if snap.Status != "running" {
-			stdout, stdoutTr := truncateTextSmart(snap.Stdout, maxToolTextChars)
-			stderr, stderrTr := truncateTextSmart(snap.Stderr, maxToolTextChars)
-			return marshalToolResult(call, map[string]any{
-				"status": snap.Status,
-				"payload": map[string]any{
-					"task_id":    snap.ID,
-					"command":    snap.Command,
-					"cwd":        snap.CWD,
-					"stdout":     stdout,
-					"stderr":     stderr,
-					"done":       true,
-					"started_at": snap.StartedAt,
-					"ended_at":   snap.FinishedAt,
-				},
-				"metrics": map[string]any{
-					"exit_code":         snap.ExitCode,
-					"stdout_truncation": stdoutTr,
-					"stderr_truncation": stderrTr,
-				},
-			})
+			return b.shellWaitFinalResult(call, snap)
 		}
 		select {
 		case <-ctx.Done():
 			return marshalToolError(call, "cancelled", ctx.Err().Error()), nil
 		case <-timer.C:
 			snap = task.snapshot()
+			if snap.Status != "running" {
+				return b.shellWaitFinalResult(call, snap)
+			}
 			return marshalToolResult(call, map[string]any{
 				"status": "running",
 				"payload": map[string]any{
@@ -231,6 +216,30 @@ func (b *Toolset) shellWait(ctx context.Context, call core.ToolCall) (core.ToolR
 		case <-poll.C:
 		}
 	}
+}
+
+func (b *Toolset) shellWaitFinalResult(call core.ToolCall, snap shellTaskSnapshot) (core.ToolResult, error) {
+	stdout, stdoutTr := truncateTextSmart(snap.Stdout, maxToolTextChars)
+	stderr, stderrTr := truncateTextSmart(snap.Stderr, maxToolTextChars)
+	b.tasks.release(snap.ID)
+	return marshalToolResult(call, map[string]any{
+		"status": snap.Status,
+		"payload": map[string]any{
+			"task_id":    snap.ID,
+			"command":    snap.Command,
+			"cwd":        snap.CWD,
+			"stdout":     stdout,
+			"stderr":     stderr,
+			"done":       true,
+			"started_at": snap.StartedAt,
+			"ended_at":   snap.FinishedAt,
+		},
+		"metrics": map[string]any{
+			"exit_code":         snap.ExitCode,
+			"stdout_truncation": stdoutTr,
+			"stderr_truncation": stderrTr,
+		},
+	})
 }
 
 func (b *Toolset) resolveShellCWD(raw string) (abs string, rel string, err error) {

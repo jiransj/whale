@@ -54,14 +54,25 @@ type shellTaskSnapshot struct {
 	Stderr     string
 }
 
+const (
+	shellTaskCompletedTTL = time.Duration(maxBackgroundShellTimeoutMS) * time.Millisecond
+	shellTaskMaxRetained  = 128
+)
+
 type shellTaskRegistry struct {
-	mu    sync.RWMutex
-	tasks map[string]*shellTask
-	seq   uint64
+	mu              sync.RWMutex
+	tasks           map[string]*shellTask
+	seq             uint64
+	scheduleCleanup func(time.Duration, func())
 }
 
 func newShellTaskRegistry() *shellTaskRegistry {
-	return &shellTaskRegistry{tasks: map[string]*shellTask{}}
+	return &shellTaskRegistry{
+		tasks: map[string]*shellTask{},
+		scheduleCleanup: func(delay time.Duration, fn func()) {
+			time.AfterFunc(delay, fn)
+		},
+	}
 }
 
 func (r *shellTaskRegistry) nextID() string {
@@ -73,15 +84,90 @@ func (r *shellTaskRegistry) create(command, cwd string) *shellTask {
 	t := &shellTask{ID: r.nextID(), Command: command, CWD: cwd, StartedAt: time.Now(), status: "running"}
 	r.mu.Lock()
 	r.tasks[t.ID] = t
+	r.pruneCompletedLocked(time.Now(), t.ID)
 	r.mu.Unlock()
 	return t
 }
 
 func (r *shellTaskRegistry) get(id string) (*shellTask, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	t, ok := r.tasks[id]
+	r.pruneCompletedLocked(time.Now(), id)
 	return t, ok
+}
+
+func (r *shellTaskRegistry) completed(id string) {
+	r.pruneCompleted(id)
+	r.scheduleCompletedCleanup()
+}
+
+func (r *shellTaskRegistry) release(id string) {
+	r.mu.Lock()
+	delete(r.tasks, id)
+	r.mu.Unlock()
+}
+
+func (r *shellTaskRegistry) pruneCompleted(keepID string) {
+	r.mu.Lock()
+	r.pruneCompletedLocked(time.Now(), keepID)
+	r.mu.Unlock()
+}
+
+func (r *shellTaskRegistry) scheduleCompletedCleanup() {
+	if r.scheduleCleanup == nil {
+		return
+	}
+	r.scheduleCleanup(shellTaskCompletedTTL, func() {
+		r.pruneCompleted("")
+	})
+}
+
+func (r *shellTaskRegistry) pruneCompletedLocked(now time.Time, keepID string) {
+	completed := 0
+	for id, task := range r.tasks {
+		snap := task.snapshot()
+		if id != keepID && shellTaskExpired(snap, now) {
+			delete(r.tasks, id)
+			continue
+		}
+		if snap.Status != "running" {
+			completed++
+		}
+	}
+	for completed > shellTaskMaxRetained {
+		oldestID := ""
+		var oldestTime time.Time
+		for id, task := range r.tasks {
+			if id == keepID {
+				continue
+			}
+			snap := task.snapshot()
+			if snap.Status == "running" {
+				continue
+			}
+			taskTime := snap.StartedAt
+			if snap.FinishedAt != nil {
+				taskTime = *snap.FinishedAt
+			}
+			if oldestID == "" || taskTime.Before(oldestTime) {
+				oldestID = id
+				oldestTime = taskTime
+			}
+		}
+		if oldestID == "" {
+			return
+		}
+		delete(r.tasks, oldestID)
+		completed--
+	}
+}
+
+func shellTaskExpired(task shellTaskSnapshot, now time.Time) bool {
+	if task.Status == "running" || task.FinishedAt == nil {
+		return false
+	}
+	return now.Sub(*task.FinishedAt) >= shellTaskCompletedTTL
 }
 
 func runShellBackground(ctx context.Context, dir, command string, task *shellTask) {

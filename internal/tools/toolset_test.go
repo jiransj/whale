@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/usewhale/whale/internal/core"
 )
@@ -987,6 +988,120 @@ func TestShellRunBackgroundAndWait(t *testing.T) {
 	if !strings.Contains(waitRes.Content, "hello") {
 		t.Fatalf("expected output in wait result: %s", waitRes.Content)
 	}
+}
+
+func TestShellRunBackgroundFinalWaitReleasesTask(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	startRes, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
+		"command":    "echo cleanup",
+		"background": true,
+	}))
+	if err != nil || startRes.IsError {
+		t.Fatalf("shell_run background failed: err=%v res=%+v", err, startRes)
+	}
+	taskID := toolsetBackgroundTaskID(t, startRes.Content)
+
+	waitRes, err := ts.shellWait(context.Background(), tc("shell_wait", map[string]any{
+		"task_id":    taskID,
+		"timeout_ms": 5000,
+	}))
+	if err != nil || waitRes.IsError {
+		t.Fatalf("shell_wait failed: err=%v res=%+v", err, waitRes)
+	}
+	if !strings.Contains(waitRes.Content, `"done":true`) {
+		t.Fatalf("expected final wait result, got: %s", waitRes.Content)
+	}
+
+	ts.tasks.mu.RLock()
+	taskCount := len(ts.tasks.tasks)
+	_, stillTracked := ts.tasks.tasks[taskID]
+	ts.tasks.mu.RUnlock()
+	if stillTracked || taskCount != 0 {
+		t.Fatalf("expected final shell_wait to release task %s, registry has %d tasks", taskID, taskCount)
+	}
+}
+
+func TestShellRunBackgroundCompletionSchedulesRegistryCleanup(t *testing.T) {
+	dir := t.TempDir()
+	ts, err := NewToolset(dir)
+	if err != nil {
+		t.Fatalf("new toolset: %v", err)
+	}
+
+	type scheduledCleanup struct {
+		delay time.Duration
+		fn    func()
+	}
+	scheduled := make(chan scheduledCleanup, 1)
+	ts.tasks.scheduleCleanup = func(delay time.Duration, fn func()) {
+		select {
+		case scheduled <- scheduledCleanup{delay: delay, fn: fn}:
+		default:
+		}
+	}
+
+	startRes, err := ts.shellRun(context.Background(), tc("shell_run", map[string]any{
+		"command":    "echo cleanup",
+		"background": true,
+	}))
+	if err != nil || startRes.IsError {
+		t.Fatalf("shell_run background failed: err=%v res=%+v", err, startRes)
+	}
+	taskID := toolsetBackgroundTaskID(t, startRes.Content)
+
+	var cleanup scheduledCleanup
+	select {
+	case cleanup = <-scheduled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected background completion to schedule registry cleanup")
+	}
+	if cleanup.delay != shellTaskCompletedTTL {
+		t.Fatalf("expected cleanup delay %s, got %s", shellTaskCompletedTTL, cleanup.delay)
+	}
+
+	ts.tasks.mu.RLock()
+	task, stillTracked := ts.tasks.tasks[taskID]
+	ts.tasks.mu.RUnlock()
+	if !stillTracked {
+		t.Fatalf("expected completed task %s to remain available before TTL cleanup", taskID)
+	}
+
+	expiredFinished := time.Now().Add(-shellTaskCompletedTTL - time.Second)
+	task.mu.Lock()
+	task.finishedAt = &expiredFinished
+	task.mu.Unlock()
+
+	cleanup.fn()
+
+	ts.tasks.mu.RLock()
+	_, stillTracked = ts.tasks.tasks[taskID]
+	ts.tasks.mu.RUnlock()
+	if stillTracked {
+		t.Fatalf("expected scheduled cleanup to release expired task %s", taskID)
+	}
+}
+
+func toolsetBackgroundTaskID(t *testing.T, content string) string {
+	t.Helper()
+	var envelope struct {
+		Data struct {
+			Payload struct {
+				TaskID string `json:"task_id"`
+			} `json:"payload"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(content), &envelope); err != nil {
+		t.Fatalf("unmarshal background result: %v", err)
+	}
+	if envelope.Data.Payload.TaskID == "" {
+		t.Fatalf("missing task_id in background result: %s", content)
+	}
+	return envelope.Data.Payload.TaskID
 }
 
 func TestShellRunCWDStaysInsideWorkspace(t *testing.T) {
