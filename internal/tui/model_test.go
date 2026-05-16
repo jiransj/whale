@@ -582,8 +582,56 @@ func TestShiftTabModeToggleDoesNotStartWorkingState(t *testing.T) {
 	}
 }
 
+func TestShiftTabModeToggleWaitsForPendingLocalSubmit(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.localSubmitPending = 1
+	m.status = "command pending"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = next.(model)
+
+	if len(*intents) != 0 {
+		t.Fatalf("pending local submit should block mode toggle intent, got %+v", *intents)
+	}
+	if m.localSubmitPending != 1 {
+		t.Fatalf("expected pending local submit to remain, got %d", m.localSubmitPending)
+	}
+	if m.status != "wait for command to finish" {
+		t.Fatalf("expected wait status while local submit is pending, got %q", m.status)
+	}
+	if m.busy {
+		t.Fatal("mode shortcut barrier should not start working state")
+	}
+}
+
 func TestLocalImmediateSlashCommandsDoNotStartWorkingState(t *testing.T) {
-	for _, cmd := range []string{"/agent", "/ask", "/plan", "/model", "/permissions", "/skills"} {
+	for _, cmd := range []string{
+		"/agent",
+		"/ask",
+		"/plan",
+		"/model",
+		"/permissions",
+		"/skills",
+		"/status",
+		"/stats",
+		"/stats usage",
+		"/stats tools",
+		"/stats repair",
+		"/stats recent",
+		"/stats all",
+		"/mcp",
+		"/resume",
+		"/clear",
+		"/new",
+		"/new scratch",
+		"/model xxx",
+		"/skills xxx",
+		"/resume xxx",
+		"/new a b",
+		"/stats bad",
+		"/compact bad",
+		"/plan show",
+	} {
 		t.Run(cmd, func(t *testing.T) {
 			m, intents := newModelWithDispatchSpy()
 			m.input.SetValue(cmd)
@@ -593,7 +641,7 @@ func TestLocalImmediateSlashCommandsDoNotStartWorkingState(t *testing.T) {
 			if len(*intents) != 1 {
 				t.Fatalf("expected one dispatched intent, got %+v", *intents)
 			}
-			if (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != cmd {
+			if (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != cmd {
 				t.Fatalf("unexpected dispatched intent: %+v", (*intents)[0])
 			}
 			if got := m.input.Value(); got != "" {
@@ -892,7 +940,7 @@ func TestSlashSuggestionPlanAutoRunsWhenSelected(t *testing.T) {
 	if len(*intents) != 1 {
 		t.Fatalf("expected one dispatch for selected /plan, got %+v", *intents)
 	}
-	if (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != "/plan" {
+	if (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != "/plan" {
 		t.Fatalf("unexpected dispatched intent: %+v", (*intents)[0])
 	}
 	if got := m.input.Value(); got != "" {
@@ -913,7 +961,7 @@ func TestSlashSuggestionAskAutoRunsWhenSelected(t *testing.T) {
 	if len(*intents) != 1 {
 		t.Fatalf("expected one dispatch for selected /ask, got %+v", *intents)
 	}
-	if (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != "/ask" {
+	if (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != "/ask" {
 		t.Fatalf("unexpected dispatched intent: %+v", (*intents)[0])
 	}
 	if got := m.input.Value(); got != "" {
@@ -924,8 +972,8 @@ func TestSlashSuggestionAskAutoRunsWhenSelected(t *testing.T) {
 	}
 }
 
-func TestSlashPromptCommandsStillStartWorkingState(t *testing.T) {
-	for _, prompt := range []string{"/ask inspect the parser", "/plan propose a fix"} {
+func TestSlashTurnStartingCommandsStillStartWorkingState(t *testing.T) {
+	for _, prompt := range []string{"/ask inspect the parser", "/plan propose a fix", "/compact", "/init"} {
 		t.Run(prompt, func(t *testing.T) {
 			m, intents := newModelWithDispatchSpy()
 			m.input.SetValue(prompt)
@@ -992,6 +1040,288 @@ func TestEnterWhileBusyQueuesInputWithoutSubmitting(t *testing.T) {
 	}
 	if got := strings.Join(tuirender.ChatLines(m.assembler.Snapshot(), 80), "\n"); strings.Contains(got, "follow up while working") {
 		t.Fatalf("queued prompt should not be written to live transcript:\n%s", got)
+	}
+}
+
+func TestEnterWhileBusyExecutesReadOnlySlashAndExitImmediately(t *testing.T) {
+	for _, cmd := range []string{"/status", "/stats usage", "/stats repair", "/mcp", "/exit"} {
+		t.Run(cmd, func(t *testing.T) {
+			m, intents := newModelWithDispatchSpy()
+			m.busy = true
+			m.status = "running"
+			m.input.SetValue(cmd)
+
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = next.(model)
+
+			if len(*intents) != 1 {
+				t.Fatalf("expected immediate local dispatch, got %+v", *intents)
+			}
+			if (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != cmd {
+				t.Fatalf("unexpected dispatched intent: %+v", (*intents)[0])
+			}
+			if got := m.input.Value(); got != "" {
+				t.Fatalf("expected input cleared after %s, got %q", cmd, got)
+			}
+			if len(m.queuedPrompts) != 0 {
+				t.Fatalf("expected no queued prompts, got %+v", m.queuedPrompts)
+			}
+			if !m.busy {
+				t.Fatal("expected active turn to remain busy")
+			}
+			if m.localSubmitPending != 1 {
+				t.Fatalf("expected pending local submit count to be 1, got %d", m.localSubmitPending)
+			}
+		})
+	}
+}
+
+func TestBusyQueuedPromptWaitsForPendingLocalSubmit(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.status = "running"
+	m.input.SetValue("/stats all")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != "/stats all" {
+		t.Fatalf("expected busy local submit dispatch, got %+v", *intents)
+	}
+
+	m.input.SetValue("queued after stats")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(m.queuedPrompts) != 1 || m.queuedPrompts[0].Text != "queued after stats" {
+		t.Fatalf("expected prompt to queue while busy local submit is pending, got %+v", m.queuedPrompts)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "done",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("queued prompt should not start before local submit done, got %+v", *intents)
+	}
+	if !strings.Contains(m.status, "command") {
+		t.Fatalf("expected wait status while local submit is pending, got %q", m.status)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventLocalSubmitDone}))
+	m = next.(model)
+	if len(*intents) != 2 || (*intents)[1].Kind != service.IntentSubmit || (*intents)[1].Input != "queued after stats" {
+		t.Fatalf("expected queued prompt to start after local submit done, got %+v", *intents)
+	}
+	if !m.busy {
+		t.Fatal("expected queued prompt to start a turn")
+	}
+}
+
+func TestTurnDoneShowsWaitStatusWhileLocalSubmitPendingWithoutQueue(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 80, height: 14, busy: true, status: "running", localSubmitPending: 1}
+
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "done",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+
+	if m.busy {
+		t.Fatal("expected turn completion to clear busy state")
+	}
+	if m.status != "wait for command to finish" {
+		t.Fatalf("expected wait status while local submit remains pending, got %q", m.status)
+	}
+}
+
+func TestQueuedPromptWaitsForAllPendingLocalSubmits(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.localSubmitPending = 2
+	m.status = "wait for command to finish"
+	m.queuedPrompts = []queuedPrompt{{Text: "after two locals"}}
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventLocalSubmitDone}))
+	m = next.(model)
+	if m.localSubmitPending != 1 {
+		t.Fatalf("expected one pending local submit left, got %d", m.localSubmitPending)
+	}
+	if len(*intents) != 0 {
+		t.Fatalf("queued prompt should not start before all local submits finish, got %+v", *intents)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventLocalSubmitDone}))
+	m = next.(model)
+	if m.localSubmitPending != 0 {
+		t.Fatalf("expected all local submits cleared, got %d", m.localSubmitPending)
+	}
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != "after two locals" {
+		t.Fatalf("expected queued prompt after final local submit done, got %+v", *intents)
+	}
+	if !m.busy {
+		t.Fatal("expected queued prompt to start a turn")
+	}
+}
+
+func TestEnterWhileBusyBlocksSlashCommandsWithoutQueueing(t *testing.T) {
+	for _, cmd := range []string{
+		"/resume",
+		"/clear",
+		"/new scratch",
+		"/model",
+		"/skills",
+		"/stats bad",
+		"/compact bad",
+		"/plan show",
+		"/ask inspect the parser",
+		"/plan propose a fix",
+		"/compact",
+		"/init",
+		"/unknown",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			m, intents := newModelWithDispatchSpy()
+			m.busy = true
+			m.status = "running"
+			m.input.SetValue(cmd)
+
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = next.(model)
+
+			if len(*intents) != 0 {
+				t.Fatalf("expected no submitted intent while busy, got %+v", *intents)
+			}
+			if len(m.queuedPrompts) != 0 {
+				t.Fatalf("expected local command not to be queued, got %+v", m.queuedPrompts)
+			}
+			if got := m.input.Value(); got != cmd {
+				t.Fatalf("expected command to remain editable, got %q", got)
+			}
+			if !m.busy {
+				t.Fatal("expected active turn to remain busy")
+			}
+			if !strings.Contains(m.status, "disabled") {
+				t.Fatalf("expected disabled guidance, got %q", m.status)
+			}
+			gotTranscript := strings.Join(tuirender.ChatLines(m.chatMessages(), 80), "\n")
+			if !strings.Contains(gotTranscript, "disabled while a turn is in progress") {
+				t.Fatalf("expected visible blocked-command message, got:\n%s", gotTranscript)
+			}
+		})
+	}
+}
+
+func TestLocalSubmitBarrierBlocksPromptUntilDone(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.input.SetValue("/new scratch")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != "/new scratch" {
+		t.Fatalf("expected /new local submit intent, got %+v", *intents)
+	}
+	if m.localSubmitPending != 1 {
+		t.Fatal("expected mutating local submit to block later prompts")
+	}
+	if m.busy {
+		t.Fatal("local submit barrier should not start working state")
+	}
+
+	m.input.SetValue("start a turn")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected prompt not to dispatch before local submit done, got %+v", *intents)
+	}
+	if got := m.input.Value(); got != "start a turn" {
+		t.Fatalf("expected prompt to remain editable, got %q", got)
+	}
+	if m.status != "wait for command to finish" {
+		t.Fatalf("expected wait status while local submit is pending, got %q", m.status)
+	}
+	if m.busy {
+		t.Fatal("prompt should not start a turn while local submit is pending")
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventLocalSubmitDone, Metadata: map[string]any{service.EventMetadataLocalSubmit: true}}))
+	m = next.(model)
+	if m.localSubmitPending != 0 {
+		t.Fatal("expected local submit barrier to clear after done event")
+	}
+	if m.status != "ready" {
+		t.Fatalf("expected wait status to clear after local submit done, got %q", m.status)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 2 || (*intents)[1].Kind != service.IntentSubmit || (*intents)[1].Input != "start a turn" {
+		t.Fatalf("expected prompt to dispatch after local submit done, got %+v", *intents)
+	}
+	if !m.busy {
+		t.Fatal("expected prompt to start a turn after local submit done")
+	}
+}
+
+func TestReadOnlyLocalSubmitBlocksPromptUntilDone(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.width = 80
+	m.height = 14
+	m.input.SetValue("/stats all")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentSubmitLocal || (*intents)[0].Input != "/stats all" {
+		t.Fatalf("expected /stats all local submit intent, got %+v", *intents)
+	}
+	if m.localSubmitPending != 1 {
+		t.Fatal("expected idle read-only local submit to block later prompts")
+	}
+	if m.busy {
+		t.Fatal("read-only local submit should not start working state")
+	}
+
+	m.input.SetValue("start a turn")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 {
+		t.Fatalf("expected prompt not to overtake local submit, got %+v", *intents)
+	}
+	if got := m.input.Value(); got != "start a turn" {
+		t.Fatalf("expected prompt to remain editable, got %q", got)
+	}
+	if m.status != "wait for command to finish" {
+		t.Fatalf("expected wait status while read-only local submit is pending, got %q", m.status)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:   service.EventLocalSubmitResult,
+		Status: "info",
+		Text:   "Stats\n\nslow usage summary",
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind: service.EventLocalSubmitDone,
+		Metadata: map[string]any{
+			service.EventMetadataLocalSubmit: true,
+		},
+	}))
+	m = next.(model)
+	if m.localSubmitPending != 0 {
+		t.Fatal("expected read-only local submit to clear after done event")
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 2 || (*intents)[1].Kind != service.IntentSubmit || (*intents)[1].Input != "start a turn" {
+		t.Fatalf("expected prompt to dispatch after read-only local submit done, got %+v", *intents)
+	}
+
+	rendered := strings.Join(tuirender.ChatLines(m.chatMessages(), 80), "\n")
+	statsIx := strings.Index(rendered, "slow usage summary")
+	promptIx := strings.Index(rendered, "start a turn")
+	if statsIx < 0 || promptIx < 0 || statsIx > promptIx {
+		t.Fatalf("expected local result before later prompt:\n%s", rendered)
 	}
 }
 
@@ -1106,6 +1436,79 @@ func TestQueuedPromptSuppressesPlanImplementationPicker(t *testing.T) {
 	}
 	if len(*intents) != 1 || (*intents)[0].Input != "queued follow up" {
 		t.Fatalf("expected queued follow-up submitted, got %+v", *intents)
+	}
+}
+
+func TestPlanImplementationPickerDefersUntilLocalSubmitDone(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.chatMode = "plan"
+	m.mode = modeChat
+	m.sawPlanThisTurn = true
+	m.localSubmitPending = 1
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+	if m.mode == modePlanImplementation {
+		t.Fatal("plan implementation picker should wait for pending local submit")
+	}
+	if !m.deferredPlanPicker {
+		t.Fatal("expected plan implementation picker to be deferred")
+	}
+	if m.status != "wait for command to finish" {
+		t.Fatalf("expected wait status while plan picker is deferred, got %q", m.status)
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 0 {
+		t.Fatalf("pending local submit should block implementation intent, got %+v", *intents)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventLocalSubmitDone}))
+	m = next.(model)
+	if m.mode != modePlanImplementation {
+		t.Fatalf("expected deferred implementation picker after local submit done, got mode %v", m.mode)
+	}
+	if m.deferredPlanPicker {
+		t.Fatal("expected deferred picker flag to clear after opening")
+	}
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentImplementPlan {
+		t.Fatalf("expected implementation intent after pending local submit clears, got %+v", *intents)
+	}
+}
+
+func TestQueuedPromptSuppressesDeferredPlanImplementationPicker(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.busy = true
+	m.chatMode = "plan"
+	m.mode = modeChat
+	m.sawPlanThisTurn = true
+	m.localSubmitPending = 1
+	m.queuedPrompts = []queuedPrompt{{Text: "queued follow up"}}
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventTurnDone}))
+	m = next.(model)
+	if m.mode == modePlanImplementation {
+		t.Fatal("plan implementation picker should not open before local submit done")
+	}
+	if !m.deferredPlanPicker {
+		t.Fatal("expected plan picker to be deferred while local submit is pending")
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventLocalSubmitDone}))
+	m = next.(model)
+	if m.mode == modePlanImplementation {
+		t.Fatal("queued prompt should suppress deferred implementation picker")
+	}
+	if m.deferredPlanPicker {
+		t.Fatal("expected queued prompt to clear deferred implementation picker")
+	}
+	if len(*intents) != 1 || (*intents)[0].Kind != service.IntentSubmit || (*intents)[0].Input != "queued follow up" {
+		t.Fatalf("expected queued follow-up submitted after local submit done, got %+v", *intents)
 	}
 }
 
@@ -1404,25 +1807,337 @@ func TestChatTranscriptRetainsLocalCommandResultsAcrossSubmits(t *testing.T) {
 	m, _ := newModelWithDispatchSpy()
 	m.width = 80
 	m.height = 14
-	m.appendTranscript("you", tuirender.KindText, "/mcp")
-	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventInfo, Text: "MCP\n\nconfig: /tmp/mcp.json servers: none"}))
+	localInfo := func(text string) service.Event {
+		return service.Event{Kind: service.EventLocalSubmitResult, Status: "info", Text: text}
+	}
+	localDone := func() service.Event {
+		return service.Event{Kind: service.EventLocalSubmitDone, Metadata: map[string]any{service.EventMetadataLocalSubmit: true}}
+	}
+	next, _ := m.Update(svcMsg(localInfo("MCP\n\nconfig: /tmp/mcp.json servers: none")))
 	m = next.(model)
-	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "MCP"}))
+	next, _ = m.Update(svcMsg(localDone()))
 	m = next.(model)
 
 	m.input.SetValue("/status")
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventInfo, Text: "Status\n\nsession: test-session"}))
+	next, _ = m.Update(svcMsg(localInfo("Status\n\nsession: test-session")))
 	m = next.(model)
-	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventTurnDone, LastResponse: "Status"}))
+	next, _ = m.Update(svcMsg(localDone()))
 	m = next.(model)
 
 	got := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
-	for _, want := range []string{"/mcp", "config: /tmp/mcp.json", "/status", "session: test-session"} {
+	for _, want := range []string{"config: /tmp/mcp.json", "session: test-session"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected transcript to retain %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestLocalCommandResultCommitsIdleAssemblerBeforeNextPrompt(t *testing.T) {
+	m, _ := newModelWithDispatchSpy()
+	m.width = 80
+	m.height = 14
+
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:   service.EventMCPStatus,
+		Status: "failed",
+		Text:   "MCP startup failed: fs. Run /mcp for details.",
+	}))
+	m = next.(model)
+	if got := len(m.assembler.Snapshot()); got == 0 {
+		t.Fatal("expected idle MCP status to leave live assembler content")
+	}
+
+	m.input.SetValue("/status")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:   service.EventLocalSubmitResult,
+		Status: "info",
+		Text:   "Status\n\nsession: test-session",
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind: service.EventLocalSubmitDone,
+		Metadata: map[string]any{
+			service.EventMetadataLocalSubmit: true,
+		},
+	}))
+	m = next.(model)
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("expected local result to commit idle live assembler, got %d live entries", got)
+	}
+
+	m.input.SetValue("next prompt")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+
+	rendered := strings.Join(tuirender.ChatLines(m.chatMessages(), 80), "\n")
+	mcpIx := strings.Index(rendered, "MCP startup failed")
+	statusIx := strings.Index(rendered, "session: test-session")
+	promptIx := strings.Index(rendered, "next prompt")
+	if mcpIx < 0 || statusIx < 0 || promptIx < 0 || !(mcpIx < statusIx && statusIx < promptIx) {
+		t.Fatalf("expected idle live content and local result before next prompt:\n%s", rendered)
+	}
+}
+
+func TestLocalCommandResultPreservesLiveTurnOrder(t *testing.T) {
+	m, _ := newModelWithDispatchSpy()
+	m.width = 80
+	m.height = 14
+	localInfo := service.Event{Kind: service.EventLocalSubmitResult, Status: "info", Text: "Stats\n\nusage summary"}
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "streamed answer"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(localInfo))
+	m = next.(model)
+
+	rendered := strings.Join(tuirender.ChatLines(m.chatMessages(), 80), "\n")
+	streamedIx := strings.Index(rendered, "streamed answer")
+	statsIx := strings.Index(rendered, "usage summary")
+	if streamedIx < 0 || statsIx < 0 || streamedIx > statsIx {
+		t.Fatalf("expected live assistant output before local result:\n%s", rendered)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "streamed answer with final reconciliation",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+	rendered = strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	streamedIx = strings.Index(rendered, "streamed answer")
+	statsIx = strings.Index(rendered, "usage summary")
+	tailIx := strings.Index(rendered, "with final reconciliation")
+	if streamedIx < 0 || statsIx < 0 || tailIx < 0 || !(streamedIx < statsIx && statsIx < tailIx) {
+		t.Fatalf("expected assistant prefix, local result, then recovered assistant tail:\n%s", rendered)
+	}
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("expected local result to leave live assembler empty after reconciliation, got %+v", m.assembler.Snapshot())
+	}
+}
+
+func TestFinalAssistantDroppedTailPreservesToolOrder(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "visible assistant"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       `read_file: {"file_path":"internal/tui/model.go"}`,
+	}))
+	m = next.(model)
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"returned_lines":24,"total_lines":100},"payload":{"file_path":"internal/tui/model.go","content":"package tui"}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       raw,
+	}))
+	m = next.(model)
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "visible assistant recovered tail",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	prefixIx := strings.Index(rendered, "visible assistant")
+	toolIx := strings.Index(rendered, "Read internal/tui/model.go")
+	tailIx := strings.Index(rendered, "recovered tail")
+	if prefixIx < 0 || toolIx < 0 || tailIx < 0 || !(prefixIx < toolIx && toolIx < tailIx) {
+		t.Fatalf("expected dropped assistant tail after already committed tool output:\n%s", rendered)
+	}
+	if earlyFullIx := strings.Index(rendered, "visible assistant recovered tail"); earlyFullIx >= 0 && earlyFullIx < toolIx {
+		t.Fatalf("final assistant text should not be moved before tool output:\n%s", rendered)
+	}
+}
+
+func TestFinalAssistantNonPrefixReconciliationStaysAfterToolOutput(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "visible pre "}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       `read_file: {"file_path":"internal/tui/model.go"}`,
+	}))
+	m = next.(model)
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"returned_lines":24,"total_lines":100},"payload":{"file_path":"internal/tui/model.go","content":"package tui"}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       raw,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "visible later"}))
+	m = next.(model)
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "visible pre missing middle visible later final tail",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	toolIx := strings.Index(rendered, "Read internal/tui/model.go")
+	finalIx := strings.Index(rendered, "visible pre missing middle visible later final tail")
+	if toolIx < 0 || finalIx < 0 || toolIx > finalIx {
+		t.Fatalf("expected non-prefix reconciled assistant after tool output:\n%s", rendered)
+	}
+	if earlyFullIx := strings.Index(rendered, "visible pre missing middle"); earlyFullIx >= 0 && earlyFullIx < toolIx {
+		t.Fatalf("final assistant text should not replace the committed pre-tool assistant:\n%s", rendered)
+	}
+}
+
+func TestFinalAssistantFailedCommittedReplacementDoesNotMutateTranscript(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "visible pre"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       `read_file: {"file_path":"internal/tui/model.go"}`,
+	}))
+	m = next.(model)
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"returned_lines":24,"total_lines":100},"payload":{"file_path":"internal/tui/model.go","content":"package tui"}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       raw,
+	}))
+	m = next.(model)
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "different final response",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	prefixIx := strings.Index(rendered, "visible pre")
+	toolIx := strings.Index(rendered, "Read internal/tui/model.go")
+	finalIx := strings.Index(rendered, "different final response")
+	if prefixIx < 0 || toolIx < 0 || finalIx < 0 || !(prefixIx < toolIx && toolIx < finalIx) {
+		t.Fatalf("expected original assistant, tool, then appended final response:\n%s", rendered)
+	}
+	if strings.Count(rendered, "different final response") != 1 {
+		t.Fatalf("expected final response to be appended exactly once:\n%s", rendered)
+	}
+}
+
+func TestBusySlashWarningPreservesLiveTurnOrder(t *testing.T) {
+	m, intents := newModelWithDispatchSpy()
+	m.width = 100
+	m.height = 30
+	m.busy = true
+	m.status = "running"
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "already visible"}))
+	m = next.(model)
+	m.input.SetValue("/model")
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if len(*intents) != 0 {
+		t.Fatalf("expected blocked slash not to dispatch, got %+v", *intents)
+	}
+
+	rendered := strings.Join(tuirender.ChatLines(m.chatMessages(), 100), "\n")
+	assistantIx := strings.Index(rendered, "already visible")
+	warningIx := strings.Index(rendered, "disabled while a turn is in progress")
+	if assistantIx < 0 || warningIx < 0 || assistantIx > warningIx {
+		t.Fatalf("expected busy slash warning after existing live assistant output:\n%s", rendered)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "already visible recovered tail",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+	rendered = strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	assistantIx = strings.Index(rendered, "already visible")
+	warningIx = strings.Index(rendered, "disabled while a turn is in progress")
+	tailIx := strings.Index(rendered, "recovered tail")
+	if assistantIx < 0 || warningIx < 0 || tailIx < 0 || !(assistantIx < warningIx && warningIx < tailIx) {
+		t.Fatalf("expected committed order assistant, warning, recovered tail:\n%s", rendered)
+	}
+}
+
+func TestBusyLocalCommandResultKeepsPendingToolCallLive(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, width: 100, height: 30, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolCall,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       `read_file: {"file_path":"internal/tui/model.go"}`,
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:   service.EventLocalSubmitResult,
+		Status: "info",
+		Text:   "Status\n\nsession: test-session",
+	}))
+	m = next.(model)
+	if !m.hasPendingToolCalls() {
+		t.Fatal("local result must not clear pending tool calls")
+	}
+
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"returned_lines":24,"total_lines":100},"payload":{"file_path":"internal/tui/model.go","content":"package tui"}}}`
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:       service.EventToolResult,
+		ToolCallID: "tc-read",
+		ToolName:   "read_file",
+		Text:       raw,
+	}))
+	m = next.(model)
+
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("expected completed tool call and local result to commit together, got %+v", m.assembler.Snapshot())
+	}
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	if !strings.Contains(rendered, "Read internal/tui/model.go") || !strings.Contains(rendered, "session: test-session") {
+		t.Fatalf("expected completed tool cell and local result in transcript:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "Running internal/tui/model.go") {
+		t.Fatalf("local result should not leave stale running tool cell:\n%s", rendered)
+	}
+}
+
+func TestBusyLocalCommandResultDoesNotDuplicateCompletedPlan(t *testing.T) {
+	m := model{assembler: tuirender.NewAssembler(), mode: modeChat, chatMode: "plan", width: 100, height: 30, busy: true}
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventPlanDelta, Text: "partial plan"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:   service.EventLocalSubmitResult,
+		Status: "info",
+		Text:   "Status\n\nsession: test-session",
+	}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventPlanCompleted, Text: "complete final plan"}))
+	m = next.(model)
+
+	if got := len(m.assembler.Snapshot()); got != 0 {
+		t.Fatalf("expected completed plan and local result to commit together, got %+v", m.assembler.Snapshot())
+	}
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 100), "\n")
+	planIx := strings.Index(rendered, "complete final plan")
+	localIx := strings.Index(rendered, "session: test-session")
+	if planIx < 0 || localIx < 0 || planIx > localIx {
+		t.Fatalf("expected completed plan before local result:\n%s", rendered)
+	}
+	if strings.Count(rendered, "complete final plan") != 1 || strings.Contains(rendered, "partial plan") {
+		t.Fatalf("expected final plan to replace partial plan once:\n%s", rendered)
 	}
 }
 
@@ -1994,6 +2709,54 @@ func TestTurnDoneWhileScrolledDefersNativeScrollbackUntilTail(t *testing.T) {
 	}
 	if got := fmt.Sprintf("%#v", cmd()); !strings.Contains(got, "tail while scrolled") {
 		t.Fatalf("expected deferred native scrollback to include turn tail, got %s", got)
+	}
+}
+
+func TestTurnDoneReconciliationPreservesScrolledPosition(t *testing.T) {
+	m := newModel(nil, "", "", "")
+	m.width = 80
+	m.height = 10
+	m.transcript = nil
+	for i := 0; i < 40; i++ {
+		m.appendTranscript("info", tuirender.KindText, fmt.Sprintf("entry-%02d", i))
+	}
+	m.nativeScrollbackPrinted = len(m.transcript)
+	m.beginTurnTranscript()
+	m.startBusy()
+
+	next, _ := m.Update(svcMsg(service.Event{Kind: service.EventAssistantDelta, Text: "visible assistant"}))
+	m = next.(model)
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventToolCall, ToolCallID: "tc-1", ToolName: "read_file", Text: `read_file: {"file_path":"internal/tui/model.go"}`}))
+	m = next.(model)
+	raw := `{"success":true,"data":{"status":"ok","metrics":{"returned_lines":24,"total_lines":100},"payload":{"file_path":"internal/tui/model.go","content":"package tui"}}}`
+	next, _ = m.Update(svcMsg(service.Event{Kind: service.EventToolResult, ToolCallID: "tc-1", ToolName: "read_file", Text: raw}))
+	m = next.(model)
+
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m = next.(model)
+	if !m.viewportFrozen || m.followTail {
+		t.Fatalf("expected user scroll to freeze away from tail, frozen=%v follow=%v", m.viewportFrozen, m.followTail)
+	}
+
+	next, _ = m.Update(svcMsg(service.Event{
+		Kind:         service.EventTurnDone,
+		LastResponse: "visible assistant with final reconciliation",
+		Metadata:     map[string]any{service.EventMetadataAgentTurn: true},
+	}))
+	m = next.(model)
+
+	if m.followTail {
+		t.Fatal("final reconciliation should not force scrolled chat back to tail")
+	}
+	if m.nativeScrollbackPrinted == len(m.transcript) {
+		t.Fatal("expected reconciled turn output to remain deferred for native scrollback")
+	}
+	rendered := strings.Join(tuirender.ChatLines(m.transcript, 80), "\n")
+	prefixIx := strings.Index(rendered, "visible assistant")
+	toolIx := strings.Index(rendered, "Read internal/tui/model.go")
+	tailIx := strings.Index(rendered, "with final reconciliation")
+	if prefixIx < 0 || toolIx < 0 || tailIx < 0 || !(prefixIx < toolIx && toolIx < tailIx) {
+		t.Fatalf("expected final assistant tail after committed tool output:\n%s", rendered)
 	}
 }
 

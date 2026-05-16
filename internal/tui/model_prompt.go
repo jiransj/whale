@@ -34,15 +34,9 @@ func (m *model) submitPromptWithBinding(value string, binding *app.SkillBinding)
 	if value == "" {
 		return nil
 	}
-	if cmd, ok := immediateLocalSubmitCommand(value); ok {
-		m.recordPromptHistory(cmd)
-		m.resetHistoryNavigation()
-		m.input.SetValue("")
-		m.skillBinding = nil
-		m.slash.matches = nil
-		m.slash.selected = 0
-		m.dispatchIntent(service.Intent{Kind: service.IntentSubmit, Input: cmd})
-		m.refreshViewportContent()
+	submit := appcommands.ClassifySubmit(value, app.CommandsHelp, "/mcp")
+	if submit.LocalNoTurn() {
+		m.submitLocalNoTurn(submit)
 		return nil
 	}
 	m.recordPromptHistory(value)
@@ -60,14 +54,59 @@ func (m *model) submitPromptWithBinding(value string, binding *app.SkillBinding)
 	return busyTickCmd()
 }
 
-func immediateLocalSubmitCommand(value string) (string, bool) {
-	cmd := appcommands.ExpandUniqueSlashPrefix(strings.TrimSpace(value), app.CommandsHelp, "/mcp")
-	switch cmd {
-	case "/agent", "/ask", "/plan", "/model", "/permissions", "/skills":
-		return cmd, true
-	default:
-		return "", false
+func (m *model) submitPromptWhileBusy(value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		if m.stopping {
+			m.status = "stopping"
+		}
+		return
 	}
+	submit := appcommands.ClassifySubmit(value, app.CommandsHelp, "/mcp")
+	if submit.BusyImmediate() {
+		m.submitLocalNoTurn(submit)
+		return
+	}
+	if appcommands.LooksLikeSlashCommand(submit.Line) {
+		m.append("error", busySlashBlockedMessage(submit.Line, m.stopping))
+		if m.stopping {
+			m.status = "command disabled while stopping"
+		} else {
+			m.status = "command disabled while working"
+		}
+		m.refreshViewportContent()
+		return
+	}
+	m.enqueuePrompt(value)
+}
+
+func busySlashBlockedMessage(line string, stopping bool) string {
+	fields := strings.Fields(line)
+	cmd := strings.TrimSpace(line)
+	if len(fields) > 0 {
+		cmd = fields[0]
+	}
+	state := "a turn is in progress"
+	if stopping {
+		state = "the current turn is stopping"
+	}
+	return fmt.Sprintf("%s is disabled while %s. Press Esc to interrupt or wait.", cmd, state)
+}
+
+func (m *model) submitLocalNoTurn(submit appcommands.SubmitClassification) {
+	cmd := submit.Line
+	m.recordPromptHistory(cmd)
+	m.resetHistoryNavigation()
+	m.input.SetValue("")
+	m.skillBinding = nil
+	m.slash.matches = nil
+	m.slash.selected = 0
+	m.localSubmitPending++
+	if !m.busy || submit.SubmitBarrier() {
+		m.status = "command pending"
+	}
+	m.dispatchIntent(service.Intent{Kind: service.IntentSubmitLocal, Input: cmd})
+	m.refreshViewportContent()
 }
 
 func (m *model) enqueuePrompt(value string) bool {

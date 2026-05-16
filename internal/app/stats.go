@@ -309,7 +309,7 @@ func formatStatsOverview(usage usageStats, toolInput toolInputStats) []string {
 	if tool := topInvalidTool(toolInput.ByTool); tool != nil {
 		lines = append(lines, fmt.Sprintf("- top invalid tool: %s · %d", tool.Tool, tool.Invalid))
 	}
-	lines = append(lines, "", "More: /stats usage, /stats tools, /stats recent, /stats all")
+	lines = append(lines, "", "More: /stats usage, /stats tools, /stats repair, /stats recent, /stats all")
 	return lines
 }
 

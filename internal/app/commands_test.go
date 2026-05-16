@@ -41,6 +41,10 @@ func TestHandleCommandResumeAndNew(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected /resume usage error")
 	}
+	_, err = handleCommand("/resume\tabc", "cur", now)
+	if err == nil {
+		t.Fatal("expected tab-separated /resume usage error")
+	}
 
 	res, err := handleCommand("/new", "cur", now)
 	if err != nil {
@@ -58,9 +62,71 @@ func TestHandleCommandResumeAndNew(t *testing.T) {
 		t.Fatalf("unexpected new id: %s", res.SessionID)
 	}
 
+	res, err = handleCommand("/new\ts3", "cur", now)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if res.SessionID != "s3" {
+		t.Fatalf("unexpected tab-separated new id: %s", res.SessionID)
+	}
+
 	_, err = handleCommand("/new a b", "cur", now)
 	if err == nil {
 		t.Fatal("expected /new usage error")
+	}
+	_, err = handleCommand("/new\ta\tb", "cur", now)
+	if err == nil {
+		t.Fatal("expected tab-separated /new usage error")
+	}
+}
+
+func TestClassifySubmitSlashCommands(t *testing.T) {
+	tests := []struct {
+		line string
+		want appcommands.SubmitClass
+	}{
+		{line: "hello", want: appcommands.SubmitText},
+		{line: "/Users/goranka/Engineer/ai/dsk", want: appcommands.SubmitText},
+		{line: "/status", want: appcommands.SubmitLocalReadOnly},
+		{line: "/stats", want: appcommands.SubmitLocalReadOnly},
+		{line: "/stats usage", want: appcommands.SubmitLocalReadOnly},
+		{line: "/stats tools", want: appcommands.SubmitLocalReadOnly},
+		{line: "/stats repair", want: appcommands.SubmitLocalReadOnly},
+		{line: "/stats recent", want: appcommands.SubmitLocalReadOnly},
+		{line: "/stats all", want: appcommands.SubmitLocalReadOnly},
+		{line: "/mcp", want: appcommands.SubmitLocalReadOnly},
+		{line: "/model", want: appcommands.SubmitLocalUI},
+		{line: "/permissions", want: appcommands.SubmitLocalUI},
+		{line: "/skills", want: appcommands.SubmitLocalUI},
+		{line: "/resume", want: appcommands.SubmitLocalUI},
+		{line: "/agent", want: appcommands.SubmitLocalMode},
+		{line: "/ask", want: appcommands.SubmitLocalMode},
+		{line: "/plan", want: appcommands.SubmitLocalMode},
+		{line: "/new", want: appcommands.SubmitLocalMutating},
+		{line: "/new scratch", want: appcommands.SubmitLocalMutating},
+		{line: "/new\tscratch", want: appcommands.SubmitLocalMutating},
+		{line: "/clear", want: appcommands.SubmitLocalMutating},
+		{line: "/exit", want: appcommands.SubmitExit},
+		{line: "/ask inspect", want: appcommands.SubmitTurnStarting},
+		{line: "/plan propose a fix", want: appcommands.SubmitTurnStarting},
+		{line: "/init", want: appcommands.SubmitTurnStarting},
+		{line: "/compact", want: appcommands.SubmitTurnStarting},
+		{line: "/model xxx", want: appcommands.SubmitUsageError},
+		{line: "/skills xxx", want: appcommands.SubmitUsageError},
+		{line: "/resume xxx", want: appcommands.SubmitUsageError},
+		{line: "/new a b", want: appcommands.SubmitUsageError},
+		{line: "/stats bad", want: appcommands.SubmitUsageError},
+		{line: "/compact bad", want: appcommands.SubmitUsageError},
+		{line: "/plan show", want: appcommands.SubmitUsageError},
+		{line: "/unknown", want: appcommands.SubmitUsageError},
+	}
+	for _, tc := range tests {
+		t.Run(tc.line, func(t *testing.T) {
+			got := appcommands.ClassifySubmit(tc.line, CommandsHelp, "/mcp")
+			if got.Class != tc.want {
+				t.Fatalf("ClassifySubmit(%q) = %v, want %v", tc.line, got.Class, tc.want)
+			}
+		})
 	}
 }
 
@@ -266,7 +332,7 @@ func TestHandleLocalCommandStats(t *testing.T) {
 		"- repair rate: 50.0%",
 		"- top repair: markdown_autolink_path · 1",
 		"- top invalid tool: write · 1",
-		"More: /stats usage, /stats tools, /stats recent, /stats all",
+		"More: /stats usage, /stats tools, /stats repair, /stats recent, /stats all",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected stats to contain %q, got:\n%s", want, out)
@@ -351,7 +417,7 @@ func TestHandleLocalCommandStats(t *testing.T) {
 	}
 
 	handled, _, err = a.HandleLocalCommand("/stats extra")
-	if !handled || err == nil || !strings.Contains(err.Error(), "usage: /stats [usage|tools|recent|all]") {
+	if !handled || err == nil || !strings.Contains(err.Error(), "usage: /stats [usage|tools|repair|recent|all]") {
 		t.Fatalf("expected /stats usage error, handled=%v err=%v", handled, err)
 	}
 }
@@ -698,7 +764,7 @@ func TestHandleSlashNewIncludesResumeHint(t *testing.T) {
 		msgStore:      store,
 		ctx:           context.Background(),
 	}
-	handled, out, synthetic, shouldExit, clearScreen, err := app.HandleSlash("/new")
+	handled, out, synthetic, shouldExit, clearScreen, err := app.HandleSlash("/new\tfresh")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -714,10 +780,10 @@ func TestHandleSlashNewIncludesResumeHint(t *testing.T) {
 	if synthetic != "" {
 		t.Fatal("expected no synthetic prompt")
 	}
-	if app.SessionID() == "sess-1" {
-		t.Fatal("expected new session id, still on sess-1")
+	if app.SessionID() != "fresh" {
+		t.Fatalf("expected tab-separated session id fresh, got %s", app.SessionID())
 	}
-	if !strings.Contains(out, "new session: ") {
+	if !strings.Contains(out, "new session: fresh") {
 		t.Fatalf("expected output to contain new session, got: %q", out)
 	}
 	if !strings.Contains(out, "dropped 1 message") {
