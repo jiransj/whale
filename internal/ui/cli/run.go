@@ -8,7 +8,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/usewhale/whale/internal/agent"
 	"github.com/usewhale/whale/internal/app"
@@ -40,7 +39,7 @@ func Run(cfg app.Config, start app.StartOptions) error {
 	}
 	turn := 0
 	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigCh, cliInterruptSignals()...)
 	defer signal.Stop(sigCh)
 	var turnCancelMu sync.Mutex
 	var turnCancel context.CancelFunc

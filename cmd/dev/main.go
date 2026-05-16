@@ -196,6 +196,7 @@ func (d devEnv) testWindows() error {
 		{"go", "test", "./internal/shell", "-count=1"},
 		{"go", "test", "./internal/tools", "-run", "Test(ReadFileNormalizesCRLFContent|EditFileMatchesLFSearchAndPreservesCRLF|EditFilePreservesMixedLineEndings|ApplyPatchMatchesLFHunksAndPreservesCRLF|ApplyPatchPreservesMixedLineEndings|WindowsShellRunForegroundAndBackground)$", "-count=1"},
 		{"go", "test", "./internal/agent", "-run", "TestWindowsHook", "-count=1"},
+		{"go", "test", "./internal/ui/cli", "-count=1"},
 	}
 	for _, step := range steps {
 		if err := d.runGo(step[0], step[1:]...); err != nil {
