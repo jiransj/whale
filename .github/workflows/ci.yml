@@ -20,13 +20,13 @@ jobs:
           go-version-file: go.mod
 
       - name: Check formatting
-        run: make fmt-check
+        run: go run ./cmd/dev fmt-check
 
       - name: Run go vet
-        run: make vet
+        run: go run ./cmd/dev vet
 
       - name: Run tests
-        run: make test
+        run: go run ./cmd/dev test
 
   windows:
     runs-on: windows-latest
@@ -40,14 +40,5 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Run Windows shell tests
-        run: go test ./internal/shell -count=1
-
-      - name: Run Windows file and shell tool tests
-        run: go test ./internal/tools -run "Test(ReadFileNormalizesCRLFContent|EditFileMatchesLFSearchAndPreservesCRLF|EditFilePreservesMixedLineEndings|ApplyPatchMatchesLFHunksAndPreservesCRLF|ApplyPatchPreservesMixedLineEndings|WindowsShellRunForegroundAndBackground)$" -count=1
-
-      - name: Run Windows hook tests
-        run: go test ./internal/agent -run TestWindowsHook -count=1
-
-      - name: Build
-        run: go build -o whale.exe ./cmd/whale
+      - name: Run Windows checks
+        run: go run ./cmd/dev test-windows

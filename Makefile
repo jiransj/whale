@@ -1,58 +1,45 @@
-SHELL := /bin/sh
-
+ifeq ($(OS),Windows_NT)
+BIN ?= bin/whale.exe
+else
 BIN ?= bin/whale
+endif
 GOCACHE_DIR ?= $(CURDIR)/.gocache
 VERSION ?= dev
 LDFLAGS := -X github.com/usewhale/whale/internal/build.Version=$(VERSION)
 
-.PHONY: help build fmt-check vet test test-tui test-evals run clean
+.PHONY: help build fmt-check vet test test-tui test-evals test-windows run clean
+
+export BIN
+export GOCACHE_DIR
+export VERSION
+export LDFLAGS
 
 help:
-	@echo "Targets:"
-	@echo "  make build       Build $(BIN)"
-	@echo "  make fmt-check   Check Go formatting with gofmt"
-	@echo "  make vet         Run go vet"
-	@echo "  make test        Run all offline Go tests"
-	@echo "  make test-evals  Run the eval-focused subset"
-	@echo "  make test-tui    Run the TUI-focused subset"
-	@echo "  make run         Build and run the TUI"
-	@echo "  make clean       Remove build output and local Go cache"
-	@echo ""
-	@echo "Variables:"
-	@echo "  VERSION=v0.1.0   Inject version into the binary"
-	@echo "  BIN=path         Override output binary path"
+	@go run ./cmd/dev help
 
 build:
-	@mkdir -p "$(dir $(BIN))" "$(GOCACHE_DIR)"
-	GOCACHE="$(GOCACHE_DIR)" go build -ldflags "$(LDFLAGS)" -o "$(BIN)" ./cmd/whale
+	@go run ./cmd/dev build
 
 fmt-check:
-	@files="$$(find . -name '*.go' -not -path './.gocache/*' | sort)"; \
-	out="$$(gofmt -l $$files)"; \
-	if [ -n "$$out" ]; then \
-		echo "gofmt needs to be run on:"; \
-		echo "$$out"; \
-		exit 1; \
-	fi
+	@go run ./cmd/dev fmt-check
 
 vet:
-	@mkdir -p "$(GOCACHE_DIR)"
-	GOCACHE="$(GOCACHE_DIR)" go vet ./...
+	@go run ./cmd/dev vet
 
 test:
-	@mkdir -p "$(GOCACHE_DIR)"
-	GOCACHE="$(GOCACHE_DIR)" go test ./...
+	@go run ./cmd/dev test
 
 test-evals:
-	@mkdir -p "$(GOCACHE_DIR)"
-	GOCACHE="$(GOCACHE_DIR)" go test ./internal/evals
+	@go run ./cmd/dev test-evals
 
 test-tui:
-	@mkdir -p "$(GOCACHE_DIR)"
-	GOCACHE="$(GOCACHE_DIR)" go test ./internal/tui ./internal/tui/render
+	@go run ./cmd/dev test-tui
 
-run: build
-	"$(BIN)"
+test-windows:
+	@go run ./cmd/dev test-windows
+
+run:
+	@go run ./cmd/dev run
 
 clean:
-	rm -rf bin .gocache
+	@go run ./cmd/dev clean
