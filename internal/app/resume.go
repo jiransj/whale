@@ -58,11 +58,15 @@ func crossWorkspaceResumeMessage(workspace, sessionID string) string {
 }
 
 func resumeCommand(workspace, sessionID string) string {
-	bin := resumeExecutable()
-	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("cd /d %s && %s resume %s", cmdQuote(workspace), cmdQuote(bin), sessionID)
+	return resumeCommandFor(runtime.GOOS, workspace, sessionID, resumeExecutable())
+}
+
+func resumeCommandFor(goos, workspace, sessionID, bin string) string {
+	if goos == "windows" {
+		return cmdResumeCommand(workspace, sessionID, bin)
 	}
-	return fmt.Sprintf("cd %s && %s resume %s", shQuote(workspace), shQuote(bin), sessionID)
+	sessionArg := resumeSessionArg(sessionID)
+	return fmt.Sprintf("cd %s && %s resume %s", shQuote(workspace), shQuote(bin), sessionArg)
 }
 
 func resumeExecutable() string {
@@ -106,8 +110,56 @@ func shQuote(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "'\"'\"'") + "'"
 }
 
-func cmdQuote(v string) string {
-	return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
+func cmdResumeCommand(workspace, sessionID, bin string) string {
+	return fmt.Sprintf(
+		`cmd /v:on /c "set whale_resume_workspace=%s&&set whale_resume_bin=%s&&set whale_resume_session=%s&&cd /d "!whale_resume_workspace!"&&"!whale_resume_bin!" resume "!whale_resume_session!""`,
+		cmdSetValue(workspace),
+		cmdSetValue(bin),
+		cmdSetValue(sessionID),
+	)
+}
+
+func cmdSetValue(v string) string {
+	var b strings.Builder
+	b.Grow(len(v))
+	for _, r := range v {
+		switch r {
+		case '^':
+			b.WriteString("^^")
+		case '!':
+			b.WriteString("^^!")
+		case '%', '&', '|', '<', '>', '(', ')':
+			b.WriteByte('^')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func resumeSessionArg(sessionID string) string {
+	if isBareResumeSessionID(sessionID) {
+		return sessionID
+	}
+	return shQuote(sessionID)
+}
+
+func isBareResumeSessionID(v string) bool {
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (a *App) ListResumeChoices(limit int) ([]string, error) {
